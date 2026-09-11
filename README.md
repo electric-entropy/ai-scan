@@ -1,0 +1,176 @@
+# ai-scan
+
+**CLI-only, authorized LLM assessment tool** — behavioral model fingerprinting and
+safe, canary-based prompt-injection testing for HTTP(S) LLM endpoints.
+
+> ⚠️ **Authorized use only.** ai-scan sends active requests to a target. It will
+> not touch the network until you have either confirmed authorization
+> interactively for the current run, or supplied a valid, target-bound
+> authorization receipt. Using it against systems you are not explicitly
+> authorized to assess may be illegal. You are responsible for staying in scope.
+
+## Install
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install -e '.[dev]'
+ai-scan --help
+```
+
+Requires Python 3.11+. Zero runtime dependencies (standard library only).
+
+## Commands
+
+```text
+ai-scan authorize        --target URL --client NAME --engagement ID --expires YYYY-MM-DD --out auth.json
+ai-scan fingerprint      --target URL [--method POST] [--request-template FILE] [--auth-receipt FILE]
+ai-scan inject           --target URL --goal GOAL [--request-template FILE] [--profile safe] [--auth-receipt FILE]
+ai-scan assess           --target URL [--request-template FILE] [--profile safe] [--auth-receipt FILE]
+ai-scan validate-receipt --auth-receipt FILE --target URL
+```
+
+Active commands (`fingerprint`, `inject`, `assess`) require authorization. Without
+`--auth-receipt` they prompt for a literal confirmation phrase for the normalized
+target origin. With `--non-interactive` and no valid receipt, they exit `2`
+**before any network traffic is sent**.
+
+### Exit codes
+
+| Code | Meaning                                   |
+|------|-------------------------------------------|
+| `0`  | Completed, no confirmed findings          |
+| `1`  | Runtime/configuration failure             |
+| `2`  | Authorization denied or invalid           |
+| `3`  | Confirmed security finding (injection)    |
+| `4`  | Inconclusive assessment                   |
+
+Configuration/usage errors (bad flags, unknown subcommand) exit `1`, distinct
+from the `2` used for authorization failures.
+
+### Safety controls
+
+- **Method allowlist** — active requests use only `GET`/`POST`; other methods
+  are rejected up front.
+- **Payload allowlist** — `--profile` accepts only packaged profile names
+  (`safe`), never a path or external file.
+- **Rate + budget** — a minimum inter-request interval is enforced and a single
+  physical-request budget bounds every attempt (retries included).
+- **Redaction & scope** — see [SECURITY.md](SECURITY.md) for the full list
+  (no-redirect-follow, header/URL/body redaction, exact-origin scoping).
+
+## Manual example (interactive authorization)
+
+```bash
+ai-scan assess --target https://api.example.com/chat --out report.json
+# Prompts:
+#   Type exactly: I confirm I am authorized to assess https://api.example.com
+```
+
+## Automation example (headless with a receipt)
+
+Create a reusable, target-bound receipt once (interactive), then run headless
+in CI or scripts:
+
+```bash
+ai-scan authorize \
+  --target https://api.example.com/chat \
+  --client "Acme Corp" --engagement ENG-42 \
+  --expires 2026-12-31 --out auth.json
+
+ai-scan assess --target https://api.example.com/chat \
+  --auth-receipt auth.json --non-interactive --out report.json
+echo "exit code: $?"   # 0 clean / 3 confirmed / 4 inconclusive
+```
+
+Receipts are written `0600` on POSIX and validated on every run: origin must
+match exactly, and the receipt must not be expired.
+
+## Request template format (Burp-style)
+
+Pass `--request-template FILE` to control the request body. The file must
+contain the literal `*` **prompt marker**, which is where each probe's prompt is
+inserted. For a JSON chat endpoint:
+
+```json
+{"model": "x", "messages": [{"role": "user", "content": "*"}]}
+```
+
+**Prompt insertion is context-aware, so the request is always well-formed:**
+
+- **JSON POST (default mode).** The marker must sit *inside* a JSON string (as
+  above). The prompt is **JSON-string-escaped** before insertion — quotes,
+  backslashes, and control characters such as newlines are escaped — so payloads
+  that contain newlines never produce invalid JSON. The default template when
+  none is supplied is `{"input": "*"}`.
+- **GET.** Place the marker in the target URL/query; the prompt is
+  **percent-encoded** on insertion.
+- **Raw mode (`prompt_encoding="raw"`, for Burp-style/non-JSON templates).** The
+  prompt is inserted **verbatim** at the marker with no escaping. Use this only
+  when your template is not JSON and you are handling escaping yourself; you are
+  then responsible for producing a valid request.
+
+Sensitive headers you add (Authorization, Cookie, API keys, tokens) are
+**redacted** from all stored evidence, and their values are scrubbed from
+response bodies. Redirects are captured but never followed.
+
+## Interpreting the report
+
+The JSON report (`--out`) is stable and machine-readable. Key sections:
+
+- `target_origin` — normalized scheme://host[:port] that was assessed.
+- `authorization` — client, engagement, and mode (`interactive`/`receipt`).
+  The confirmation phrase itself is **never** stored.
+- `request_budget` — bounds and requests actually used.
+- `fingerprint` — ranked heuristic candidates (see limitations below).
+- `injection` — per-family status and the overall status. A `confirmed`
+  finding means the target emitted the canary by *executing* the injected
+  instruction (a mere reflection of the prompt is `potential`); a redirect,
+  HTTP error, or truncated response is `inconclusive`, never a silent clean
+  result. A confirmed finding includes the exact canary as proof.
+- `evidence` — redacted request/response records.
+- `findings` — confirmed/potential injection findings promoted to the top.
+
+`assess` exits `3` on any confirmed injection, `4` if the injection run was only
+inconclusive, otherwise `0`.
+
+## Fingerprint confidence — limitations
+
+The built-in fingerprinter is **heuristic**. It scores a small set of behavioral
+markers plus weak header and self-identification signals, and returns `unknown`
+unless a family clears both a minimum score and a minimum margin. It is **not**
+equivalent to the academic LLMmap pretrained-model inference approach, and its
+`heuristic` label reflects that. Treat candidates as leads, not attribution.
+
+## Receipt threat model
+
+Receipt integrity uses canonical JSON + SHA-256. This makes a receipt
+**tamper-evident**, not **authenticated**: it reliably detects accidental edits
+and corruption, but a party who can run the tool can recompute the digest and
+forge a receipt. Receipts are an operator convenience for staying in scope
+during authorized engagements — not an access-control mechanism. See
+[SECURITY.md](SECURITY.md).
+
+## Roadmap (beyond MVP)
+
+- Adapter for an upstream academic/PyTorch LLMmap backend and a current-model
+  template registry.
+- Expanded, versioned injection payload packs.
+- Authenticated (signed) receipts / centralized authorization.
+- Additional transports and non-JSON body templating.
+
+Explicitly out of scope for the MVP: REST/web UI, browser automation,
+distributed workers, aggressive/destructive payloads, RAG/multimodal injection,
+and LLM-as-judge scoring.
+
+## Development
+
+```bash
+pip install -e '.[dev]'
+pytest            # unit + integration (loopback only)
+ruff check .
+mypy
+```
+
+## License
+
+MIT — see [LICENSE](LICENSE).
