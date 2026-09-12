@@ -29,67 +29,22 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+from urllib.parse import quote
 
 from ai_scan.targets import Target
+from ai_scan.transport.records import ExchangeRecord, build_exchange_record
+from ai_scan.transport.redaction import (
+    redact_headers,
+    redact_url,
+    scrub_text,
+    sensitive_header_values,
+    url_secret_values,
+)
 
 MARKER = "*"
 
 # Non-destructive method allowlist for the MVP.
 ACTIVE_METHODS = frozenset({"GET", "POST"})
-
-# Explicit sensitive header names.
-_SENSITIVE_HEADERS = frozenset(
-    {
-        "authorization",
-        "proxy-authorization",
-        "cookie",
-        "set-cookie",
-        "x-api-key",
-        "api-key",
-        "x-auth-token",
-        "x-amz-security-token",
-        "x-goog-api-key",
-    }
-)
-
-# Substrings that mark a header name as token-bearing even if not listed above.
-_SENSITIVE_HEADER_SUBSTRINGS = (
-    "authorization",
-    "cookie",
-    "token",
-    "secret",
-    "password",
-    "passwd",
-    "credential",
-    "api-key",
-    "apikey",
-    "auth",
-    "session",
-    "signature",
-    "bearer",
-)
-
-# Query-parameter name substrings whose values are secret-like.
-_SENSITIVE_QUERY_SUBSTRINGS = (
-    "token",
-    "secret",
-    "password",
-    "passwd",
-    "pwd",
-    "credential",
-    "api_key",
-    "apikey",
-    "api-key",
-    "key",
-    "auth",
-    "session",
-    "sig",
-    "signature",
-    "access",
-)
-
-_REDACTED = "REDACTED"
 
 
 class TransportError(Exception):
@@ -203,6 +158,7 @@ class HttpResponse:
     request_line: dict[str, str]
     request_headers: dict[str, str] = field(default_factory=dict)
     attempts: int = 1
+    known_secrets: frozenset[str] = field(default_factory=frozenset)
 
     @property
     def ok(self) -> bool:
@@ -227,46 +183,26 @@ class HttpResponse:
             },
         }
 
+    def to_record(self) -> ExchangeRecord:
+        """Build an immutable, redaction-complete canonical exchange record.
 
-def _is_sensitive_header(name: str) -> bool:
-    low = name.lower()
-    if low in _SENSITIVE_HEADERS:
-        return True
-    return any(token in low for token in _SENSITIVE_HEADER_SUBSTRINGS)
-
-
-def redact_headers(headers: dict[str, str]) -> dict[str, str]:
-    """Return a copy of ``headers`` with sensitive values replaced."""
-    return {
-        key: (_REDACTED if _is_sensitive_header(key) else value)
-        for key, value in headers.items()
-    }
-
-
-def redact_url(url: str) -> str:
-    """Redact userinfo and secret-like query-parameter values from ``url``."""
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return _REDACTED
-    netloc = parts.netloc
-    if "@" in netloc:  # strip any userinfo entirely
-        netloc = netloc.rsplit("@", 1)[1]
-    if parts.query:
-        pairs = parse_qsl(parts.query, keep_blank_values=True)
-        redacted_pairs = [
-            (key, _REDACTED if _is_sensitive_query_key(key) else value)
-            for key, value in pairs
-        ]
-        query = urlencode(redacted_pairs)
-    else:
-        query = parts.query
-    return urlunsplit((parts.scheme, netloc, parts.path, query, ""))
-
-
-def _is_sensitive_query_key(key: str) -> bool:
-    low = key.lower()
-    return any(token in low for token in _SENSITIVE_QUERY_SUBSTRINGS)
+        Fields are already redacted on this object; :func:`build_exchange_record`
+        re-applies central redaction (idempotent) so the record is guaranteed
+        secret-free and marked ``redaction_complete``.
+        """
+        return build_exchange_record(
+            method=self.request_line.get("method", ""),
+            url=self.request_line.get("url", ""),
+            request_headers=self.request_headers,
+            status=self.status,
+            response_headers=self.headers,
+            body=self.body,
+            redirected=self.redirected,
+            redirect_location=self.redirect_location,
+            truncated=self.truncated,
+            attempts=self.attempts,
+            known_secrets=self.known_secrets,
+        )
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -341,10 +277,13 @@ class Transport:
                 headers or the prompt.
             BudgetExceededError: When the request budget is exhausted.
         """
+        raw_method = method
         method = method.upper()
         if method not in ACTIVE_METHODS:
+            # The method value is untrusted; scrub it before it enters the
+            # exception message so a secret-like method cannot leak.
             raise TransportError(
-                f"method {method!r} is not permitted; allowed: "
+                f"method {scrub_text(raw_method)!r} is not permitted; allowed: "
                 f"{', '.join(sorted(ACTIVE_METHODS))}"
             )
 
@@ -364,7 +303,7 @@ class Transport:
             req_headers.setdefault("Content-Type", "application/json")
 
         redacted = redact_headers(req_headers)
-        secret_values = _sensitive_values(req_headers) | _url_secret_values(target.url)
+        secret_values = sensitive_header_values(req_headers) | url_secret_values(target.url)
         request_line = {
             "method": method,
             "url": redact_url(_apply_marker(target.url, "<PROMPT>")),
@@ -429,8 +368,14 @@ class Transport:
         if location is not None:
             location = redact_url(location)
 
-        body_text = _scrub_secrets(payload.decode("utf-8", errors="replace"), secret_values)
-        safe_resp_headers = redact_headers(resp_headers)
+        body_text = scrub_text(payload.decode("utf-8", errors="replace"), secret_values)
+        # Redact response headers by name, then scrub *every* header value for
+        # reflected known secrets (an opaque credential echoed in an ordinary
+        # header must not survive).
+        safe_resp_headers = {
+            key: scrub_text(value, secret_values)
+            for key, value in redact_headers(resp_headers).items()
+        }
         # A Location value carries secret-like query params even though the
         # header name itself is not sensitive; redact its URL in place.
         for key in list(safe_resp_headers):
@@ -447,35 +392,8 @@ class Transport:
             request_line=request_line,
             request_headers=redacted,
             attempts=attempts,
+            known_secrets=secret_values,
         )
-
-
-def _sensitive_values(headers: dict[str, str]) -> frozenset[str]:
-    """Collect the values of sensitive request headers, for body scrubbing."""
-    return frozenset(
-        value for key, value in headers.items() if _is_sensitive_header(key) and value
-    )
-
-
-def _url_secret_values(url: str) -> frozenset[str]:
-    """Collect secret-like query-parameter values from a request URL."""
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return frozenset()
-    return frozenset(
-        value
-        for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if value and _is_sensitive_query_key(key)
-    )
-
-
-def _scrub_secrets(text: str, secret_values: frozenset[str]) -> str:
-    """Replace any known secret header values reflected in a response body."""
-    for secret in secret_values:
-        if secret and secret in text:
-            text = text.replace(secret, _REDACTED)
-    return text
 
 
 def _safe_reason(error: Exception | None) -> str:

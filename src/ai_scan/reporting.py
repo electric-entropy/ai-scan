@@ -143,11 +143,25 @@ def exit_code_for(report: Report) -> int:
     return EXIT_OK
 
 
-def write_report_atomic(report: Report, path: str) -> None:
-    """Write ``report`` to ``path`` atomically (temp file + rename)."""
+def write_report_atomic(
+    report: Report, path: str, known_secrets: frozenset[str] = frozenset()
+) -> None:
+    """Write ``report`` to ``path`` atomically (temp file + rename).
+
+    Applies a final central redaction pass over the whole report at this
+    persistence boundary (credential patterns always; ``known_secrets`` — the
+    run's collected reflected secrets — in addition), so nothing unredacted can
+    reach disk even if an upstream sink missed it.
+    """
+    from ai_scan.transport.redaction import scrub_structure
+
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
-    payload = json.dumps(report.to_dict(), indent=2, sort_keys=True)
+    # Value-only scrub (not key-name redaction, which would destroy benign tool
+    # metadata like the "authorization" block): credential literals, reflected
+    # known secrets, and URL-field query secrets are removed.
+    safe = scrub_structure(report.to_dict(), known_secrets)
+    payload = json.dumps(safe, indent=2, sort_keys=True)
 
     fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".ai-scan-report-", suffix=".tmp")
     try:

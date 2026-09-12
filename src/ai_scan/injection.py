@@ -156,8 +156,13 @@ def load_payloads(profile: str = "safe") -> PayloadPack:
             malformed.
     """
     if profile not in ALLOWED_PROFILES:
+        # Sanitize the (untrusted) profile value before it enters the exception
+        # message, so a secret-like profile cannot leak through error output.
+        from ai_scan.transport.redaction import scrub_text
+
+        safe_profile = scrub_text(profile)
         raise InjectionError(
-            f"Unknown payload profile {profile!r}; allowed: "
+            f"Unknown payload profile {safe_profile!r}; allowed: "
             f"{', '.join(sorted(ALLOWED_PROFILES))}."
         )
     resource = resources.files("ai_scan.payloads").joinpath(f"{profile}.json")

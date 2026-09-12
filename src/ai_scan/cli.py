@@ -46,6 +46,7 @@ from ai_scan.transport import (
     Transport,
     TransportConfig,
     TransportError,
+    scrub_text,
 )
 
 EXIT_OK = 0
@@ -230,11 +231,13 @@ def _run_active(
     target: Target,
     auth_meta: dict[str, object],
 ) -> int:
-    method = getattr(args, "method", "POST").upper()
+    raw_method = getattr(args, "method", "POST")
+    method = raw_method.upper()
     if method not in ACTIVE_METHODS:
-        # Configuration error — reject before any transport is created.
+        # Configuration error — reject before any transport is created. The
+        # method value is untrusted, so scrub it before printing.
         print(
-            f"error: method {method!r} is not permitted; allowed: "
+            f"error: method {scrub_text(raw_method)!r} is not permitted; allowed: "
             f"{', '.join(sorted(ACTIVE_METHODS))}"
         )
         return EXIT_RUNTIME_ERROR
@@ -258,6 +261,7 @@ def _run_active(
     )
     transport = _make_transport(controller)
     evidence: list[dict[str, object]] = []
+    run_secrets: set[str] = set()  # reflected secrets collected across the run
 
     fingerprint_result = None
     injection_result = None
@@ -274,6 +278,7 @@ def _run_active(
                 )
             except TransportError:
                 return ProbeExchange(probe.id, "", {}, status=0, transport_ok=False)
+            run_secrets.update(resp.known_secrets)
             evidence.append(resp.evidence())
             return ProbeExchange(
                 probe.id,
@@ -302,6 +307,7 @@ def _run_active(
                 )
             except TransportError:
                 return ExchangeOutcome(body="", transport_ok=False)
+            run_secrets.update(resp.known_secrets)
             evidence.append(resp.evidence())
             return ExchangeOutcome(
                 body=resp.body,
@@ -330,10 +336,12 @@ def _run_active(
         evidence=evidence,
     )
 
+    secrets_seen = frozenset(run_secrets)
     if getattr(args, "out", None):
-        write_report_atomic(report, args.out)
+        write_report_atomic(report, args.out, known_secrets=secrets_seen)
         print(f"report written to {args.out}")
-    print(report.console_summary())
+    # Final central scrub at the console boundary.
+    print(scrub_text(report.console_summary(), secrets_seen))
     return exit_code_for(report)
 
 

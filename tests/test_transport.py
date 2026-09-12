@@ -215,13 +215,15 @@ def test_redirect_location_secrets_are_redacted(mock_server) -> None:
 
 
 def test_unrecognized_token_header_is_redacted(echo_server) -> None:
+    # An unrecognized but clearly token-bearing header name (ends in a credential
+    # token) is redacted by the precise classifier, while a benign header is kept.
     t = Transport(TransportConfig())
     resp = t.send(
         normalize_target(f"{echo_server.base_url}/chat"),
         method="POST",
         prompt="x",
         body_template='{"input": "*"}',
-        headers={"X-Custom-Session-Blob": "blob-SECRET-42", "Accept": "text/plain"},
+        headers={"X-Acme-Access-Token": "blob-SECRET-42", "Accept": "text/plain"},
     )
     dumped = json.dumps(resp.evidence())
     assert "blob-SECRET-42" not in dumped
