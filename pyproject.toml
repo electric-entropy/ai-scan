@@ -27,6 +27,9 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "build>=1.0",
+    # Build backend must be present in the env for the artifact tests'
+    # `python -m build --no-isolation` (Python 3.12 venvs don't ship setuptools).
+    "setuptools>=68",
     "wheel>=0.42",
 ]
 
