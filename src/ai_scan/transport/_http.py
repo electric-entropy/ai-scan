@@ -176,7 +176,11 @@ class HttpResponse:
             "response": {
                 "status": self.status,
                 "redirected": self.redirected,
-                "redirect_location": self.redirect_location,
+                "redirect_location": (
+                    scrub_text(redact_url(self.redirect_location), self.known_secrets)
+                    if self.redirect_location is not None
+                    else None
+                ),
                 "truncated": self.truncated,
                 "headers": dict(self.headers),
                 "body": self.body,
@@ -366,7 +370,9 @@ class Transport:
         redirected = 300 <= status < 400
         location = resp_headers.get("Location") if redirected else None
         if location is not None:
-            location = redact_url(location)
+            # URL-key redaction *and* known-secret scrubbing: a reflected secret
+            # can sit in a non-sensitive Location query param or path segment.
+            location = scrub_text(redact_url(location), secret_values)
 
         body_text = scrub_text(payload.decode("utf-8", errors="replace"), secret_values)
         # Redact response headers by name, then scrub *every* header value for

@@ -224,19 +224,43 @@ def redact_url(url: str) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path, query, ""))
 
 
+# Authentication scheme keywords that prefix a credential but are not
+# themselves secret. Excluded from component tracking so the ordinary word
+# (``Bearer``, ``Basic``, …) is never scrubbed out of benign evidence, while
+# the credential that follows it is tracked regardless of how short it is.
+_AUTH_SCHEME_WORDS = frozenset(
+    {
+        "bearer",
+        "basic",
+        "digest",
+        "negotiate",
+        "ntlm",
+        "token",
+        "mac",
+        "hoba",
+        "mutual",
+        "apikey",
+        "aws4-hmac-sha256",
+    }
+)
+
+
 def sensitive_header_values(headers: dict[str, str]) -> frozenset[str]:
     """Sensitive request-header secret values, for body/response scrubbing.
 
-    Collects the full value *and* its whitespace-separated components of length
-    >= 8, so a scheme-prefixed credential (``Bearer <token>``, ``Basic <b64>``)
-    is caught even when the target reflects only the bare token.
+    Collects the full value *and* each of its whitespace-separated components —
+    regardless of length — so a scheme-prefixed credential (``Bearer <token>``,
+    ``Basic <b64>``) is caught even when the target reflects only the bare
+    token, and even when that token is short (``Bearer abc123`` → ``abc123``).
+    Known authentication-scheme keywords are excluded so the scheme word itself
+    is never treated as a secret.
     """
     values: set[str] = set()
     for key, value in headers.items():
         if is_sensitive_header(key) and value:
             values.add(value)
             for part in value.split():
-                if len(part) >= 8:
+                if part and part.lower() not in _AUTH_SCHEME_WORDS:
                     values.add(part)
     return frozenset(values)
 
@@ -256,16 +280,35 @@ def url_secret_values(url: str) -> frozenset[str]:
         return frozenset()
     values: set[str] = set()
     if parts.password:
-        values.add(parts.password)
+        values.update(_value_variants(parts.password))
     for key, value in parse_qsl(parts.query, keep_blank_values=True):
         decoded_key, _ = _decode_to_fixed_point(key)
         if is_sensitive_query_key(key) or is_sensitive_query_key(decoded_key):
             if value:
-                values.add(value)
-                decoded_value, _ = _decode_to_fixed_point(value)
-                if decoded_value:
-                    values.add(decoded_value)
+                values.update(_value_variants(value))
     return frozenset(values)
+
+
+def _value_variants(value: str) -> set[str]:
+    """All spellings of a secret value a target might reflect.
+
+    ``parse_qsl`` form-decodes query values (``+`` → space, ``%XX`` → byte).
+    This expands a decoded value back across the raw form, its fully
+    percent-decoded form, and the ``+``↔space form-encoding swap of each — so
+    ``opaque+secret`` and ``opaque secret`` (and their percent-encoded
+    equivalents) are all tracked together.
+    """
+    variants: set[str] = set()
+    seeds = {value}
+    decoded, _ = _decode_to_fixed_point(value)
+    seeds.add(decoded)
+    for seed in seeds:
+        if not seed:
+            continue
+        variants.add(seed)
+        variants.add(seed.replace(" ", "+"))
+        variants.add(seed.replace("+", " "))
+    return {v for v in variants if v}
 
 
 def _matches_secret_pattern(text: str) -> bool:

@@ -26,6 +26,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from ai_scan.targets import Target, TargetError, normalize_target
+from ai_scan.transport.redaction import scrub_text
 
 CONFIRM_PREFIX = "I confirm I am authorized to assess"
 
@@ -205,7 +206,8 @@ def _validate_expiry_format(expires: str) -> date:
         return date.fromisoformat(expires)
     except (ValueError, TypeError) as exc:
         raise AuthorizationError(
-            f"Receipt expiry {expires!r} is not a valid YYYY-MM-DD date."
+            f"Receipt expiry {scrub_text(str(expires))!r} is not a valid "
+            f"YYYY-MM-DD date."
         ) from exc
 
 
@@ -214,7 +216,8 @@ def _validate_created_at(created_at: str) -> datetime:
         return datetime.fromisoformat(created_at)
     except (ValueError, TypeError) as exc:
         raise AuthorizationError(
-            f"Receipt created_at {created_at!r} is not a valid ISO-8601 timestamp."
+            f"Receipt created_at {scrub_text(str(created_at))!r} is not a valid "
+            f"ISO-8601 timestamp."
         ) from exc
 
 
