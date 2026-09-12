@@ -288,7 +288,13 @@ def _run_active(
                     prompt=probe.prompt,
                     body_template=body_template,
                 )
-            except TransportError:
+            except TransportError as exc:
+                # Structured denials (scope block / budget exhaustion) are
+                # terminal for the whole run — let them reach main()'s outcome
+                # mapping. Ordinary connection/timeout failures stay a single
+                # inconclusive probe outcome.
+                if getattr(exc, "outcome", None) is not None:
+                    raise
                 return ProbeExchange(probe.id, "", {}, status=0, transport_ok=False)
             run_secrets.update(resp.known_secrets)
             evidence.append(resp.evidence())
@@ -317,7 +323,11 @@ def _run_active(
                     prompt=case.rendered_prompt,
                     body_template=body_template,
                 )
-            except TransportError:
+            except TransportError as exc:
+                # Structured denials are terminal for the run (see probe path);
+                # ordinary transport failures remain one inconclusive outcome.
+                if getattr(exc, "outcome", None) is not None:
+                    raise
                 return ExchangeOutcome(body="", transport_ok=False)
             run_secrets.update(resp.known_secrets)
             evidence.append(resp.evidence())

@@ -232,7 +232,12 @@ def run_injection(
 
             try:
                 outcome = responder(case)
-            except Exception:  # noqa: BLE001 - transport errors → inconclusive
+            except Exception as exc:  # noqa: BLE001 - transport errors → inconclusive
+                # A structured denial (scope block / budget exhaustion, carrying
+                # an ``outcome``) is terminal for the run and must reach the
+                # caller; only ordinary failures degrade to an inconclusive case.
+                if getattr(exc, "outcome", None) is not None:
+                    raise
                 request_count += 1
                 findings.append(
                     InjectionFinding(

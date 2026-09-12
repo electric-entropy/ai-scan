@@ -99,6 +99,46 @@ def test_empty_resolution_is_blocked() -> None:
         guard.authorize(NAMED.url)
 
 
+# --- HTTPS IP-pinning: named-host fails closed, IP literal is allowed -----------
+
+def test_named_host_https_fails_closed_before_socket_io() -> None:
+    # The guard can validate the resolved IP, but the broker cannot pin a named
+    # HTTPS connection to it (urllib would re-resolve at TLS connect, and an
+    # authority rewrite would break SNI/cert validation). Fail closed.
+    https_named = normalize_target("https://api.example.test/chat")
+    opener = RecordingOpener(FakeResponse())
+    broker = RequestBroker(
+        ledger=BudgetLedger(max_requests=8),
+        guard=_guard(https_named, lambda h: [PUBLIC_IP]),
+        timeout=1.0,
+        max_response_bytes=1024,
+        opener=opener,
+    )
+    with pytest.raises(ScopeError, match="HTTPS") as exc:
+        broker.fetch(url=https_named.url, method="GET", data=None, headers={},
+                     kind=AttemptKind.INITIAL)
+    assert opener.calls == [], "must not connect via the unpinned hostname"
+    assert exc.value.outcome == "blocked"
+
+
+def test_ip_literal_https_is_allowed_in_scope() -> None:
+    # An IP-literal HTTPS target has no name to re-resolve, so it stays allowed.
+    https_literal = normalize_target("https://93.184.216.34/chat")
+    opener = RecordingOpener(FakeResponse(status=200, body=b"ok"))
+    broker = RequestBroker(
+        ledger=BudgetLedger(max_requests=8),
+        guard=ScopeGuard(target=https_literal),
+        timeout=1.0,
+        max_response_bytes=1024,
+        opener=opener,
+    )
+    result = broker.fetch(
+        url=https_literal.url, method="GET", data=None, headers={}, kind=AttemptKind.INITIAL
+    )
+    assert result.status == 200
+    assert len(opener.calls) == 1
+
+
 # --- broker integration: a blocked attempt performs no socket I/O ---------------
 
 def test_broker_blocks_scope_violation_without_touching_socket() -> None:

@@ -137,36 +137,44 @@ def _should_not_prompt(_msg: str) -> str:
     raise AssertionError("prompt must not be called in non-interactive mode")
 
 
-_ORIGIN = "http://127.0.0.1:8080"
-_CONFIRM = f"I confirm I am authorized to assess {_ORIGIN}"
+def _confirm_for(origin: str):
+    return lambda _msg: f"I confirm I am authorized to assess {origin}"
 
 
-def test_scope_denial_maps_to_blocked_exit(monkeypatch, capsys) -> None:
-    from ai_scan.transport import ScopeError
+def test_scope_denial_through_real_transport_maps_to_blocked(monkeypatch, capsys) -> None:
+    # Real Transport.send() → broker → ScopeGuard SSRF block, not a monkeypatched
+    # _run_active. Only the transport construction seam is injected, to give the
+    # guard a resolver that returns a private IP for the named host.
+    from ai_scan.transport import RequestController, Transport, TransportConfig
 
-    def raiser(*_a, **_k):
-        raise ScopeError(
-            "request origin is outside the authorized scope",
-            totals={"initial": 1, "total": 1},
+    def fake_make(controller: RequestController) -> Transport:
+        return Transport(
+            TransportConfig(), controller=controller, resolver=lambda _h: ["169.254.169.254"]
         )
 
-    monkeypatch.setattr(cli, "_run_active", raiser)
-    rc = cli.main(["fingerprint", "--target", f"{_ORIGIN}/chat"], prompt=lambda _m: _CONFIRM)
+    monkeypatch.setattr(cli, "_make_transport", fake_make)
+    origin = "http://scope.test"
+    rc = cli.main(["fingerprint", "--target", f"{origin}/chat"], prompt=_confirm_for(origin))
     assert rc == cli.EXIT_AUTH_DENIED
-    assert "blocked:" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "blocked:" in out and "physical attempts" in out
 
 
-def test_budget_exhaustion_maps_to_inconclusive_exit(monkeypatch, capsys) -> None:
-    from ai_scan.transport import BudgetExceededError
+def test_budget_exhaustion_through_real_transport_maps_to_inconclusive(
+    echo_server, monkeypatch, capsys
+) -> None:
+    # Real Transport.send() against a loopback mock, with a 1-request budget so
+    # the second probe exhausts it and raises BudgetExceededError through the
+    # real responder path.
+    from ai_scan.transport import RequestController, Transport, TransportConfig
 
-    def raiser(*_a, **_k):
-        raise BudgetExceededError(
-            "request budget of 2 exhausted",
-            totals={"initial": 1, "retry": 1, "total": 2},
-        )
+    def fake_make(_controller: RequestController) -> Transport:
+        tight = RequestController(max_requests=1, min_interval=0.0)
+        return Transport(TransportConfig(), controller=tight)
 
-    monkeypatch.setattr(cli, "_run_active", raiser)
-    rc = cli.main(["fingerprint", "--target", f"{_ORIGIN}/chat"], prompt=lambda _m: _CONFIRM)
+    monkeypatch.setattr(cli, "_make_transport", fake_make)
+    origin = echo_server.base_url
+    rc = cli.main(["fingerprint", "--target", f"{origin}/chat"], prompt=_confirm_for(origin))
     assert rc == cli.EXIT_INCONCLUSIVE
     out = capsys.readouterr().out
     assert "inconclusive:" in out and "physical attempts" in out

@@ -23,7 +23,7 @@ import urllib.request
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
-from ai_scan.transport._errors import TransportError
+from ai_scan.transport._errors import ScopeError, TransportError
 from ai_scan.transport.budgets import AttemptKind, BudgetLedger
 from ai_scan.transport.scope_guard import ResolvedEndpoint, ScopeGuard
 
@@ -136,14 +136,27 @@ def _pin_connection(
     """Rewrite the connection to the vetted IP, preserving the ``Host`` header.
 
     For an IP-literal target the URL already *is* the vetted address, so it is
-    returned unchanged (byte-identical to a direct request). For a named host
-    over http, the authority is rewritten to the guard-validated IP and the
-    original ``Host`` header is pinned, so the socket cannot connect anywhere
-    the guard did not vet (closing the resolve→connect rebinding window).
+    returned unchanged (byte-identical to a direct request), and an IP-literal
+    HTTPS target is likewise safe (no name to re-resolve). For a named host over
+    http, the authority is rewritten to the guard-validated IP and the original
+    ``Host`` header is pinned, so the socket cannot connect anywhere the guard
+    did not vet (closing the resolve→connect rebinding window).
+
+    A named host over **https** is rejected: urllib would re-resolve the
+    hostname during the TLS connect, reopening the rebinding window, and
+    rewriting the authority to the IP would break SNI and certificate hostname
+    validation. We fail closed until SNI/cert-preserving IP pinning is
+    implemented, rather than connect to an unvetted address.
     """
     req_headers = dict(headers)
-    if endpoint.host_is_literal or endpoint.target.scheme != "http":
+    if endpoint.host_is_literal:
         return url, req_headers
+    if endpoint.target.scheme != "http":
+        raise ScopeError(
+            "named-host HTTPS is not supported: the TLS connection cannot be "
+            "pinned to the scope-validated IP without breaking SNI/certificate "
+            "validation; use an IP-literal target"
+        )
 
     parts = urlsplit(url)
     authority = parts.netloc.rsplit("@", 1)[-1]
