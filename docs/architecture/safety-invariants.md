@@ -55,7 +55,7 @@ called out honestly below and closed by a later milestone.
 
 | Invariant | MVP status | MVP mechanism (frozen by the contract tests) |
 |-----------|-----------|----------------------------------------------|
-| 1 No network before auth | **partial** | Authorization (target + receipt) is validated before any `Transport` is constructed, and an unauthorized active command sends **zero** requests. **Gap:** the payload pack (`--profile`) is validated only when the injection phase reaches it — *after* the transport is built and, for `assess`, *after* the fingerprint phase has already sent requests. So pack validity is **not** guaranteed before all traffic. See "Known gaps" below. |
+| 1 No network before auth | **full (single-origin scope)** | Authorization (target + receipt) **and** the payload pack (`--profile`) are validated before any `Transport` is constructed; an unauthorized active command, and an authorized command with an invalid profile, both send **zero** requests and exit (`2` / `1` respectively). The Milestone 0 ordering gap (pack validated after transport, `assess` sending 4 fingerprint requests first) was **closed in Milestone 2**. The future whole-plan-before-any-active-object validation (mode/capabilities/engagement/receipt-v2) still lands with the config/authorization milestones. |
 | 2 Exact scope | full | `targets.normalize_target` + `same_origin` (scheme+host+effective port, IPv6 canonicalized); receipts bound to exact origin. |
 | 3 Physical accounting | full | `RequestController.count` increments per physical attempt, retries included. |
 | 4 Central broker | full | All requests flow through `Transport`; engines use injected responders. |
@@ -73,27 +73,23 @@ recorded here now so no later change can silently violate them.
 
 - **Invariant 1 — complete offline validation before transport construction.**
   The future engine parses and validates the *entire* plan (target, mode, pack
-  set, capability set, receipt) before creating any adapter or transport
-  (Milestone 2 introduces strict configuration/schema validation of a complete
-  offline plan). The current MVP behaves as follows — stated exactly, and frozen
-  by contract tests:
+  set, capability set, receipt) before creating any adapter or transport.
+  Milestone 2 introduces strict configuration/schema validation of offline plans
+  and **closed the Milestone 0 compatibility-command ordering gap**. Current,
+  exact behavior — frozen by contract tests:
   - **Unauthorized active commands send zero requests.** `fingerprint`,
     `inject`, and `assess` with `--non-interactive` and no valid receipt exit
     `2` before any transport is constructed (test:
     `test_no_network_before_authorization`).
-  - **Authorized `inject --profile invalid` rejects before any traffic.** The
-    injection phase loads the pack first, so an unknown profile exits `1` with
-    **0** requests sent.
-  - **Authorized `assess --profile invalid` performs its 4 fingerprint requests
-    first**, then reaches profile validation, then exits `1`. So **4** requests
-    are sent before the invalid profile is rejected (test:
-    `test_invalid_profile_ordering_is_characterized`).
-  - **Therefore the MVP does *not* guarantee pack validation before all
-    traffic.** Authorization is enforced before any network I/O, but pack
-    validity is not. **Milestone 2 must close this ordering gap** by validating
-    the complete offline plan (including the pack) before constructing any
-    transport. Milestone 0 documents this gap and does **not** change runtime
-    behavior.
+  - **Authorized invalid-profile runs send zero requests for both commands.**
+    `inject --profile invalid` **and** `assess --profile invalid` now validate
+    the pack before constructing the transport, so both exit `1` with **0**
+    requests sent (test: `test_invalid_profile_rejected_before_any_request`).
+  - **Remaining (future) scope:** whole-plan validation of mode, capabilities,
+    engagement, and signed receipt v2 before any active object is constructed —
+    delivered by the config/authorization milestones. Single-origin
+    compatibility commands already validate their full offline input (target,
+    receipt, profile) before any transport.
 - **Invariants 5–6, 9, 11, 14** are not yet exercised because modes, judges,
   reproducibility metadata, and intrusive capabilities do not exist in the MVP;
   they are frozen here as forward constraints.

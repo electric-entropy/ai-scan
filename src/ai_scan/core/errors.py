@@ -20,3 +20,9 @@ class PolicyError(AiScanError):
 
 class ValidationError(AiScanError):
     """Raised when domain data fails validation (findings, IDs, content IDs)."""
+
+
+class ConfigError(AiScanError):
+    """Raised when a configuration/plan document fails strict loading or schema
+    validation (unknown fields, duplicate keys, NaN/Infinity, unsupported schema
+    version, invalid/unbounded limits, path traversal, or secret literals)."""

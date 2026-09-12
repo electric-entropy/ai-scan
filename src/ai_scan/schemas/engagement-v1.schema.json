@@ -1,0 +1,74 @@
+{
+  "$id": "https://ai-scan/schemas/engagement-v1.schema.json",
+  "title": "engagement-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "kind", "engagement_id", "client", "approver",
+    "issued_at", "expires_at", "target_scopes", "capabilities", "limits",
+    "signer_key_id"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"const": "engagement"},
+    "engagement_id": {"type": "string", "minLength": 1, "maxLength": 200},
+    "client": {"type": "string", "minLength": 1, "maxLength": 200},
+    "approver": {"type": "string", "minLength": 1, "maxLength": 200},
+    "issued_at": {"type": "string", "minLength": 20, "maxLength": 40, "x-datetime": true},
+    "expires_at": {"type": "string", "minLength": 20, "maxLength": 40, "x-datetime": true},
+    "target_scopes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {"type": "string", "minLength": 1, "maxLength": 2048, "x-origin": true}
+    },
+    "allowed_adapters": {
+      "type": "array", "maxItems": 32,
+      "items": {"type": "string", "minLength": 1, "maxLength": 100}
+    },
+    "allowed_protocols": {
+      "type": "array", "maxItems": 8,
+      "items": {"type": "string", "enum": ["http", "https"]}
+    },
+    "path_allow": {"type": "array", "maxItems": 256, "items": {"type": "string", "maxLength": 2048}},
+    "path_deny": {"type": "array", "maxItems": 256, "items": {"type": "string", "maxLength": 2048}},
+    "identities": {"type": "array", "maxItems": 64, "items": {"type": "string", "maxLength": 200}},
+    "capabilities": {
+      "type": "array", "maxItems": 64,
+      "items": {"type": "string", "minLength": 1, "maxLength": 100}
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_physical_requests", "max_duration_seconds", "requests_per_second", "max_concurrency"],
+      "properties": {
+        "max_physical_requests": {"type": "integer", "minimum": 1, "maximum": 1000000},
+        "max_duration_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
+        "requests_per_second": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000},
+        "max_concurrency": {"type": "integer", "minimum": 1, "maximum": 256},
+        "max_cost_usd": {"type": "number", "minimum": 0, "maximum": 1000000}
+      }
+    },
+    "allowed_families": {
+      "type": "array", "maxItems": 256,
+      "items": {"type": "string", "minLength": 1, "maxLength": 100}
+    },
+    "risk_levels": {
+      "type": "array", "maxItems": 8,
+      "items": {"type": "string", "enum": ["low", "medium", "high", "critical"]}
+    },
+    "prohibited_actions": {
+      "type": "array", "maxItems": 256,
+      "items": {"type": "string", "minLength": 1, "maxLength": 200}
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "redact": {"type": "boolean"},
+        "retain_days": {"type": "integer", "minimum": 0, "maximum": 3650}
+      }
+    },
+    "signer_key_id": {"type": "string", "minLength": 1, "maxLength": 200, "x-secret-scan": true}
+  }
+}

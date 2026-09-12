@@ -567,19 +567,19 @@ def test_non_allowlisted_profiles_rejected(bad: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("command", "extra", "expected_requests"),
+    ("command", "extra"),
     [
-        ("inject", ["--goal", "g"], 0),
-        ("assess", [], 4),
+        ("inject", ["--goal", "g"]),
+        ("assess", []),
     ],
 )
-def test_invalid_profile_ordering_is_characterized(
-    command: str, extra: list[str], expected_requests: int, mock_server, tmp_path
+def test_invalid_profile_rejected_before_any_request(
+    command: str, extra: list[str], mock_server, tmp_path
 ) -> None:
-    # Documents the actual MVP ordering (see docs/architecture/safety-invariants.md):
-    # the payload pack is loaded AFTER the transport is constructed, so `inject`
-    # rejects an invalid profile before any request, but `assess` first performs
-    # its 4 fingerprint requests and only then rejects the profile — both exit 1.
+    # Milestone 2 closed the ordering gap: the payload pack (`--profile`) is
+    # validated BEFORE any transport is constructed, so an authorized run with an
+    # invalid profile sends ZERO requests for both `inject` and `assess`, exit 1.
+    expected_requests = 0
     hits = {"n": 0}
 
     def app(req: MockRequest) -> MockResponse:

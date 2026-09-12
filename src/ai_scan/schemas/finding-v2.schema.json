@@ -1,0 +1,24 @@
+{
+  "$id": "https://ai-scan/schemas/finding-v2.schema.json",
+  "title": "finding-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "id", "attack_id", "title", "status", "severity"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "kind": {"const": "finding"},
+    "id": {"type": "string", "minLength": 1, "maxLength": 200},
+    "attack_id": {"type": "string", "minLength": 1, "maxLength": 200},
+    "title": {"type": "string", "minLength": 1, "maxLength": 500},
+    "status": {
+      "type": "string",
+      "enum": ["confirmed", "likely", "suspected", "not_observed", "inconclusive", "blocked", "not_tested"]
+    },
+    "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "informational"]},
+    "summary": {"type": "string", "maxLength": 8192},
+    "evidence_ids": {
+      "type": "array", "maxItems": 4096,
+      "items": {"type": "string", "minLength": 1, "maxLength": 200}
+    }
+  }
+}

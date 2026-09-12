@@ -7,7 +7,13 @@ hierarchy, and stable-ID helpers. No network or engine code lives here.
 
 from __future__ import annotations
 
-from ai_scan.core.errors import AiScanError, PolicyError, ValidationError
+from ai_scan.core.config import (
+    SUPPORTED_SCHEMAS,
+    load_document,
+    load_json_strict,
+    load_schema,
+)
+from ai_scan.core.errors import AiScanError, ConfigError, PolicyError, ValidationError
 from ai_scan.core.ids import attempt_id, content_id
 from ai_scan.core.models import (
     DeterminismClass,
@@ -25,7 +31,9 @@ from ai_scan.core.modes import (
 )
 
 __all__ = [
+    "SUPPORTED_SCHEMAS",
     "AiScanError",
+    "ConfigError",
     "DeterminismClass",
     "Finding",
     "FindingStatus",
@@ -38,6 +46,9 @@ __all__ = [
     "attempt_id",
     "content_id",
     "kitchen_sink_policy",
+    "load_document",
+    "load_json_strict",
+    "load_schema",
     "reliable_policy",
     "resolve_policy",
 ]

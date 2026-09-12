@@ -1,0 +1,28 @@
+{
+  "$id": "https://ai-scan/schemas/evidence-v2.schema.json",
+  "title": "evidence-v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "kind", "id", "node_type", "digest", "redaction_state", "created_at"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "kind": {"const": "evidence"},
+    "id": {"type": "string", "minLength": 1, "maxLength": 200},
+    "node_type": {
+      "type": "string",
+      "enum": [
+        "plan", "authorization", "request", "response", "control",
+        "validator_signal", "finding", "cleanup", "artifact"
+      ]
+    },
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "redaction_state": {"type": "string", "enum": ["redaction_complete", "raw"]},
+    "created_at": {"type": "string", "minLength": 20, "maxLength": 40, "x-datetime": true},
+    "source_plugin": {"type": "string", "maxLength": 200},
+    "source_version": {"type": "string", "maxLength": 100},
+    "derived_from": {
+      "type": "array", "maxItems": 1024,
+      "items": {"type": "string", "minLength": 1, "maxLength": 200}
+    }
+  }
+}

@@ -23,6 +23,8 @@ from ai_scan.authorization import (
     validate_receipt,
     write_receipt,
 )
+from ai_scan.core.config import SUPPORTED_SCHEMAS, load_document
+from ai_scan.core.errors import ConfigError
 from ai_scan.fingerprint import DEFAULT_PROBES, ProbeExchange, run_fingerprint
 from ai_scan.injection import (
     ExchangeOutcome,
@@ -68,7 +70,7 @@ class _ArgumentParser(argparse.ArgumentParser):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Construct the top-level argument parser with all five subcommands."""
+    """Construct the top-level argument parser with all subcommands."""
     parser = _ArgumentParser(
         prog=PROG,
         description="Authorized LLM assessment: behavioral fingerprinting and "
@@ -115,6 +117,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_validate.add_argument("--auth-receipt", required=True, help="Receipt file path.")
     p_validate.add_argument("--target", required=True, help="Target URL.")
 
+    p_validate_config = subparsers.add_parser(
+        "validate-config",
+        help="Validate a configuration/plan document against its packaged schema.",
+    )
+    p_validate_config.add_argument(
+        "--kind", required=True, choices=sorted(SUPPORTED_SCHEMAS), help="Document kind."
+    )
+    p_validate_config.add_argument("--file", required=True, help="Path to the JSON document.")
+
     return parser
 
 
@@ -155,6 +166,8 @@ def main(
         return _cmd_authorize(args, ask)
     if args.command == "validate-receipt":
         return _cmd_validate_receipt(args)
+    if args.command == "validate-config":
+        return _cmd_validate_config(args)
 
     # Active, network-touching commands. Fail closed before any transport.
     try:
@@ -226,13 +239,24 @@ def _run_active(
         )
         return EXIT_RUNTIME_ERROR
 
+    # Validate the complete offline plan BEFORE constructing any transport or
+    # sending a request (safety invariant 1). The payload pack (`--profile`) is
+    # resolved up front, so an invalid profile fails closed with zero requests
+    # for both `inject` and `assess` (raised InjectionError → exit 1 in main()).
+    needs_injection = args.command in ("inject", "assess")
+    pack = load_payloads(getattr(args, "profile", "safe")) if needs_injection else None
+
+    # Validate the request template BEFORE constructing any transport, so an
+    # invalid template fails closed (exit 1) with zero transport constructions
+    # and zero requests for fingerprint/inject/assess.
+    body_template = _load_body_template(args)
+
     # A single controller enforces and counts every physical request (retries
     # included) across both engines, so budget and rate are unified.
     controller = RequestController(
         max_requests=_DEFAULT_BUDGET, min_interval=_DEFAULT_MIN_INTERVAL
     )
     transport = _make_transport(controller)
-    body_template = _load_body_template(args)
     evidence: list[dict[str, object]] = []
 
     fingerprint_result = None
@@ -264,9 +288,9 @@ def _run_active(
 
         fingerprint_result = run_fingerprint(DEFAULT_PROBES, probe_responder)
 
-    if args.command in ("inject", "assess"):
+    if needs_injection:
+        assert pack is not None  # resolved above, before transport construction
         canary = generate_canary()
-        pack = load_payloads(getattr(args, "profile", "safe"))
 
         def inject_responder(case: InjectionCase) -> ExchangeOutcome:
             try:
@@ -342,6 +366,23 @@ def _cmd_authorize(args: argparse.Namespace, ask: Callable[[str], str]) -> int:
         return EXIT_RUNTIME_ERROR
 
     print(f"authorized: receipt for {receipt.origin} written to {args.out}")
+    return EXIT_OK
+
+
+def _cmd_validate_config(args: argparse.Namespace) -> int:
+    """Offline document validation. Never constructs an adapter or transport."""
+    try:
+        with open(args.file, encoding="utf-8") as handle:
+            text = handle.read()
+    except OSError as exc:
+        print(f"error: cannot read {args.file}: {exc.strerror}")
+        return EXIT_RUNTIME_ERROR
+    try:
+        load_document(text, args.kind)
+    except ConfigError as exc:
+        print(f"invalid: {exc}")
+        return EXIT_RUNTIME_ERROR
+    print(f"valid: {args.file} conforms to {args.kind} schema")
     return EXIT_OK
 
 
