@@ -137,6 +137,41 @@ def _should_not_prompt(_msg: str) -> str:
     raise AssertionError("prompt must not be called in non-interactive mode")
 
 
+_ORIGIN = "http://127.0.0.1:8080"
+_CONFIRM = f"I confirm I am authorized to assess {_ORIGIN}"
+
+
+def test_scope_denial_maps_to_blocked_exit(monkeypatch, capsys) -> None:
+    from ai_scan.transport import ScopeError
+
+    def raiser(*_a, **_k):
+        raise ScopeError(
+            "request origin is outside the authorized scope",
+            totals={"initial": 1, "total": 1},
+        )
+
+    monkeypatch.setattr(cli, "_run_active", raiser)
+    rc = cli.main(["fingerprint", "--target", f"{_ORIGIN}/chat"], prompt=lambda _m: _CONFIRM)
+    assert rc == cli.EXIT_AUTH_DENIED
+    assert "blocked:" in capsys.readouterr().out
+
+
+def test_budget_exhaustion_maps_to_inconclusive_exit(monkeypatch, capsys) -> None:
+    from ai_scan.transport import BudgetExceededError
+
+    def raiser(*_a, **_k):
+        raise BudgetExceededError(
+            "request budget of 2 exhausted",
+            totals={"initial": 1, "retry": 1, "total": 2},
+        )
+
+    monkeypatch.setattr(cli, "_run_active", raiser)
+    rc = cli.main(["fingerprint", "--target", f"{_ORIGIN}/chat"], prompt=lambda _m: _CONFIRM)
+    assert rc == cli.EXIT_INCONCLUSIVE
+    out = capsys.readouterr().out
+    assert "inconclusive:" in out and "physical attempts" in out
+
+
 def test_argparse_missing_required_arg_exits_1() -> None:
     # argparse's own default is exit code 2, which collides with auth-denied.
     import pytest

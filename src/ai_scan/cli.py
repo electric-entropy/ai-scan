@@ -186,6 +186,18 @@ def main(
     try:
         return _run_active(args, target, auth_meta)
     except (TransportError, _InjectionError, OSError) as exc:
+        # Budget exhaustion and scope denial carry a structured outcome and the
+        # accurate per-kind physical totals; surface them with the documented
+        # exit codes instead of a generic runtime error.
+        outcome = getattr(exc, "outcome", None)
+        totals = getattr(exc, "totals", None)
+        suffix = f" (physical attempts: {totals})" if totals else ""
+        if outcome == "blocked":
+            print(f"blocked: {exc}{suffix}")
+            return EXIT_AUTH_DENIED
+        if outcome == "inconclusive":
+            print(f"inconclusive: {exc}{suffix}")
+            return EXIT_INCONCLUSIVE
         print(f"error: {exc}")
         return EXIT_RUNTIME_ERROR
 
