@@ -15,6 +15,7 @@ import argparse
 import sys
 from collections.abc import Callable, Sequence
 
+from ai_scan.adapters import Adapter, AdapterError, GenericHttpAdapter
 from ai_scan.authorization import (
     AuthorizationError,
     Receipt,
@@ -185,7 +186,7 @@ def main(
     auth_meta = _authorization_metadata(args)
     try:
         return _run_active(args, target, auth_meta)
-    except (TransportError, _InjectionError, OSError) as exc:
+    except (AdapterError, TransportError, _InjectionError, OSError) as exc:
         # Budget exhaustion and scope denial carry a structured outcome and the
         # accurate per-kind physical totals; surface them with the documented
         # exit codes instead of a generic runtime error.
@@ -238,6 +239,11 @@ def _make_transport(controller: RequestController) -> Transport:
     return Transport(TransportConfig(), controller=controller)
 
 
+def _build_generic_adapter(target: Target, *, method: str, body_template: str) -> Adapter:
+    """Build the compatibility generic HTTP adapter before transport creation."""
+    return GenericHttpAdapter(target=target, method=method, body_template=body_template)
+
+
 def _run_active(
     args: argparse.Namespace,
     target: Target,
@@ -266,6 +272,19 @@ def _run_active(
     # and zero requests for fingerprint/inject/assess.
     body_template = _load_body_template(args)
 
+    # Build the application-shaping adapter(s) BEFORE constructing transport.
+    # Malformed adapter config therefore fails closed with zero requests.
+    fingerprint_adapter = (
+        _build_generic_adapter(target, method=method, body_template=body_template)
+        if args.command in ("fingerprint", "assess")
+        else None
+    )
+    injection_adapter = (
+        _build_generic_adapter(target, method="POST", body_template=body_template)
+        if needs_injection
+        else None
+    )
+
     # A single controller enforces and counts every physical request (retries
     # included) across both engines, so budget and rate are unified.
     controller = RequestController(
@@ -279,14 +298,12 @@ def _run_active(
     injection_result = None
 
     if args.command in ("fingerprint", "assess"):
+        assert fingerprint_adapter is not None
 
         def probe_responder(probe: Probe) -> ProbeExchange:
             try:
-                resp = transport.send(
-                    target,
-                    method=method,
-                    prompt=probe.prompt,
-                    body_template=body_template,
+                resp = transport.send_prepared(
+                    target, fingerprint_adapter.build_request(probe.prompt)
                 )
             except TransportError as exc:
                 # Structured denials (scope block / budget exhaustion) are
@@ -300,7 +317,7 @@ def _run_active(
             evidence.append(resp.evidence())
             return ProbeExchange(
                 probe.id,
-                resp.body,
+                fingerprint_adapter.extract(resp),
                 resp.headers,
                 status=resp.status,
                 redirected=resp.redirected,
@@ -313,15 +330,13 @@ def _run_active(
 
     if needs_injection:
         assert pack is not None  # resolved above, before transport construction
+        assert injection_adapter is not None
         canary = generate_canary()
 
         def inject_responder(case: InjectionCase) -> ExchangeOutcome:
             try:
-                resp = transport.send(
-                    target,
-                    method="POST",
-                    prompt=case.rendered_prompt,
-                    body_template=body_template,
+                resp = transport.send_prepared(
+                    target, injection_adapter.build_request(case.rendered_prompt)
                 )
             except TransportError as exc:
                 # Structured denials are terminal for the run (see probe path);
@@ -332,7 +347,7 @@ def _run_active(
             run_secrets.update(resp.known_secrets)
             evidence.append(resp.evidence())
             return ExchangeOutcome(
-                body=resp.body,
+                body=injection_adapter.extract(resp),
                 status=resp.status,
                 redirected=resp.redirected,
                 truncated=resp.truncated,

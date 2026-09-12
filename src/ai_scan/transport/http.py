@@ -29,7 +29,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import quote
 
 from ai_scan.targets import Target
@@ -54,6 +54,25 @@ MARKER = "*"
 
 # Non-destructive method allowlist for the MVP.
 ACTIVE_METHODS = frozenset({"GET", "POST"})
+
+
+class _Prepared(Protocol):
+    """Structural type for an adapter-built request (avoids an import cycle).
+
+    ``ai_scan.adapters.base.PreparedRequest`` satisfies this; defining it
+    structurally here keeps the transport layer free of an adapters import.
+    """
+
+    @property
+    def method(self) -> str: ...
+
+    @property
+    def url(self) -> str: ...
+
+    @property
+    def body(self) -> bytes | None: ...
+
+    def header_dict(self) -> dict[str, str]: ...
 
 __all__ = [
     "ACTIVE_METHODS",
@@ -383,6 +402,75 @@ class Transport:
             except (BudgetExceededError, ScopeError):
                 # Budget exhaustion / scope denial are terminal: propagate the
                 # structured outcome (never retry an out-of-scope attempt).
+                raise
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                last_error = exc
+                continue
+            return self._shape(raw, request_line, redacted, secret_values, attempts)
+
+        raise TransportError(
+            f"Request to {target.origin} failed after "
+            f"{attempts} attempt(s): {_safe_reason(last_error)}"
+        )
+
+    def send_prepared(self, target: Target, prepared: _Prepared) -> HttpResponse:
+        """Send an adapter-prepared request through the same broker pipeline.
+
+        The adapter has already performed marker insertion and encoding; this
+        validates the method, applies header defaults, and routes every physical
+        attempt through the broker (budgets + scope enforced before any I/O).
+        The redacted request URL is recorded as evidence.
+
+        Raises:
+            TransportError: On a disallowed method or a connection/timeout
+                failure (sanitized message).
+            BudgetExceededError: When a budget is exhausted (``inconclusive``).
+            ScopeError: When the attempt would leave scope (``blocked``).
+        """
+        method = prepared.method.upper()
+        if method not in ACTIVE_METHODS:
+            raise TransportError(
+                f"method {scrub_text(prepared.method)!r} is not permitted; allowed: "
+                f"{', '.join(sorted(ACTIVE_METHODS))}"
+            )
+        req_headers = prepared.header_dict()
+        req_headers.setdefault("User-Agent", self.config.user_agent)
+
+        redacted = redact_headers(req_headers)
+        secret_values = (
+            sensitive_header_values(req_headers)
+            | url_secret_values(target.url)
+            | url_secret_values(prepared.url)
+        )
+        request_line = {"method": method, "url": redact_url(prepared.url)}
+
+        broker = RequestBroker(
+            ledger=self._ledger,
+            guard=ScopeGuard(
+                target=target,
+                resolver=self._resolver,
+                allow_private=self._allow_private,
+                allowed_families=self._allowed_families,
+            ),
+            timeout=self.config.timeout,
+            max_response_bytes=self.config.max_response_bytes,
+            opener=self._opener,
+        )
+
+        last_error: Exception | None = None
+        attempts = 0
+        for _attempt in range(self.config.max_retries + 1):
+            attempts += 1
+            kind = AttemptKind.INITIAL if attempts == 1 else AttemptKind.RETRY
+            try:
+                raw = broker.fetch(
+                    url=prepared.url,
+                    method=method,
+                    data=prepared.body,
+                    headers=req_headers,
+                    kind=kind,
+                )
+            except (BudgetExceededError, ScopeError):
                 raise
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 last_error = exc
