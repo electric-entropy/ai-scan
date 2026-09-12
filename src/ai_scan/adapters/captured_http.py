@@ -30,7 +30,7 @@ from ai_scan.adapters.base import (
     extract_text,
 )
 from ai_scan.targets import Target
-from ai_scan.transport import ACTIVE_METHODS, HttpResponse
+from ai_scan.transport import ACTIVE_METHODS, HttpResponse, scrub_text
 from ai_scan.transport.http import _apply_marker, _encode_prompt
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
@@ -110,11 +110,11 @@ def _parse_request_line(line: str) -> tuple[str, str]:
     parts = line.split(" ")
     if len(parts) != 3:
         raise AdapterConfigError("malformed request line (expected 'METHOD TARGET VERSION')")
-    method, request_target, version = parts
-    method = method.upper()
+    given_method, request_target, version = parts
+    method = given_method.upper()
     if method not in ACTIVE_METHODS:
         raise AdapterConfigError(
-            f"captured method {method!r} is not permitted; allowed: "
+            f"captured method {scrub_text(given_method)!r} is not permitted; allowed: "
             f"{', '.join(sorted(ACTIVE_METHODS))}"
         )
     if not version.startswith("HTTP/"):
@@ -146,7 +146,9 @@ def _parse_headers(header_lines: list[str]) -> dict[str, str]:
             raise AdapterConfigError("invalid control character in header value")
         low = name.lower()
         if low in seen:
-            raise AdapterConfigError(f"duplicate header {name!r} is not allowed (ambiguous)")
+            raise AdapterConfigError(
+                f"duplicate header {scrub_text(name)!r} is not allowed (ambiguous)"
+            )
         seen.add(low)
         headers[name] = value
     return headers
@@ -185,7 +187,7 @@ class CapturedHttpAdapter:
     def __post_init__(self) -> None:
         if self.prompt_encoding is not None and self.prompt_encoding not in _VALID_ENCODINGS:
             raise AdapterConfigError(
-                f"unknown prompt encoding {self.prompt_encoding!r}; "
+                f"unknown prompt encoding {scrub_text(str(self.prompt_encoding))!r}; "
                 f"allowed: {', '.join(sorted(_VALID_ENCODINGS))}"
             )
         self._template = parse_captured_request(self.raw_request, self.target)

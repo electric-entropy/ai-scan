@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 
-from ai_scan.transport import HttpResponse
+from ai_scan.transport import HttpResponse, scrub_text
 
 MARKER = "*"
 
@@ -109,12 +109,15 @@ class ExtractionSpec:
 
     def __post_init__(self) -> None:
         if self.mode not in _VALID_EXTRACTION_MODES:
+            # The mode is untrusted config; scrub before it enters the message.
             raise AdapterConfigError(
-                f"unknown extraction mode {self.mode!r}; "
+                f"unknown extraction mode {scrub_text(str(self.mode))!r}; "
                 f"allowed: {', '.join(sorted(_VALID_EXTRACTION_MODES))}"
             )
         if self.mode in {"json_pointer", "header"} and not self.path:
-            raise AdapterConfigError(f"extraction mode {self.mode!r} requires a path")
+            raise AdapterConfigError(
+                f"extraction mode {scrub_text(str(self.mode))!r} requires a path"
+            )
         if self.mode == "text" and self.path:
             raise AdapterConfigError("extraction mode 'text' does not take a path")
         if (

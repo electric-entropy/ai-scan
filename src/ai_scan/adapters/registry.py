@@ -18,6 +18,7 @@ from ai_scan.adapters.captured_http import CAPABILITIES as _CAPTURED_CAPS
 from ai_scan.adapters.captured_http import CapturedHttpAdapter
 from ai_scan.adapters.generic_http import CAPABILITIES as _GENERIC_CAPS
 from ai_scan.adapters.generic_http import GenericHttpAdapter
+from ai_scan.transport import scrub_text
 
 Factory = Callable[..., Adapter]
 
@@ -33,7 +34,7 @@ class AdapterRegistry:
         self, name: str, factory: Factory, capabilities: AdapterCapabilities
     ) -> None:
         if name in self._factories:
-            raise AdapterConfigError(f"adapter {name!r} is already registered")
+            raise AdapterConfigError(f"adapter {scrub_text(str(name))!r} is already registered")
         self._factories[name] = factory
         self._capabilities[name] = capabilities
 
@@ -44,14 +45,14 @@ class AdapterRegistry:
     def capabilities(self, name: str) -> AdapterCapabilities:
         """The static capability descriptor for ``name`` (offline)."""
         if name not in self._capabilities:
-            raise AdapterConfigError(f"unknown adapter {name!r}")
+            raise AdapterConfigError(f"unknown adapter {scrub_text(str(name))!r}")
         return self._capabilities[name]
 
     def create(self, name: str, **config: Any) -> Adapter:
         """Instantiate adapter ``name`` with ``config`` (fails closed on error)."""
         if name not in self._factories:
             raise AdapterConfigError(
-                f"unknown adapter {name!r}; available: {', '.join(self.names())}"
+                f"unknown adapter {scrub_text(str(name))!r}; available: {', '.join(self.names())}"
             )
         return self._factories[name](**config)
 

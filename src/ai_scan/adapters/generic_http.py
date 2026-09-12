@@ -22,7 +22,7 @@ from ai_scan.adapters.base import (
     extract_text,
 )
 from ai_scan.targets import Target
-from ai_scan.transport import ACTIVE_METHODS, HttpResponse, TransportConfig
+from ai_scan.transport import ACTIVE_METHODS, HttpResponse, TransportConfig, scrub_text
 from ai_scan.transport.http import _apply_marker, _encode_prompt
 
 _VALID_ENCODINGS = frozenset({"json", "url", "raw"})
@@ -62,15 +62,18 @@ class GenericHttpAdapter:
     extraction: ExtractionSpec = field(default_factory=ExtractionSpec)
 
     def __post_init__(self) -> None:
+        # Preserve the value as given so the (untrusted) original is what gets
+        # scrubbed into any error message, not the uppercased form.
+        given_method = self.method
         self.method = self.method.upper()
         if self.method not in ACTIVE_METHODS:
             raise AdapterConfigError(
-                f"method {self.method!r} is not permitted; allowed: "
+                f"method {scrub_text(str(given_method))!r} is not permitted; allowed: "
                 f"{', '.join(sorted(ACTIVE_METHODS))}"
             )
         if self.prompt_encoding is not None and self.prompt_encoding not in _VALID_ENCODINGS:
             raise AdapterConfigError(
-                f"unknown prompt encoding {self.prompt_encoding!r}; "
+                f"unknown prompt encoding {scrub_text(str(self.prompt_encoding))!r}; "
                 f"allowed: {', '.join(sorted(_VALID_ENCODINGS))}"
             )
         # The prompt must have somewhere to land: the marker must appear in the
