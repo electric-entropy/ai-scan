@@ -315,9 +315,10 @@ def test_budget_exhaustion_raises_budget_error(echo_server) -> None:
 def test_response_objects_are_closed(echo_server) -> None:
     closed: list[bool] = []
     t = Transport(TransportConfig())
-    real_perform = t._perform
 
-    # Wrap the opener to observe close() calls.
+    # Wrap the broker's opener (shared from the transport) to observe close()
+    # calls. Physical I/O now flows through the broker, which always closes the
+    # response via contextlib.closing.
     import urllib.request as _u
 
     orig_open = t._opener.open
@@ -334,7 +335,7 @@ def test_response_objects_are_closed(echo_server) -> None:
         return raw
 
     t._opener.open = wrapped_open  # type: ignore[method-assign]
-    assert real_perform and _u  # keep references used
+    assert _u  # keep reference used
     t.send(
         normalize_target(f"{echo_server.base_url}/chat"),
         method="POST",

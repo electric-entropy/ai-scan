@@ -1,0 +1,157 @@
+"""The sole request broker: every physical attempt flows through here.
+
+No adapter or plugin is ever handed a raw network client. They call
+:meth:`RequestBroker.fetch`, which — once per physical attempt and *before any
+socket I/O* —
+
+1. acquires request, rate, time, and concurrency budget (via the ledger), then
+2. re-checks the authorized scope against the host's freshly resolved IPs (via
+   the scope guard), then
+3. connects to the *vetted* IP (pinning the connection to the address the guard
+   validated, so a rebinding between check and connect cannot escape scope).
+
+Budget exhaustion and scope denial surface as structured
+:class:`BudgetExceededError` / :class:`ScopeError` carrying the accurate
+per-kind physical totals. The urllib opener is name-mangled and never exposed.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from urllib.parse import urlsplit, urlunsplit
+
+from ai_scan.transport._errors import TransportError
+from ai_scan.transport.budgets import AttemptKind, BudgetLedger
+from ai_scan.transport.scope_guard import ResolvedEndpoint, ScopeGuard
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Redirect handler that refuses to follow any redirect (fail-closed scope)."""
+
+    def redirect_request(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
+
+@dataclass
+class RawExchange:
+    """The unshaped result of one physical attempt (redaction happens above)."""
+
+    status: int
+    headers: dict[str, str]
+    payload: bytes
+
+
+class RequestBroker:
+    """Mediates, budgets, and scope-checks every physical network attempt."""
+
+    def __init__(
+        self,
+        *,
+        ledger: BudgetLedger,
+        guard: ScopeGuard,
+        timeout: float,
+        max_response_bytes: int,
+        opener: urllib.request.OpenerDirector | None = None,
+    ) -> None:
+        self._ledger = ledger
+        self._guard = guard
+        self._timeout = timeout
+        self._max_response_bytes = max_response_bytes
+        # Name-mangled: adapters/plugins holding a broker cannot reach the opener.
+        self.__opener = opener or urllib.request.build_opener(_NoRedirect)
+
+    @property
+    def totals(self) -> dict[str, int]:
+        """Per-kind physical-attempt totals (the parts sum to ``total``)."""
+        return self._ledger.totals()
+
+    def fetch(
+        self,
+        *,
+        url: str,
+        method: str,
+        data: bytes | None,
+        headers: dict[str, str],
+        kind: AttemptKind,
+    ) -> RawExchange:
+        """Perform one budgeted, scope-checked physical attempt of ``kind``.
+
+        Raises:
+            BudgetExceededError: If any budget (count/rate/time/concurrency) is
+                exhausted — no socket I/O occurs.
+            ScopeError: If the URL or its resolved IPs leave the authorized
+                scope — no socket I/O occurs.
+            TransportError: On a connection/timeout failure.
+
+        Budget/scope denials carry accurate per-kind ``totals``.
+        """
+        try:
+            with self._ledger.attempt(kind):
+                # Budget is now held; scope is re-checked before any connection.
+                endpoint = self._guard.authorize(url)
+                return self._perform(endpoint, url, method, data, headers)
+        except TransportError as exc:
+            if exc.totals is None:
+                exc.totals = self._ledger.totals()
+            raise
+
+    def _perform(
+        self,
+        endpoint: ResolvedEndpoint,
+        url: str,
+        method: str,
+        data: bytes | None,
+        headers: dict[str, str],
+    ) -> RawExchange:
+        connect_url, req_headers = _pin_connection(endpoint, url, headers)
+        request = urllib.request.Request(connect_url, data=data, method=method)
+        for key, value in req_headers.items():
+            request.add_header(key, value)
+
+        try:
+            raw = self.__opener.open(request, timeout=self._timeout)
+            with contextlib.closing(raw):
+                status = raw.status
+                resp_headers = {k: v for k, v in raw.headers.items()}
+                payload = raw.read(self._max_response_bytes + 1)
+        except urllib.error.HTTPError as http_err:
+            # Non-2xx (including our captured redirects) arrive here.
+            with contextlib.closing(http_err):
+                status = http_err.code
+                resp_headers = (
+                    {k: v for k, v in http_err.headers.items()} if http_err.headers else {}
+                )
+                payload = http_err.read(self._max_response_bytes + 1)
+        return RawExchange(status=status, headers=resp_headers, payload=payload)
+
+
+def _pin_connection(
+    endpoint: ResolvedEndpoint, url: str, headers: dict[str, str]
+) -> tuple[str, dict[str, str]]:
+    """Rewrite the connection to the vetted IP, preserving the ``Host`` header.
+
+    For an IP-literal target the URL already *is* the vetted address, so it is
+    returned unchanged (byte-identical to a direct request). For a named host
+    over http, the authority is rewritten to the guard-validated IP and the
+    original ``Host`` header is pinned, so the socket cannot connect anywhere
+    the guard did not vet (closing the resolve→connect rebinding window).
+    """
+    req_headers = dict(headers)
+    if endpoint.host_is_literal or endpoint.target.scheme != "http":
+        return url, req_headers
+
+    parts = urlsplit(url)
+    authority = parts.netloc.rsplit("@", 1)[-1]
+    ip_authority = f"[{endpoint.ip}]" if endpoint.family == 6 else endpoint.ip
+    if endpoint.target.port != _DEFAULT_PORTS[endpoint.target.scheme]:
+        ip_authority = f"{ip_authority}:{endpoint.target.port}"
+    pinned_url = urlunsplit(
+        (parts.scheme, ip_authority, parts.path, parts.query, parts.fragment)
+    )
+    req_headers.setdefault("Host", authority)
+    return pinned_url, req_headers

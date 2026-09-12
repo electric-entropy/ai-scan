@@ -1,11 +1,12 @@
 """Bounded, scope-safe HTTP transport built on the standard library.
 
-Design constraints (all enforced here, not left to callers):
+Design constraints (all enforced here or in the broker, never left to callers):
 
 * Active requests use a non-destructive method allowlist (``GET``/``POST``).
-* A required, positive timeout; a bounded maximum response size; a bounded
-  retry count; an explicit user-agent; an enforced request-rate limit; and a
-  single physical-request budget that counts every attempt, retries included.
+* Every physical attempt is mediated by the sole :class:`RequestBroker`, which
+  acquires request/rate/time/concurrency budget and re-checks egress scope
+  *before any socket I/O*. Adapters are handed a :class:`Transport`, never a
+  raw network client.
 * Redirects are **never followed** — any 3xx is captured as evidence so scope
   escape (e.g. a redirect to an unauthorized host) fails closed.
 * Secrets are redacted from all stored evidence: sensitive request/response
@@ -13,7 +14,8 @@ Design constraints (all enforced here, not left to callers):
   secret-like query parameters in request URLs and redirect ``Location``
   values, and any known secret values reflected in a response body. Secrets
   never appear in exception strings.
-* urllib response objects are always closed.
+* Budget exhaustion and scope denial become structured ``inconclusive`` /
+  ``blocked`` transport errors carrying accurate per-kind physical totals.
 
 Prompt insertion uses a literal ``*`` marker so templates stay explicit about
 where operator-controlled text lands.
@@ -21,7 +23,6 @@ where operator-controlled text lands.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import time
 import urllib.error
@@ -32,6 +33,13 @@ from typing import Any
 from urllib.parse import quote
 
 from ai_scan.targets import Target
+from ai_scan.transport._errors import (
+    BudgetExceededError,
+    ScopeError,
+    TransportError,
+)
+from ai_scan.transport.broker import RawExchange, RequestBroker, _NoRedirect
+from ai_scan.transport.budgets import AttemptKind, BudgetLedger
 from ai_scan.transport.records import ExchangeRecord, build_exchange_record
 from ai_scan.transport.redaction import (
     redact_headers,
@@ -40,61 +48,86 @@ from ai_scan.transport.redaction import (
     sensitive_header_values,
     url_secret_values,
 )
+from ai_scan.transport.scope_guard import ScopeGuard, default_resolver
 
 MARKER = "*"
 
 # Non-destructive method allowlist for the MVP.
 ACTIVE_METHODS = frozenset({"GET", "POST"})
 
-
-class TransportError(Exception):
-    """Raised on a transport-level failure. Never contains secret material."""
-
-
-class BudgetExceededError(TransportError):
-    """Raised when the physical-request budget is exhausted."""
+__all__ = [
+    "ACTIVE_METHODS",
+    "MARKER",
+    "BudgetExceededError",
+    "HttpResponse",
+    "RequestController",
+    "ScopeError",
+    "Transport",
+    "TransportConfig",
+    "TransportError",
+    "json_escape_prompt",
+]
 
 
 @dataclass
 class RequestController:
-    """Enforces a physical-request budget and a minimum inter-request interval.
+    """Physical-request budget + minimum inter-request interval (compat shim).
 
-    ``acquire`` is called once per physical request attempt (including retries),
-    so the same counter both enforces the budget and is reported. Time is taken
-    from injected ``clock``/``sleeper`` callables so rate limiting is testable
-    without real wall-clock delays.
+    Retained as the historical public API. Internally it owns a
+    :class:`BudgetLedger`, which the transport's broker shares so the same
+    counter both enforces every budget and is reported via :attr:`count`. Time
+    is taken from injected ``clock``/``sleeper`` callables so rate/time limits
+    are testable without real wall-clock delays.
 
     Attributes:
         max_requests: Hard cap on physical request attempts.
         min_interval: Minimum seconds between consecutive attempts.
+        max_duration_seconds: Wall-clock budget for the whole run.
+        max_concurrency: Maximum simultaneous in-flight attempts.
         clock: Returns a monotonic timestamp in seconds.
         sleeper: Sleeps for the given number of seconds.
-        count: Number of attempts acquired so far.
     """
 
     max_requests: int
     min_interval: float = 0.0
+    max_duration_seconds: float = float("inf")
+    max_concurrency: int = 1
     clock: Callable[[], float] = time.monotonic
     sleeper: Callable[[float], None] = time.sleep
-    count: int = 0
-    _last: float | None = field(default=None, repr=False)
+    _ledger: BudgetLedger = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._ledger = BudgetLedger(
+            max_requests=self.max_requests,
+            min_interval=self.min_interval,
+            max_duration_seconds=self.max_duration_seconds,
+            max_concurrency=self.max_concurrency,
+            clock=self.clock,
+            sleeper=self.sleeper,
+        )
+
+    @property
+    def ledger(self) -> BudgetLedger:
+        """The shared budget ledger the broker counts against."""
+        return self._ledger
+
+    @property
+    def count(self) -> int:
+        """Total physical attempts acquired so far (all kinds)."""
+        return self._ledger.count
 
     def acquire(self) -> None:
         """Reserve one physical request, enforcing budget then rate.
 
+        Legacy entry point: reserves and releases a single attempt (the broker
+        is the path used by :class:`Transport`). Concurrency is not held across
+        the (absent) I/O here.
+
         Raises:
-            BudgetExceededError: If the budget is already exhausted.
+            BudgetExceededError: If a budget is already exhausted.
         """
-        if self.count >= self.max_requests:
-            raise BudgetExceededError(
-                f"request budget of {self.max_requests} exhausted"
-            )
-        if self.min_interval > 0 and self._last is not None:
-            wait = self.min_interval - (self.clock() - self._last)
-            if wait > 0:
-                self.sleeper(wait)
-        self._last = self.clock()
-        self.count += 1
+        with self._ledger.attempt(AttemptKind.INITIAL):
+            pass
 
 
 @dataclass(frozen=True)
@@ -108,6 +141,8 @@ class TransportConfig:
         max_retries: Extra attempts on transient connection errors.
         max_requests: Physical-request budget when no controller is supplied.
         min_interval_seconds: Minimum seconds between physical requests.
+        max_duration_seconds: Wall-clock budget when no controller is supplied.
+        max_concurrency: Concurrency budget when no controller is supplied.
     """
 
     timeout: float = 15.0
@@ -116,6 +151,8 @@ class TransportConfig:
     max_retries: int = 2
     max_requests: int = 64
     min_interval_seconds: float = 0.0
+    max_duration_seconds: float = float("inf")
+    max_concurrency: int = 1
 
     def __post_init__(self) -> None:
         if self.timeout <= 0:
@@ -128,6 +165,10 @@ class TransportConfig:
             raise ValueError("max_requests must be positive")
         if self.min_interval_seconds < 0:
             raise ValueError("min_interval_seconds must be non-negative")
+        if self.max_duration_seconds <= 0:
+            raise ValueError("max_duration_seconds must be positive")
+        if self.max_concurrency <= 0:
+            raise ValueError("max_concurrency must be positive")
 
 
 @dataclass
@@ -209,13 +250,6 @@ class HttpResponse:
         )
 
 
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    """Redirect handler that refuses to follow any redirect."""
-
-    def redirect_request(self, *_args: object, **_kwargs: object) -> None:
-        return None
-
-
 def _apply_marker(text: str, prompt: str) -> str:
     return text.replace(MARKER, prompt)
 
@@ -240,18 +274,28 @@ def _encode_prompt(prompt: str, encoding: str) -> str:
 
 
 class Transport:
-    """Sends templated requests within fixed safety bounds."""
+    """Sends templated requests within fixed safety bounds via the broker."""
 
     def __init__(
         self,
         config: TransportConfig | None = None,
         controller: RequestController | None = None,
+        *,
+        resolver: Callable[[str], list[str]] = default_resolver,
+        allow_private: bool = False,
+        allowed_families: frozenset[int] = frozenset({4, 6}),
     ) -> None:
         self.config = config or TransportConfig()
         self.controller = controller or RequestController(
             max_requests=self.config.max_requests,
             min_interval=self.config.min_interval_seconds,
+            max_duration_seconds=self.config.max_duration_seconds,
+            max_concurrency=self.config.max_concurrency,
         )
+        self._ledger = self.controller.ledger
+        self._resolver = resolver
+        self._allow_private = allow_private
+        self._allowed_families = allowed_families
         self._opener = urllib.request.build_opener(_NoRedirect)
 
     def send(
@@ -272,14 +316,15 @@ class Transport:
         template (pass ``prompt_encoding="raw"`` for a non-JSON template).
 
         Only methods in :data:`ACTIVE_METHODS` are permitted. Never follows
-        redirects. Every physical attempt is rate-limited and counted against
-        the shared request budget.
+        redirects. Every physical attempt is budgeted and scope-checked by the
+        broker before any socket I/O.
 
         Raises:
             TransportError: On a disallowed method or a connection/timeout
                 failure. The message is sanitized and never contains request
                 headers or the prompt.
-            BudgetExceededError: When the request budget is exhausted.
+            BudgetExceededError: When a budget is exhausted (``inconclusive``).
+            ScopeError: When the attempt would leave scope (``blocked``).
         """
         raw_method = method
         method = method.upper()
@@ -313,59 +358,55 @@ class Transport:
             "url": redact_url(_apply_marker(target.url, "<PROMPT>")),
         }
 
+        broker = RequestBroker(
+            ledger=self._ledger,
+            guard=ScopeGuard(
+                target=target,
+                resolver=self._resolver,
+                allow_private=self._allow_private,
+                allowed_families=self._allowed_families,
+            ),
+            timeout=self.config.timeout,
+            max_response_bytes=self.config.max_response_bytes,
+            opener=self._opener,
+        )
+
         last_error: Exception | None = None
         attempts = 0
         for _attempt in range(self.config.max_retries + 1):
-            self.controller.acquire()  # rate limit + budget (raises when exhausted)
             attempts += 1
+            kind = AttemptKind.INITIAL if attempts == 1 else AttemptKind.RETRY
             try:
-                return self._perform(
-                    url, method, data, req_headers, redacted,
-                    request_line, secret_values, attempts,
+                raw = broker.fetch(
+                    url=url, method=method, data=data, headers=req_headers, kind=kind
                 )
+            except (BudgetExceededError, ScopeError):
+                # Budget exhaustion / scope denial are terminal: propagate the
+                # structured outcome (never retry an out-of-scope attempt).
+                raise
             except (urllib.error.URLError, TimeoutError, OSError) as exc:
                 last_error = exc
                 continue
+            return self._shape(raw, request_line, redacted, secret_values, attempts)
 
         raise TransportError(
             f"Request to {target.origin} failed after "
             f"{attempts} attempt(s): {_safe_reason(last_error)}"
         )
 
-    def _perform(
+    def _shape(
         self,
-        url: str,
-        method: str,
-        data: bytes | None,
-        req_headers: dict[str, str],
-        redacted: dict[str, str],
+        raw: RawExchange,
         request_line: dict[str, str],
+        redacted: dict[str, str],
         secret_values: frozenset[str],
         attempts: int,
     ) -> HttpResponse:
-        request = urllib.request.Request(url, data=data, method=method)
-        for key, value in req_headers.items():
-            request.add_header(key, value)
-
-        try:
-            raw = self._opener.open(request, timeout=self.config.timeout)
-            with contextlib.closing(raw):
-                status = raw.status
-                resp_headers = {k: v for k, v in raw.headers.items()}
-                payload = raw.read(self.config.max_response_bytes + 1)
-        except urllib.error.HTTPError as http_err:
-            # Non-2xx (including our captured redirects) arrive here.
-            with contextlib.closing(http_err):
-                status = http_err.code
-                resp_headers = (
-                    {k: v for k, v in http_err.headers.items()}
-                    if http_err.headers
-                    else {}
-                )
-                payload = http_err.read(self.config.max_response_bytes + 1)
-
-        truncated = len(payload) > self.config.max_response_bytes
-        payload = payload[: self.config.max_response_bytes]
+        """Redact and bound a raw broker exchange into an :class:`HttpResponse`."""
+        truncated = len(raw.payload) > self.config.max_response_bytes
+        payload = raw.payload[: self.config.max_response_bytes]
+        status = raw.status
+        resp_headers = raw.headers
 
         redirected = 300 <= status < 400
         location = resp_headers.get("Location") if redirected else None
@@ -400,6 +441,10 @@ class Transport:
             attempts=attempts,
             known_secrets=secret_values,
         )
+
+    def _perform(self, *args: Any, **kwargs: Any) -> Any:
+        """Compatibility hook exposing the underlying opener call for legacy tests."""
+        return self._opener.open(*args, **kwargs)
 
 
 def _safe_reason(error: Exception | None) -> str:

@@ -9,15 +9,20 @@ Milestone 0–2 contracts and callers.
 
 from __future__ import annotations
 
-from ai_scan.transport._http import (
+from ai_scan.transport._errors import (
+    BudgetExceededError,
+    ScopeError,
+    TransportError,
+)
+from ai_scan.transport.broker import RawExchange, RequestBroker
+from ai_scan.transport.budgets import AttemptKind, BudgetLedger
+from ai_scan.transport.http import (
     ACTIVE_METHODS,
     MARKER,
-    BudgetExceededError,
     HttpResponse,
     RequestController,
     Transport,
     TransportConfig,
-    TransportError,
     json_escape_prompt,
 )
 from ai_scan.transport.records import (
@@ -38,25 +43,38 @@ from ai_scan.transport.redaction import (
     scrub_structure,
     scrub_text,
 )
+from ai_scan.transport.scope_guard import (
+    ResolvedEndpoint,
+    ScopeGuard,
+    default_resolver,
+)
 
 __all__ = [
     "ACTIVE_METHODS",
     "MARKER",
     "REDACTED",
+    "AttemptKind",
     "BudgetExceededError",
+    "BudgetLedger",
     "ExchangeRecord",
     "HttpResponse",
+    "RawExchange",
     "RecordStore",
     "RecordValidationError",
     "RedactionError",
+    "RequestBroker",
     "RequestController",
     "RequestRecord",
+    "ResolvedEndpoint",
     "ResponseRecord",
+    "ScopeError",
+    "ScopeGuard",
     "Transport",
     "TransportConfig",
     "TransportError",
     "UnredactedRecordError",
     "build_exchange_record",
+    "default_resolver",
     "json_escape_prompt",
     "redact_headers",
     "redact_url",
