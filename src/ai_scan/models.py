@@ -11,6 +11,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, runtime_checkable
 
+# Milestone 1 bridge: re-export the shared core domain types through the legacy
+# `ai_scan.models` path so callers can migrate gradually. The existing legacy
+# types below are unchanged. Explicit `as` aliases keep these re-exports visible
+# under strict mypy (no implicit re-export).
+from ai_scan.core.models import DeterminismClass as DeterminismClass
+from ai_scan.core.models import Finding as Finding
+from ai_scan.core.models import FindingStatus as FindingStatus
+from ai_scan.core.models import PackTrust as PackTrust
+from ai_scan.core.models import Severity as Severity
+
 SignalKind = Literal["header", "self_id", "behavioral"]
 
 
