@@ -162,6 +162,24 @@ Explicitly out of scope for the MVP: REST/web UI, browser automation,
 distributed workers, aggressive/destructive payloads, RAG/multimodal injection,
 and LLM-as-judge scoring.
 
+### Platform direction
+
+This MVP (report schema v1) is the stable base for a broader **local, CLI-first
+AI-pentest platform**. The public contracts are frozen and documented under
+[`docs/architecture/`](docs/architecture/):
+
+- [platform-boundaries.md](docs/architecture/platform-boundaries.md) — in/out of scope.
+- [mode-contracts.md](docs/architecture/mode-contracts.md) — the `reliable` and
+  `kitchen-sink` modes and finding taxonomy.
+- [safety-invariants.md](docs/architecture/safety-invariants.md) — non-negotiable invariants.
+- [migration-policy.md](docs/architecture/migration-policy.md) — how v1 stays
+  compatible as schema v2 / the `run` path arrive.
+- ADRs: [0001 CLI-first engine](docs/architecture/adr/0001-cli-first-engine.md),
+  [0002 confirmation & confidence](docs/architecture/adr/0002-confirmation-and-confidence.md).
+
+The MVP behavior these docs freeze is guarded by the golden compatibility
+contract in [`tests/contracts/`](tests/contracts/).
+
 ## Development
 
 ```bash

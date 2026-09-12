@@ -9,6 +9,11 @@ operational safeguard for well-intentioned operators — it is **not** a barrier
 against a malicious operator, who by definition controls the machine running the
 tool.
 
+> The platform-wide, non-negotiable safety invariants that every future
+> milestone must preserve are documented in
+> [docs/architecture/safety-invariants.md](docs/architecture/safety-invariants.md).
+> The boundaries below are the subset the current MVP enforces.
+
 ## Safety boundaries enforced by the tool
 
 - **Fail-closed authorization.** Active commands require either an interactive
