@@ -64,6 +64,12 @@ class PlanLimits:
     requests_per_second: float
     max_duration_seconds: int
 
+    def __post_init__(self) -> None:
+        _require_int(self.max_physical_requests, "max_physical_requests")
+        _require_int(self.max_concurrency, "max_concurrency")
+        _require_rate(self.requests_per_second, "requests_per_second")
+        _require_int(self.max_duration_seconds, "max_duration_seconds")
+
 
 @dataclass(frozen=True)
 class PlannedCase:
@@ -75,6 +81,15 @@ class PlannedCase:
     index: int
     kind: str  # "attack" | "control"
     template: str
+
+    def __post_init__(self) -> None:
+        _require_str(self.case_id, "case_id")
+        _require_str(self.pack_id, "pack_id")
+        _require_str(self.family, "family")
+        _require_int(self.index, "case index", positive=False)
+        if self.kind not in _VALID_KINDS:
+            raise PlanError("invalid case kind")
+        _require_str(self.template, "template")
 
 
 @dataclass(frozen=True)
@@ -91,6 +106,25 @@ class Plan:
     limits: PlanLimits
     trial_policy: tuple[int, int, int]  # (attack, successes, control)
     digest: str
+
+    def __post_init__(self) -> None:
+        if self.plan_version != PLAN_VERSION:
+            raise PlanError("unsupported plan version")
+        if self.mode not in {"reliable", "kitchen-sink"}:
+            raise PlanError("invalid plan mode")
+        _canonical_origin(_require_str(self.origin, "origin"))
+        _require_str(self.adapter, "adapter")
+        _require_int(self.seed, "seed", positive=False)
+        if not isinstance(self.packs, tuple):
+            raise PlanError("packs must be a tuple")
+        if not isinstance(self.cases, tuple):
+            raise PlanError("cases must be a tuple")
+        if not isinstance(self.trial_policy, tuple) or len(self.trial_policy) != 3:
+            raise PlanError("trial_policy must be a 3-tuple")
+        _require_int(self.trial_policy[0], "minimum_attack_trials")
+        _require_int(self.trial_policy[1], "minimum_successes")
+        _require_int(self.trial_policy[2], "minimum_control_trials")
+        _require_str(self.digest, "digest")
 
     def attack_cases(self) -> tuple[PlannedCase, ...]:
         return tuple(c for c in self.cases if c.kind == "attack")
@@ -218,13 +252,21 @@ def load_plan(data: Mapping[str, Any]) -> Plan:
         raise PlanError("plan document must be a JSON object")
     if data.get("plan_version") != PLAN_VERSION:
         raise PlanError("unsupported or missing plan_version")
+    # Closed field set: a re-digested document with extra/missing keys is still
+    # rejected, so digest validity alone cannot smuggle an out-of-schema plan.
+    extra = set(data) - _ALLOWED_TOP_LEVEL
+    if extra:
+        raise PlanError("plan document has unknown field(s)")
+    missing = _ALLOWED_TOP_LEVEL - set(data)
+    if missing:
+        raise PlanError("plan document is missing required field(s)")
     if not verify_digest(dict(data)):
         raise PlanError("plan digest does not match its content (malformed or tampered)")
     try:
         mode = _require_str(data["mode"], "mode")
         if mode not in {"reliable", "kitchen-sink"}:
             raise PlanError("invalid plan mode")
-        origin = _require_str(data["origin"], "origin")
+        origin = _canonical_origin(_require_str(data["origin"], "origin"))
         adapter = _require_str(data["adapter"], "adapter")
         seed = _require_int(data["seed"], "seed", positive=False)
         limits_raw = _require_sequence(data["limits"], "limits", length=4)
@@ -246,26 +288,45 @@ def load_plan(data: Mapping[str, Any]) -> Plan:
             kind = _require_str(row[4], "kind")
             if kind not in _VALID_KINDS:
                 raise PlanError("invalid case kind in plan")
+            pack_id = _require_str(row[1], "pack_id")
+            family = _require_str(row[2], "family")
+            index = _require_int(row[3], "case index", positive=False)
+            template = _require_str(row[5], "template")
+            # case_id must be the canonical compiled shape, so a row cannot be
+            # re-pointed at a different pack/family/kind/index than its id claims.
+            if case_id != f"{pack_id}:{family}:{kind}:{index}":
+                raise PlanError("case_id is inconsistent with its pack/family/kind/index")
+            # Attack templates must carry the prompt marker; controls must not.
+            if kind == "attack" and _CANARY_MARKER not in template:
+                raise PlanError("attack case template is missing the canary marker")
+            if kind == "control" and _CANARY_MARKER in template:
+                raise PlanError("control case template must not contain the canary marker")
             cases_list.append(
                 PlannedCase(
                     case_id=case_id,
-                    pack_id=_require_str(row[1], "pack_id"),
-                    family=_require_str(row[2], "family"),
-                    index=_require_int(row[3], "case index", positive=False),
+                    pack_id=pack_id,
+                    family=family,
+                    index=index,
                     kind=kind,
-                    template=_require_str(row[5], "template"),
+                    template=template,
                 )
             )
         cases = tuple(cases_list)
         tp = _require_sequence(data["trial_policy"], "trial_policy", length=3)
-        packs = tuple(
-            (
-                _require_str(row[0], "pack id"),
-                _require_str(row[1], "pack version"),
-                _require_str(row[2], "pack digest"),
+        packs_list: list[tuple[str, str, str]] = []
+        seen_packs: set[str] = set()
+        for p in _require_sequence(data["packs"], "packs"):
+            prow = _require_sequence(p, "pack", length=3)
+            pack_identity = (
+                _require_str(prow[0], "pack id"),
+                _require_str(prow[1], "pack version"),
+                _require_str(prow[2], "pack digest"),
             )
-            for row in (_require_sequence(p, "pack", length=3) for p in data["packs"])
-        )
+            if pack_identity[0] in seen_packs:
+                raise PlanError("duplicate pack identity in plan")
+            seen_packs.add(pack_identity[0])
+            packs_list.append(pack_identity)
+        packs = tuple(packs_list)
         return Plan(
             plan_version=PLAN_VERSION,
             mode=mode,
