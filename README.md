@@ -193,10 +193,22 @@ contract in [`tests/contracts/`](tests/contracts/).
 
 ```bash
 pip install -e '.[dev]'
-pytest            # unit + integration (loopback only)
+python -m pytest tests/contracts -q
+python -m pytest -q          # unit + integration (loopback only)
 ruff check .
 mypy
+python -m build
 ```
+
+Release/operator documentation:
+
+- [Operator guide](docs/operator-guide.md) — safe authorization, run, replay, and release validation workflow.
+- [Pack authoring](docs/pack-authoring.md) — declarative pack requirements and fail-closed validation rules.
+- [Evidence and retention](docs/evidence-and-retention.md) — redaction, bundle, replay, and retention guidance.
+- [Threat model](docs/threat-model.md) — trust boundaries and release-hardening controls.
+- [Changelog](CHANGELOG.md) — release history.
+
+CI runs Python 3.11 and 3.12, contracts, full tests, Ruff, strict Mypy, wheel/sdist builds, fresh-wheel package-resource smoke checks, a local secret scan, a zero-runtime-dependency audit, SBOM generation, and static container-worker checks. GitHub Actions are pinned to immutable commit SHAs.
 
 ## License
 

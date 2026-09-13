@@ -26,11 +26,103 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e '.[dev]'
 
+      - name: Contract tests
+        run: python -m pytest tests/contracts -q
+
+      - name: Full tests
+        run: python -m pytest -q
+
       - name: Ruff
         run: ruff check .
 
       - name: Mypy
         run: mypy
 
-      - name: Pytest
-        run: pytest -q
+      - name: Build wheel and sdist
+        run: python -m build
+
+      - name: Fresh wheel install and package-resource smoke
+        run: |
+          python -m venv /tmp/ai-scan-wheel-smoke
+          /tmp/ai-scan-wheel-smoke/bin/python -m pip install --upgrade pip
+          /tmp/ai-scan-wheel-smoke/bin/pip install dist/*.whl
+          /tmp/ai-scan-wheel-smoke/bin/ai-scan --help
+          /tmp/ai-scan-wheel-smoke/bin/python - <<'PY'
+          from importlib import metadata, resources
+          dist = metadata.distribution('ai-scan')
+          meta = dist.metadata
+          assert meta.get('License-Expression') == 'LicenseRef-PolyForm-Shield-1.0.0'
+          assert 'LICENSE' in meta.get_all('License-File', [])
+          root = resources.files('ai_scan')
+          required = [
+              'py.typed',
+              'schemas/target-v1.schema.json',
+              'schemas/engagement-v1.schema.json',
+              'schemas/plan-v1.schema.json',
+              'schemas/pack-v1.schema.json',
+              'schemas/evidence-v2.schema.json',
+              'schemas/finding-v2.schema.json',
+              'schemas/receipt-v2.schema.json',
+              'payloads/safe.json',
+              'packs/builtin/direct-injection-reliable-v1.json',
+              'reporting/templates/report.html',
+          ]
+          for rel in required:
+              assert root.joinpath(rel).is_file(), rel
+          PY
+
+      - name: Secret scan
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys
+          pat = re.compile(r"(?i)(api[_-]?key|secret|password|token|passwd)\s*=\s*['\"][^'\"]{6,}['\"]")
+          skip_parts = {
+              '.git',
+              '.venv',
+              'dist',
+              'build',
+              'tests',
+              '.mypy_cache',
+              '.pytest_cache',
+              '.ruff_cache',
+          }
+          findings = []
+          for path in pathlib.Path('.').rglob('*'):
+              if not path.is_file() or any(part in skip_parts for part in path.parts):
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              for lineno, line in enumerate(text.splitlines(), 1):
+                  if pat.search(line):
+                      findings.append(f'{path}:{lineno}')
+          if findings:
+              print('\n'.join(findings))
+              sys.exit(1)
+          PY
+
+      - name: Dependency audit and SBOM
+        run: |
+          python - <<'PY'
+          import json
+          from importlib import metadata
+          deps = metadata.metadata('ai-scan').get_all('Requires-Dist') or []
+          runtime_deps = [d for d in deps if 'extra ==' not in d]
+          assert runtime_deps == [], runtime_deps
+          sbom = {
+              'bomFormat': 'CycloneDX',
+              'specVersion': '1.5',
+              'metadata': {'component': {'type': 'application', 'name': 'ai-scan'}},
+              'components': [],
+          }
+          with open('sbom.cdx.json', 'w', encoding='utf-8') as f:
+              json.dump(sbom, f, sort_keys=True, indent=2)
+              f.write('\n')
+          PY
+
+      - name: Container worker static scan
+        run: |
+          test -f Dockerfile.worker
+          grep -q '^USER ' Dockerfile.worker
+          grep -q 'network none' docs/container-worker.md

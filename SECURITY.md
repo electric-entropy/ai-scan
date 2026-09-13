@@ -71,3 +71,17 @@ deferred beyond the MVP.
 If you find a security issue in ai-scan itself, please open a private report to
 the maintainers rather than a public issue. Do not include working exploits or
 real target data in the report.
+
+## Release hardening
+
+Release gates are documented in [docs/operator-guide.md](docs/operator-guide.md)
+and modeled in [docs/threat-model.md](docs/threat-model.md). A releasable source
+checkout must pass contract tests, the full loopback-only test suite, Ruff,
+strict Mypy, wheel/sdist build, fresh-wheel CLI and package-resource smoke
+checks, local secret scanning, a zero-runtime-dependency audit, SBOM generation,
+and worker-container static checks. These gates do not contact external scan
+targets.
+
+Evidence retention and scrubbing expectations are documented in
+[docs/evidence-and-retention.md](docs/evidence-and-retention.md). Pack authoring
+and validation rules are documented in [docs/pack-authoring.md](docs/pack-authoring.md).

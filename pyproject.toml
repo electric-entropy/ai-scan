@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-scan"
-version = "0.1.0"
-description = "CLI-only authorized LLM assessment tool: behavioral fingerprinting and safe prompt-injection testing."
+version = "0.2.0"
+description = "CLI-first authorized AI-system pentesting platform with reliable evidence and fail-closed safety gates."
 readme = "README.md"
 license = "LicenseRef-PolyForm-Shield-1.0.0"
 requires-python = ">=3.11"

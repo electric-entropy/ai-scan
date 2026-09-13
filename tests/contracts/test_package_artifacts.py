@@ -38,9 +38,14 @@ EXPECTED_DATA = [
     "reporting/templates/report.html",
 ]
 EXPECTED_SDIST_FILES = [
+    "CHANGELOG.md",
     "Dockerfile.worker",
     "docker/entrypoint.py",
     "docs/container-worker.md",
+    "docs/operator-guide.md",
+    "docs/pack-authoring.md",
+    "docs/evidence-and-retention.md",
+    "docs/threat-model.md",
     "tests/integration/test_container_worker.py",
 ]
 

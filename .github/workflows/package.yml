@@ -1,0 +1,82 @@
+name: Package
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Verify wheel metadata and resources
+        run: |
+          python -m venv /tmp/ai-scan-package-smoke
+          /tmp/ai-scan-package-smoke/bin/python -m pip install --upgrade pip
+          /tmp/ai-scan-package-smoke/bin/pip install dist/*.whl
+          /tmp/ai-scan-package-smoke/bin/ai-scan --help
+          /tmp/ai-scan-package-smoke/bin/python - <<'PY'
+          from importlib import metadata, resources
+          dist = metadata.distribution('ai-scan')
+          meta = dist.metadata
+          assert meta.get('License-Expression') == 'LicenseRef-PolyForm-Shield-1.0.0'
+          assert 'LICENSE' in meta.get_all('License-File', [])
+          root = resources.files('ai_scan')
+          for rel in (
+              'py.typed',
+              'schemas/target-v1.schema.json',
+              'schemas/engagement-v1.schema.json',
+              'schemas/plan-v1.schema.json',
+              'schemas/pack-v1.schema.json',
+              'schemas/evidence-v2.schema.json',
+              'schemas/finding-v2.schema.json',
+              'schemas/receipt-v2.schema.json',
+              'payloads/safe.json',
+              'packs/builtin/direct-injection-reliable-v1.json',
+              'reporting/templates/report.html',
+          ):
+              assert root.joinpath(rel).is_file(), rel
+          PY
+
+      - name: Reproducible artifact listing
+        run: |
+          python - <<'PY'
+          import json, tarfile, zipfile
+          from pathlib import Path
+          listing = {}
+          for artifact in sorted(Path('dist').iterdir()):
+              if artifact.suffix == '.whl':
+                  with zipfile.ZipFile(artifact) as zf:
+                      listing[artifact.name] = sorted(zf.namelist())
+              elif artifact.name.endswith('.tar.gz'):
+                  with tarfile.open(artifact, 'r:gz') as tf:
+                      listing[artifact.name] = sorted(tf.getnames())
+          Path('dist/artifact-contents.json').write_text(json.dumps(listing, indent=2, sort_keys=True) + '\n')
+          PY
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.6.2
+        with:
+          name: ai-scan-dist
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/artifact-contents.json

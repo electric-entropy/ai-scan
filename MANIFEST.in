@@ -1,4 +1,4 @@
-include LICENSE README.md Dockerfile.worker
+include LICENSE README.md CHANGELOG.md Dockerfile.worker
 recursive-include docker *.py
 recursive-include docs *.md
 recursive-include src/ai_scan *.py *.typed *.json *.html
