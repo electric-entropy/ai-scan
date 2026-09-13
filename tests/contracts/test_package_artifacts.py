@@ -37,6 +37,12 @@ EXPECTED_DATA = [
     "packs/builtin/rag-isolation-kitchen-v1.json",
     "reporting/templates/report.html",
 ]
+EXPECTED_SDIST_FILES = [
+    "Dockerfile.worker",
+    "docker/entrypoint.py",
+    "docs/container-worker.md",
+    "tests/integration/test_container_worker.py",
+]
 
 
 @pytest.fixture(scope="module")
@@ -78,3 +84,5 @@ def test_sdist_contains_all_schemas_and_data(built_dists) -> None:
         assert present(f"schemas/{schema}"), f"sdist missing {schema}"
     for data in EXPECTED_DATA:
         assert present(data), f"sdist missing {data}"
+    for suffix in EXPECTED_SDIST_FILES:
+        assert any(n.endswith(f"/{suffix}") for n in names), f"sdist missing {suffix}"
