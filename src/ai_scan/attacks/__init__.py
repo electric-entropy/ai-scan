@@ -19,10 +19,12 @@ from ai_scan.attacks.base import (
     run_attack,
 )
 from ai_scan.attacks.direct_injection import DirectInjectionPlugin
+from ai_scan.attacks.encoding import EncodingPlugin
 from ai_scan.attacks.indirect_injection import IndirectInjectionPlugin
 from ai_scan.attacks.isolation import IsolationPlugin
 from ai_scan.attacks.memory import MemoryPlugin
 from ai_scan.attacks.multi_agent import MultiAgentPlugin
+from ai_scan.attacks.output_handling import OutputHandlingPlugin
 from ai_scan.attacks.prompt_disclosure import PromptDisclosurePlugin
 from ai_scan.attacks.rag import RagIsolationPlugin
 from ai_scan.attacks.tool_abuse import ToolAbusePlugin
@@ -34,10 +36,12 @@ __all__ = [
     "AttackPlugin",
     "AttackResult",
     "DirectInjectionPlugin",
+    "EncodingPlugin",
     "IsolationPlugin",
     "IndirectInjectionPlugin",
     "MemoryPlugin",
     "MultiAgentPlugin",
+    "OutputHandlingPlugin",
     "PromptDisclosurePlugin",
     "RagIsolationPlugin",
     "ToolAbusePlugin",

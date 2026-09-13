@@ -24,6 +24,7 @@ from ai_scan.adapters.base import (
 from ai_scan.adapters.captured_http import CapturedHttpAdapter, parse_captured_request
 from ai_scan.adapters.gemini import GeminiAdapter
 from ai_scan.adapters.generic_http import GenericHttpAdapter
+from ai_scan.adapters.multimodal import MultimodalAdapter
 from ai_scan.adapters.ollama import OllamaAdapter
 from ai_scan.adapters.openai_compatible import OpenAICompatibleAdapter
 from ai_scan.adapters.registry import (
@@ -47,6 +48,7 @@ __all__ = [
     "GeminiAdapter",
     "GenericHttpAdapter",
     "HttpJsonAdapter",
+    "MultimodalAdapter",
     "OllamaAdapter",
     "OpenAICompatibleAdapter",
     "PreparedRequest",

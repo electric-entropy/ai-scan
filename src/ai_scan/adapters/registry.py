@@ -22,6 +22,8 @@ from ai_scan.adapters.generic_http import CAPABILITIES as _GENERIC_CAPS
 from ai_scan.adapters.generic_http import GenericHttpAdapter
 from ai_scan.adapters.mcp import CAPABILITIES as _MCP_CAPS
 from ai_scan.adapters.mcp import McpAdapter
+from ai_scan.adapters.multimodal import CAPABILITIES as _MULTIMODAL_CAPS
+from ai_scan.adapters.multimodal import MultimodalAdapter
 from ai_scan.adapters.ollama import OllamaAdapter
 from ai_scan.adapters.openai_compatible import OpenAICompatibleAdapter
 from ai_scan.adapters.sse import SseAdapter
@@ -99,6 +101,7 @@ def default_registry() -> AdapterRegistry:
         "websocket", WebSocketAdapter, _stream_caps("websocket", frozenset({"GET"}), "ws_delta")
     )
     registry.register("mcp", McpAdapter, _MCP_CAPS)
+    registry.register("multimodal", MultimodalAdapter, _MULTIMODAL_CAPS)
     return registry
 
 

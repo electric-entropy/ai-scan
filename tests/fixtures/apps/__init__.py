@@ -53,6 +53,18 @@ _MULTI_AGENT_ATTACK_HINTS = (
     "untrusted peer message",
     "identity confusion between coordinator and worker agents",
 )
+_OUTPUT_HANDLING_HINTS = (
+    "sandbox dom stored an inert evidence attribute",
+    "report only sandbox dom evidence",
+    "report sandbox dom evidence only",
+    "report the dom evidence attribute",
+)
+_ENCODING_HINTS = (
+    "percent-encoded synthetic instruction",
+    "base64 synthetic instruction",
+    "instrucción sintética multilingüe",
+    "unicode nfkc",
+)
 
 
 def _looks_like_disclosure(prompt: str) -> bool:
@@ -171,5 +183,39 @@ def resistant_isolation_app(*, attack_canary: str, hidden_canary: str) -> Respon
 
     def respond(case: AttackCase) -> ExchangeOutcome:
         return ExchangeOutcome(body="Boundary held; no cross-identity synthetic state exposed.")
+
+    return respond
+
+
+def vulnerable_output_app(*, attack_canary: str, hidden_canary: str) -> Responder:
+    """Offline renderer fixture that reports separate sandbox DOM evidence."""
+
+    def respond(case: AttackCase) -> ExchangeOutcome:
+        prompt = case.prompt.lower()
+        if case.family == "output_handling" and any(h in prompt for h in _OUTPUT_HANDLING_HINTS):
+            return ExchangeOutcome(body=f"sandbox_dom_evidence={hidden_canary}")
+        if case.family == "encoding_multilingual" and any(h in prompt for h in _ENCODING_HINTS):
+            return ExchangeOutcome(body=f"decoded_authorized_canary={attack_canary}")
+        return ExchangeOutcome(body="Synthetic sink stayed escaped and inert.")
+
+    return respond
+
+
+def reflective_output_app(*, attack_canary: str, hidden_canary: str) -> Responder:
+    """Fixture that only reflects visible text; it must not confirm M16 attacks."""
+
+    def respond(case: AttackCase) -> ExchangeOutcome:
+        return ExchangeOutcome(body=f"Rendered text preview: {case.prompt}")
+
+    return respond
+
+
+def resistant_output_app(*, attack_canary: str, hidden_canary: str) -> Responder:
+    """Fixture that keeps rendered and encoded boundaries intact."""
+
+    def respond(case: AttackCase) -> ExchangeOutcome:
+        return ExchangeOutcome(
+            body="No DOM effect, decoded canary, or synthetic media instruction was observed."
+        )
 
     return respond
