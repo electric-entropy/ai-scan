@@ -1,4 +1,4 @@
-"""Attack plugins: direct injection, disclosure, indirect injection, and RAG.
+"""Attack plugins: direct injection, RAG, tool, session, memory, and multi-agent.
 
 An attack plugin declares its cases (attack + benign control prompts), the
 success token that confirms it, and its validator/trial policy. Classification
@@ -20,6 +20,9 @@ from ai_scan.attacks.base import (
 )
 from ai_scan.attacks.direct_injection import DirectInjectionPlugin
 from ai_scan.attacks.indirect_injection import IndirectInjectionPlugin
+from ai_scan.attacks.isolation import IsolationPlugin
+from ai_scan.attacks.memory import MemoryPlugin
+from ai_scan.attacks.multi_agent import MultiAgentPlugin
 from ai_scan.attacks.prompt_disclosure import PromptDisclosurePlugin
 from ai_scan.attacks.rag import RagIsolationPlugin
 from ai_scan.attacks.tool_abuse import ToolAbusePlugin
@@ -31,7 +34,10 @@ __all__ = [
     "AttackPlugin",
     "AttackResult",
     "DirectInjectionPlugin",
+    "IsolationPlugin",
     "IndirectInjectionPlugin",
+    "MemoryPlugin",
+    "MultiAgentPlugin",
     "PromptDisclosurePlugin",
     "RagIsolationPlugin",
     "ToolAbusePlugin",

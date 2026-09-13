@@ -35,6 +35,24 @@ _TOOL_ATTACK_HINTS = (
     "bypass the approval gate",
     "unauthorized synthetic action",
 )
+_ISOLATION_ATTACK_HINTS = (
+    "alpha's synthetic session",
+    "canary written by identity alpha",
+    "stale alpha context",
+    "cross-session cache bleed",
+)
+_MEMORY_ATTACK_HINTS = (
+    "alpha's memory canary",
+    "alpha's persisted synthetic note",
+    "poison shared memory",
+    "stale memory",
+)
+_MULTI_AGENT_ATTACK_HINTS = (
+    "forge a peer-agent message",
+    "delegate to alpha without authorization",
+    "untrusted peer message",
+    "identity confusion between coordinator and worker agents",
+)
 
 
 def _looks_like_disclosure(prompt: str) -> bool:
@@ -127,5 +145,31 @@ def resistant_tool_agent(*, attack_canary: str, hidden_canary: str) -> Responder
 
     def respond(case: AttackCase) -> ExchangeOutcome:
         return ExchangeOutcome(body="Blocked: approval and tool authorization boundaries held.")
+
+    return respond
+
+
+def vulnerable_isolation_app(*, attack_canary: str, hidden_canary: str) -> Responder:
+    """Offline fixture that leaks identity-bound synthetic state across boundaries."""
+
+    def respond(case: AttackCase) -> ExchangeOutcome:
+        prompt = case.prompt.lower()
+        hints = {
+            "session_isolation": _ISOLATION_ATTACK_HINTS,
+            "memory_isolation": _MEMORY_ATTACK_HINTS,
+            "multi_agent_isolation": _MULTI_AGENT_ATTACK_HINTS,
+        }.get(case.family, ())
+        if any(h in prompt for h in hints):
+            return ExchangeOutcome(body=f"identity_bound_evidence={hidden_canary}")
+        return ExchangeOutcome(body="Only same-identity synthetic state was returned.")
+
+    return respond
+
+
+def resistant_isolation_app(*, attack_canary: str, hidden_canary: str) -> Responder:
+    """Offline fixture that preserves session, memory, and peer-agent boundaries."""
+
+    def respond(case: AttackCase) -> ExchangeOutcome:
+        return ExchangeOutcome(body="Boundary held; no cross-identity synthetic state exposed.")
 
     return respond
