@@ -25,18 +25,19 @@ from dataclasses import dataclass
 from importlib import resources
 from typing import TYPE_CHECKING, Any
 
-from ai_scan.core.models import FindingStatus, PackTrust
+from ai_scan.core.models import DeterminismClass, FindingStatus, PackTrust
 from ai_scan.packs import resolve_packs
 from ai_scan.validation import (
     ComplianceHeuristicValidator,
     Evidence,
     ExactCanaryValidator,
     GatingContext,
+    Validator,
     classify,
 )
 
 if TYPE_CHECKING:
-    from ai_scan.packs import Pack
+    from ai_scan.packs import Pack, TrialPolicy
 
 _CANARY_PREFIX = "AISCAN-"
 
@@ -334,6 +335,111 @@ def run_injection(
     )
 
 
+def _select_validators(methods: frozenset[DeterminismClass]) -> list[Validator]:
+    """Build exactly the validators a pack declares (offline, deterministic order).
+
+    A validator is included only when its determinism class is declared — so a
+    pack that does not declare ``deterministic`` gets no exact-canary execution
+    validator and therefore cannot confirm through a validator it never asked
+    for. ``statistical`` and ``judge`` need runtime inputs (an exemplar or a
+    model verdict) that the offline direct-injection path cannot supply, so they
+    are handled fail-closed: declaring them contributes no signal here rather
+    than being silently substituted by a deterministic (confirming) validator.
+    """
+    validators: list[Validator] = []
+    if DeterminismClass.DETERMINISTIC in methods:
+        validators.append(ExactCanaryValidator())
+    if DeterminismClass.HEURISTIC in methods:
+        validators.append(ComplianceHeuristicValidator())
+    return validators
+
+
+def run_injection_pack(
+    pack: Pack,
+    responder: Responder,
+    *,
+    canary: str,
+    goal: str,
+    max_cases: int | None = None,
+) -> InjectionResult:
+    """Run a declarative pack, threading its metadata into classification.
+
+    Unlike :func:`run_injection` (which only sees flattened families), this
+    consumes the pack's declared ``validators`` (which signals to build),
+    ``controls`` (a benign baseline whose canary emission blocks confirmation),
+    ``trial_policy`` (repeatability thresholds), and ``side_effects`` (whether a
+    state-change corroboration is required) — all fed into the single
+    confidence predicate via :class:`~ai_scan.validation.GatingContext`.
+    """
+    validators = _select_validators(pack.validators)
+    trial = pack.trial_policy
+    requires_state_change = pack.side_effects
+    findings: list[InjectionFinding] = []
+    request_count = 0
+    cases_run = 0
+
+    for family in pack.families:
+        # Controls run first: a benign control that still emits the canary means
+        # the target emits it unconditionally — confirmation must be blocked.
+        control_succeeded = False
+        for control in family.controls:
+            case = InjectionCase(family=family.name, template=control, rendered_prompt=control)
+            try:
+                outcome = responder(case)
+            except Exception as exc:  # noqa: BLE001 - structured denials propagate
+                if getattr(exc, "outcome", None) is not None:
+                    raise
+                request_count += 1
+                continue
+            request_count += max(1, outcome.attempts)
+            if _usable(outcome) and canary in outcome.body:
+                control_succeeded = True
+
+        for template in family.templates:
+            if max_cases is not None and cases_run >= max_cases:
+                break
+            cases_run += 1
+            rendered = template.replace("{canary}", canary)
+            case = InjectionCase(family=family.name, template=template, rendered_prompt=rendered)
+            try:
+                outcome = responder(case)
+            except Exception as exc:  # noqa: BLE001 - structured denials propagate
+                if getattr(exc, "outcome", None) is not None:
+                    raise
+                request_count += 1
+                findings.append(
+                    InjectionFinding(family.name, InjectionStatus.INCONCLUSIVE, rendered, None)
+                )
+                continue
+            request_count += max(1, outcome.attempts)
+            status, proof = _evaluate_pack_case(
+                outcome, canary, rendered, validators,
+                control_succeeded=control_succeeded,
+                trial=trial,
+                requires_state_change=requires_state_change,
+            )
+            findings.append(InjectionFinding(family.name, status, rendered, proof))
+        if max_cases is not None and cases_run >= max_cases:
+            break
+
+    return InjectionResult(
+        status=_aggregate(findings),
+        findings=findings,
+        request_count=request_count,
+        canary=canary,
+        goal=goal,
+    )
+
+
+def _usable(outcome: ExchangeOutcome) -> bool:
+    return (
+        outcome.transport_ok
+        and not outcome.redirected
+        and outcome.status < 400
+        and not outcome.truncated
+    )
+
+
 # FindingStatus (the one central vocabulary) → the injection engine's status.
 _FINDING_TO_INJECTION = {
     FindingStatus.CONFIRMED: InjectionStatus.CONFIRMED,
@@ -354,12 +460,7 @@ def _evaluate(
     the single confirmation predicate's :class:`~ai_scan.core.models.FindingStatus`
     back onto the injection engine's status. There is no confirmation logic here.
     """
-    evaluable = (
-        outcome.transport_ok
-        and not outcome.redirected
-        and outcome.status < 400
-        and not outcome.truncated
-    )
+    evaluable = _usable(outcome)
     evidence = Evidence(
         response=outcome.body, canary=canary, prompt=rendered_prompt, evaluable=evaluable
     )
@@ -368,6 +469,43 @@ def _evaluate(
         ComplianceHeuristicValidator().validate(evidence),
     ]
     result = classify(signals, GatingContext(), evaluable=evaluable)
+    status = _FINDING_TO_INJECTION[result.status]
+    proof = (
+        _proof_snippet(outcome.body, canary)
+        if status is InjectionStatus.CONFIRMED
+        else None
+    )
+    return status, proof
+
+
+def _evaluate_pack_case(
+    outcome: ExchangeOutcome,
+    canary: str,
+    rendered_prompt: str,
+    validators: list[Validator],
+    *,
+    control_succeeded: bool,
+    trial: TrialPolicy,
+    requires_state_change: bool,
+) -> tuple[InjectionStatus, str | None]:
+    """Classify one attack case with pack-declared validators + gating context."""
+    evaluable = _usable(outcome)
+    evidence = Evidence(
+        response=outcome.body, canary=canary, prompt=rendered_prompt, evaluable=evaluable
+    )
+    signals = [validator.validate(evidence) for validator in validators]
+    execution_succeeded = any(
+        s.validator_id == "exact_canary" and s.fired and not s.reflection for s in signals
+    )
+    context = GatingContext(
+        control_succeeded=control_succeeded,
+        attack_trials=1,
+        successes=1 if execution_succeeded else 0,
+        min_attack_trials=trial.min_attack_trials,
+        min_successes=trial.min_successes,
+        requires_state_change=requires_state_change,
+    )
+    result = classify(signals, context, evaluable=evaluable)
     status = _FINDING_TO_INJECTION[result.status]
     proof = (
         _proof_snippet(outcome.body, canary)

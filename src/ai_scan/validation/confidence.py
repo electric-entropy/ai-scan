@@ -116,14 +116,20 @@ def classify(
             # A reflected canary is an echo of our own prompt, never execution.
             ceiling = FindingStatus.SUSPECTED
             reason = f"{signal.validator_id}: canary reflected, not executed"
-        elif signal.method is DeterminismClass.DETERMINISTIC:
+        elif (
+            signal.method is DeterminismClass.DETERMINISTIC
+            and signal.ceiling is FindingStatus.CONFIRMED
+        ):
+            # ONLY a deterministic signal that *declares* it can confirm — i.e.
+            # the exact canary-execution validator — enters the gated confirmation
+            # path. A deterministic signal with a lower declared ceiling (e.g. a
+            # control baseline) is held to that ceiling below.
             ceiling, reason = _confirmation_ceiling(context)
         else:
-            # Every non-deterministic signal is held to its declared ceiling,
-            # which is never ``confirmed``.
+            # Honor the signal's declared ceiling; nothing else may confirm.
             ceiling = signal.ceiling
             if status_rank(ceiling) >= status_rank(FindingStatus.CONFIRMED):
-                ceiling = FindingStatus.LIKELY  # defensive: never let a non-exec signal confirm
+                ceiling = FindingStatus.LIKELY  # defensive: only gated execution confirms
             reason = f"{signal.validator_id} ({signal.method.value}) capped at {ceiling.value}"
         if status_rank(ceiling) > status_rank(best):
             best = ceiling
