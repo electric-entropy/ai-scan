@@ -43,7 +43,12 @@ Homepage = "https://github.com/electric-entropy/ai-scan"
 where = ["src"]
 
 [tool.setuptools.package-data]
-ai_scan = ["payloads/*.json", "schemas/*.schema.json", "py.typed"]
+ai_scan = [
+    "payloads/*.json",
+    "schemas/*.schema.json",
+    "packs/builtin/*.json",
+    "py.typed",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

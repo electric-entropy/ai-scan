@@ -26,7 +26,12 @@ EXPECTED_SCHEMAS = [
     "finding-v2.schema.json",
     "receipt-v2.schema.json",
 ]
-EXPECTED_DATA = ["py.typed", "payloads/safe.json"]
+EXPECTED_DATA = [
+    "py.typed",
+    "payloads/safe.json",
+    "packs/builtin/direct-injection-reliable-v1.json",
+    "packs/builtin/direct-injection-kitchen-v1.json",
+]
 
 
 @pytest.fixture(scope="module")

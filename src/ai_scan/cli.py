@@ -12,6 +12,7 @@ Exit codes are stable and part of the tool's contract:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Callable, Sequence
 
@@ -38,6 +39,14 @@ from ai_scan.injection import (
     InjectionError as _InjectionError,
 )
 from ai_scan.models import Probe
+from ai_scan.packs import (
+    PackError,
+    PackResolutionError,
+    available_packs,
+    load_builtin_pack,
+    load_pack,
+    resolve_packs,
+)
 from ai_scan.reporting import Report, exit_code_for, write_report_atomic
 from ai_scan.targets import Target, TargetError, normalize_target
 from ai_scan.transport import (
@@ -128,6 +137,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_validate_config.add_argument("--file", required=True, help="Path to the JSON document.")
 
+    p_packs = subparsers.add_parser(
+        "packs",
+        help="List or validate declarative attack packs without network access.",
+    )
+    packs_subparsers = p_packs.add_subparsers(dest="packs_command", metavar="PACKS_COMMAND")
+    p_packs_list = packs_subparsers.add_parser("list", help="List resolved built-in packs.")
+    p_packs_list.add_argument(
+        "--mode", choices=["reliable", "kitchen-sink"], help="Only show packs resolved for mode."
+    )
+    p_packs_validate = packs_subparsers.add_parser(
+        "validate", help="Validate a built-in pack id or JSON pack file."
+    )
+    p_packs_validate.add_argument("pack", help="Built-in pack id or path to a JSON pack file.")
+
     return parser
 
 
@@ -170,6 +193,8 @@ def main(
         return _cmd_validate_receipt(args)
     if args.command == "validate-config":
         return _cmd_validate_config(args)
+    if args.command == "packs":
+        return _cmd_packs(args)
 
     # Active, network-touching commands. Fail closed before any transport.
     try:
@@ -429,6 +454,41 @@ def _cmd_validate_config(args: argparse.Namespace) -> int:
         return EXIT_RUNTIME_ERROR
     print(f"valid: {args.file} conforms to {args.kind} schema")
     return EXIT_OK
+
+
+def _cmd_packs(args: argparse.Namespace) -> int:
+    """Offline pack registry commands. Never constructs adapters or transport."""
+    if args.packs_command is None:
+        print("error: packs requires a subcommand")
+        return EXIT_RUNTIME_ERROR
+    if args.packs_command == "list":
+        try:
+            packs = (
+                resolve_packs(args.mode)
+                if args.mode
+                else [load_builtin_pack(p) for p in available_packs()]
+            )
+        except PackResolutionError as exc:
+            print(f"error: {exc}")
+            return EXIT_RUNTIME_ERROR
+        for pack in packs:
+            modes = ",".join(sorted(pack.modes))
+            print(f"{pack.id}\tversion={pack.version}\tmodes={modes}\tdigest={pack.digest}")
+        return EXIT_OK
+    if args.packs_command == "validate":
+        try:
+            if args.pack in available_packs():
+                pack = load_builtin_pack(args.pack)
+            else:
+                with open(args.pack, encoding="utf-8") as handle:
+                    pack = load_pack(json.load(handle), verify=True)
+        except (OSError, PackError, PackResolutionError, ValueError) as exc:
+            print(f"invalid: {scrub_text(str(exc))}")
+            return EXIT_RUNTIME_ERROR
+        print(f"valid: {pack.id} version={pack.version} digest={pack.digest}")
+        return EXIT_OK
+    print("error: unknown packs subcommand")
+    return EXIT_RUNTIME_ERROR
 
 
 def _cmd_validate_receipt(args: argparse.Namespace) -> int:

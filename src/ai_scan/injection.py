@@ -24,7 +24,13 @@ import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
 from importlib import resources
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from ai_scan.core.models import PackTrust
+from ai_scan.packs import resolve_packs
+
+if TYPE_CHECKING:
+    from ai_scan.packs import Pack
 
 _CANARY_PREFIX = "AISCAN-"
 _COMPLIANCE_HINTS = ("sure", "here you go", "okay", "of course", "as requested", "system")
@@ -188,6 +194,58 @@ def load_payloads(profile: str = "safe") -> PayloadPack:
         )
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise InjectionError(f"Malformed payload pack {profile!r}.") from exc
+
+
+def payloads_from_pack(pack: Pack) -> PayloadPack:
+    """Flatten a declarative :class:`~ai_scan.packs.Pack` into a runnable pack.
+
+    Only the attack families/templates are projected into the execution pack;
+    the declarative pack's controls, validators, and trial policy are carried on
+    the :class:`~ai_scan.packs.Pack` itself for the validation/confidence engine.
+    """
+    return PayloadPack(
+        version=f"{pack.id}-{pack.version}",
+        description=pack.description,
+        families=[
+            PayloadFamily(name=fam.name, description=fam.description, templates=list(fam.templates))
+            for fam in pack.families
+        ],
+    )
+
+
+def resolve_injection_payloads(
+    mode: str,
+    *,
+    trust: frozenset[PackTrust] = frozenset({PackTrust.BUILTIN}),
+    capabilities: frozenset[str] = frozenset(),
+) -> PayloadPack:
+    """Resolve packs for ``mode`` via the registry and merge them into one pack.
+
+    Deterministic and offline: packs come back in registry order and their
+    families are concatenated (first occurrence of a family name wins), so the
+    same inputs always produce the same runnable pack.
+    """
+    packs = resolve_packs(mode, trust=trust, capabilities=capabilities)
+    families: list[PayloadFamily] = []
+    seen: set[str] = set()
+    for pack in packs:
+        for fam in pack.families:
+            if fam.name in seen:
+                continue
+            seen.add(fam.name)
+            families.append(
+                PayloadFamily(
+                    name=fam.name,
+                    description=fam.description,
+                    templates=list(fam.templates),
+                )
+            )
+    version = "+".join(f"{pack.id}-{pack.version}" for pack in packs)
+    return PayloadPack(
+        version=version,
+        description=f"Resolved built-in packs for mode {mode!r}.",
+        families=families,
+    )
 
 
 def run_injection(
