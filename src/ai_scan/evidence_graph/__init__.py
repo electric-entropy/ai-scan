@@ -27,6 +27,7 @@ from ai_scan.evidence_graph.graph import (
     validate_graph,
 )
 from ai_scan.evidence_graph.replay import ReplayError, ReplayResult, replay_bundle
+from ai_scan.evidence_graph.store import ArtifactRef, ArtifactStore, StoreError
 
 __all__ = [
     "Bundle",
@@ -38,6 +39,9 @@ __all__ = [
     "Observation",
     "ReplayError",
     "ReplayResult",
+    "ArtifactRef",
+    "ArtifactStore",
+    "StoreError",
     "build_bundle",
     "build_graph",
     "dump_bundle",
