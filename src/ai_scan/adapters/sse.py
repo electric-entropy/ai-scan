@@ -109,7 +109,9 @@ class SseAdapter:
             raise ExtractionError("SSE stream was byte-truncated (inconclusive)")
         pieces: list[str] = []
         complete = False
-        for payload in _sse_payloads(response.body):
+        for event_type, payload in _sse_events(response.body):
+            if event_type == "error":
+                raise ExtractionError("SSE stream delivered an error event")
             if payload.strip() == _DONE:
                 complete = True
                 break

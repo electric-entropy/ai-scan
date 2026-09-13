@@ -183,3 +183,18 @@ def test_truncated_streaming_response_classifies_inconclusive() -> None:
         requires_state_change=False,
     )
     assert status is InjectionStatus.INCONCLUSIVE
+
+
+def test_sse_event_error_type_cannot_confirm() -> None:
+    # An `event: error` block must be rejected before its data is aggregated,
+    # even when the data looks like a normal canary-bearing delta and a later
+    # [DONE] arrives.
+    canary = "AISCAN-EVTERR0001"
+    adapter = SseAdapter(target=TARGET, model="gpt")
+    body = (
+        "event: error\n"
+        "data: " + json.dumps({"choices": [{"delta": {"content": canary}}]}) + "\n\n"
+        "data: [DONE]\n\n"
+    )
+    with pytest.raises(ExtractionError):
+        adapter.extract(_response(body))
