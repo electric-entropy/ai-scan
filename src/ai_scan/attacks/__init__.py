@@ -22,6 +22,7 @@ from ai_scan.attacks.direct_injection import DirectInjectionPlugin
 from ai_scan.attacks.indirect_injection import IndirectInjectionPlugin
 from ai_scan.attacks.prompt_disclosure import PromptDisclosurePlugin
 from ai_scan.attacks.rag import RagIsolationPlugin
+from ai_scan.attacks.tool_abuse import ToolAbusePlugin
 
 __all__ = [
     "AttackCase",
@@ -33,5 +34,6 @@ __all__ = [
     "IndirectInjectionPlugin",
     "PromptDisclosurePlugin",
     "RagIsolationPlugin",
+    "ToolAbusePlugin",
     "run_attack",
 ]

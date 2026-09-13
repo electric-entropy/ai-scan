@@ -20,6 +20,8 @@ from ai_scan.adapters.captured_http import CapturedHttpAdapter
 from ai_scan.adapters.gemini import GeminiAdapter
 from ai_scan.adapters.generic_http import CAPABILITIES as _GENERIC_CAPS
 from ai_scan.adapters.generic_http import GenericHttpAdapter
+from ai_scan.adapters.mcp import CAPABILITIES as _MCP_CAPS
+from ai_scan.adapters.mcp import McpAdapter
 from ai_scan.adapters.ollama import OllamaAdapter
 from ai_scan.adapters.openai_compatible import OpenAICompatibleAdapter
 from ai_scan.adapters.sse import SseAdapter
@@ -96,6 +98,7 @@ def default_registry() -> AdapterRegistry:
     registry.register(
         "websocket", WebSocketAdapter, _stream_caps("websocket", frozenset({"GET"}), "ws_delta")
     )
+    registry.register("mcp", McpAdapter, _MCP_CAPS)
     return registry
 
 

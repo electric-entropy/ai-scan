@@ -25,6 +25,8 @@ _BUILTIN: dict[str, str] = {
     "indirect-injection-kitchen": "indirect-injection-kitchen-v1.json",
     "rag-isolation-reliable": "rag-isolation-reliable-v1.json",
     "rag-isolation-kitchen": "rag-isolation-kitchen-v1.json",
+    "tool-abuse-reliable": "tool-abuse-reliable-v1.json",
+    "tool-abuse-kitchen": "tool-abuse-kitchen-v1.json",
 }
 
 _VALID_MODES = frozenset({"reliable", "kitchen-sink"})
