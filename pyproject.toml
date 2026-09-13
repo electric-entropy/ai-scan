@@ -7,7 +7,7 @@ name = "ai-scan"
 version = "0.1.0"
 description = "CLI-only authorized LLM assessment tool: behavioral fingerprinting and safe prompt-injection testing."
 readme = "README.md"
-license = "MIT"
+license = "LicenseRef-PolyForm-Shield-1.0.0"
 requires-python = ">=3.11"
 authors = [{ name = "Electric Entropy" }]
 keywords = ["security", "llm", "prompt-injection", "fingerprint", "assessment"]

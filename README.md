@@ -191,4 +191,4 @@ mypy
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[PolyForm Shield License 1.0.0](LICENSE) — use and modification are permitted, but providing a product that competes with AI-Scan or an Electric Entropy product using AI-Scan is prohibited.
