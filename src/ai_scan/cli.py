@@ -26,6 +26,7 @@ from ai_scan.authorization import (
 )
 from ai_scan.core.config import SUPPORTED_SCHEMAS, load_document
 from ai_scan.core.errors import ConfigError
+from ai_scan.evidence_graph import BundleError, ReplayError, load_bundle, replay_bundle
 from ai_scan.fingerprint import DEFAULT_PROBES, ProbeExchange, run_fingerprint
 from ai_scan.injection import (
     ExchangeOutcome,
@@ -163,6 +164,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_packs_validate.add_argument("pack", help="Built-in pack id or path to a JSON pack file.")
 
+    p_bundle = subparsers.add_parser(
+        "bundle",
+        help="Validate or replay an evidence bundle offline (no network access).",
+    )
+    bundle_subparsers = p_bundle.add_subparsers(dest="bundle_command", metavar="BUNDLE_COMMAND")
+    p_bundle_validate = bundle_subparsers.add_parser(
+        "validate", help="Verify a bundle's digests, plan, graph, and secret-free boundary."
+    )
+    p_bundle_validate.add_argument("--file", required=True, help="Path to the bundle JSON file.")
+    p_bundle_replay = bundle_subparsers.add_parser(
+        "replay", help="Verify a bundle and reproduce its classification offline."
+    )
+    p_bundle_replay.add_argument("--file", required=True, help="Path to the bundle JSON file.")
+
     return parser
 
 
@@ -209,6 +224,8 @@ def main(
         return _cmd_packs(args)
     if args.command == "plan":
         return _cmd_plan(args)
+    if args.command == "bundle":
+        return _cmd_bundle(args)
 
     # Active, network-touching commands. Fail closed before any transport.
     try:
@@ -272,6 +289,33 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         print(f"error: {scrub_text(str(exc))}")
         return EXIT_RUNTIME_ERROR
     return EXIT_OK
+
+
+def _cmd_bundle(args: argparse.Namespace) -> int:
+    """Validate or replay an evidence bundle offline; constructs no transport."""
+    if args.bundle_command is None:
+        print("error: bundle requires a subcommand")
+        return EXIT_RUNTIME_ERROR
+    try:
+        with open(args.file, encoding="utf-8") as handle:
+            text = handle.read()
+        if args.bundle_command == "validate":
+            bundle = load_bundle(text)
+            print(f"valid: bundle digest={bundle.digest} records={len(bundle.records)}")
+            return EXIT_OK
+        if args.bundle_command == "replay":
+            result = replay_bundle(text)
+            confirmed = sum(1 for s in result.findings.values() if s == "confirmed")
+            print(
+                f"replayed: verified={result.verified} findings={len(result.findings)} "
+                f"confirmed={confirmed} gaps={len(result.coverage_gaps)}"
+            )
+            return EXIT_OK
+    except (BundleError, ReplayError, OSError) as exc:
+        print(f"invalid: {scrub_text(str(exc))}")
+        return EXIT_RUNTIME_ERROR
+    print("error: unknown bundle subcommand")
+    return EXIT_RUNTIME_ERROR
 
 
 def _load_body_template(args: argparse.Namespace) -> str:

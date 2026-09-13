@@ -35,6 +35,10 @@ from ai_scan.packs import Pack, resolve_packs
 
 Responder = Callable[[InjectionCase], ExchangeOutcome]
 Cleanup = Callable[[Plan], None]
+# Observes each completed case's (case, response, finding) — used to capture
+# redacted evidence for bundle export. A plain callable: the runner imports no
+# evidence-graph module, so there is no cycle.
+Observer = Callable[[PlannedCase, ExchangeOutcome, InjectionFinding], None]
 
 
 class RunState(enum.StrEnum):
@@ -80,6 +84,7 @@ def run_plan(
     checkpoint_path: str | None = None,
     authorized_plan_digest: str | None = None,
     cleanup: Cleanup | None = None,
+    observer: Observer | None = None,
 ) -> RunResult:
     """Run ``plan`` as a resumable state machine through the M7 confidence path.
 
@@ -129,6 +134,14 @@ def run_plan(
             }
             completed.add(case.case_id)
             _persist(checkpoint_path, checkpoint)
+            if observer is not None:
+                observer(
+                    case,
+                    outcome,
+                    InjectionFinding(
+                        case.family, InjectionStatus.NOT_OBSERVED, case.template, None
+                    ),
+                )
 
         checkpoint.state = RunState.CONFIRMING.value
         _persist(checkpoint_path, checkpoint)
@@ -150,6 +163,8 @@ def run_plan(
             checkpoint.completed[case.case_id] = _record_from_finding(finding, kind="attack")
             completed.add(case.case_id)
             _persist(checkpoint_path, checkpoint)
+            if observer is not None:
+                observer(case, outcome, finding)
     except (KeyboardInterrupt, SystemExit):
         checkpoint.state = RunState.CLEANING_UP.value
         _persist(checkpoint_path, checkpoint)
