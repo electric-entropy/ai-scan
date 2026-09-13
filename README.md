@@ -26,13 +26,22 @@ ai-scan authorize        --target URL --client NAME --engagement ID --expires YY
 ai-scan fingerprint      --target URL [--method POST] [--request-template FILE] [--auth-receipt FILE]
 ai-scan inject           --target URL --goal GOAL [--request-template FILE] [--profile safe] [--auth-receipt FILE]
 ai-scan assess           --target URL [--request-template FILE] [--profile safe] [--auth-receipt FILE]
+ai-scan plan             --target URL [--mode reliable|kitchen-sink] [--out plan.json]
+ai-scan run              --target URL --plan plan.json --auth-receipt FILE --non-interactive [--out report.json]
+ai-scan packs            list|validate
+ai-scan adapters         list|show NAME
+ai-scan report           --file report.json --format json|jsonl|markdown|html|sarif
+ai-scan baseline         create|diff
+ai-scan bundle           validate|replay
 ai-scan validate-receipt --auth-receipt FILE --target URL
 ```
 
-Active commands (`fingerprint`, `inject`, `assess`) require authorization. Without
+Active commands (`fingerprint`, `inject`, `assess`, `run`) require authorization. Without
 `--auth-receipt` they prompt for a literal confirmation phrase for the normalized
 target origin. With `--non-interactive` and no valid receipt, they exit `2`
-**before any network traffic is sent**.
+**before any network traffic is sent**. `assess` uses the conservative
+`reliable` mode. A v1 receipt cannot authorize headless `kitchen-sink` execution;
+use an interactive authorization path until signed v2 receipts land.
 
 ### Exit codes
 

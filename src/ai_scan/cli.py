@@ -12,10 +12,12 @@ Exit codes are stable and part of the tool's contract:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Callable, Sequence
 
 from ai_scan.adapters import Adapter, AdapterError, GenericHttpAdapter
+from ai_scan.adapters.registry import AdapterRegistry, default_registry
 from ai_scan.authorization import (
     AuthorizationError,
     Receipt,
@@ -31,6 +33,7 @@ from ai_scan.fingerprint import DEFAULT_PROBES, ProbeExchange, run_fingerprint
 from ai_scan.injection import (
     ExchangeOutcome,
     InjectionCase,
+    InjectionResult,
     generate_canary,
     load_payloads,
     run_injection,
@@ -39,7 +42,7 @@ from ai_scan.injection import (
     InjectionError as _InjectionError,
 )
 from ai_scan.models import Probe
-from ai_scan.orchestration import PlanError, compile_plan, plan_to_json
+from ai_scan.orchestration import Plan, PlanError, compile_plan, load_plan, plan_to_json, run_plan
 from ai_scan.packs import (
     PackError,
     PackResolutionError,
@@ -49,6 +52,12 @@ from ai_scan.packs import (
     resolve_packs,
 )
 from ai_scan.reporting import Report, exit_code_for, write_report_atomic
+from ai_scan.reporting.diff import compare_baselines, create_baseline, render_baseline
+from ai_scan.reporting.html import render_html
+from ai_scan.reporting.json_report import render_json
+from ai_scan.reporting.jsonl import render_jsonl
+from ai_scan.reporting.markdown import render_markdown
+from ai_scan.reporting.sarif import render_sarif
 from ai_scan.targets import Target, TargetError, normalize_target
 from ai_scan.transport import (
     ACTIVE_METHODS,
@@ -134,6 +143,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_plan.add_argument("--seed", type=int, default=0, help="Deterministic scheduling seed.")
     p_plan.add_argument("--out", help="Plan output path; stdout when omitted.")
 
+    p_run = subparsers.add_parser(
+        "run",
+        help="Execute a compiled plan through the authorized runner.",
+    )
+    _add_active_args(p_run)
+    p_run.add_argument("--plan", required=True, help="Plan JSON produced by ai-scan plan.")
+    p_run.add_argument("--checkpoint", help="Checkpoint path for resumable execution.")
+
     p_validate = subparsers.add_parser(
         "validate-receipt",
         help="Validate an authorization receipt against a target.",
@@ -163,6 +180,50 @@ def build_parser() -> argparse.ArgumentParser:
         "validate", help="Validate a built-in pack id or JSON pack file."
     )
     p_packs_validate.add_argument("pack", help="Built-in pack id or path to a JSON pack file.")
+
+    p_adapters = subparsers.add_parser(
+        "adapters",
+        help="List or inspect target adapters offline (no network access).",
+    )
+    adapters_subparsers = p_adapters.add_subparsers(
+        dest="adapters_command", metavar="ADAPTERS_COMMAND"
+    )
+    adapters_subparsers.add_parser("list", help="List built-in adapters.")
+    p_adapters_show = adapters_subparsers.add_parser("show", help="Show adapter capabilities.")
+    p_adapters_show.add_argument("adapter", help="Adapter name.")
+
+    p_report = subparsers.add_parser(
+        "report",
+        help="Render an existing report in JSON, JSONL, Markdown, HTML, or SARIF.",
+    )
+    p_report.add_argument("--file", required=True, help="Legacy report JSON file.")
+    p_report.add_argument(
+        "--format",
+        choices=["json", "jsonl", "markdown", "html", "sarif"],
+        default="json",
+        help="Output format.",
+    )
+    p_report.add_argument("--mode", choices=["reliable", "kitchen-sink"], default="reliable")
+    p_report.add_argument("--include-leads", action="store_true", help="Include leads in SARIF.")
+    p_report.add_argument("--out", help="Output path; stdout when omitted.")
+
+    p_baseline = subparsers.add_parser(
+        "baseline",
+        help="Create or diff stable CI baselines offline.",
+    )
+    baseline_subparsers = p_baseline.add_subparsers(
+        dest="baseline_command", metavar="BASELINE_COMMAND"
+    )
+    p_baseline_create = baseline_subparsers.add_parser("create", help="Create a baseline.")
+    p_baseline_create.add_argument("--file", required=True, help="Legacy report JSON file.")
+    p_baseline_create.add_argument(
+        "--mode", choices=["reliable", "kitchen-sink"], default="reliable"
+    )
+    p_baseline_create.add_argument("--out", help="Output path; stdout when omitted.")
+    p_baseline_diff = baseline_subparsers.add_parser("diff", help="Diff two baselines.")
+    p_baseline_diff.add_argument("--old", required=True, help="Old baseline JSON file.")
+    p_baseline_diff.add_argument("--new", required=True, help="New baseline JSON file.")
+    p_baseline_diff.add_argument("--out", help="Output path; stdout when omitted.")
 
     p_bundle = subparsers.add_parser(
         "bundle",
@@ -222,8 +283,14 @@ def main(
         return _cmd_validate_config(args)
     if args.command == "packs":
         return _cmd_packs(args)
+    if args.command == "adapters":
+        return _cmd_adapters(args)
     if args.command == "plan":
         return _cmd_plan(args)
+    if args.command == "report":
+        return _cmd_report(args)
+    if args.command == "baseline":
+        return _cmd_baseline(args)
     if args.command == "bundle":
         return _cmd_bundle(args)
 
@@ -240,9 +307,23 @@ def main(
         return EXIT_AUTH_DENIED
 
     auth_meta = _authorization_metadata(args)
+    if _headless_v1_receipt_blocks_kitchen_sink(args, auth_meta):
+        print(
+            "authorization: Kitchen Sink requires an interactive "
+            "or v2+ receipt authorization"
+        )
+        return EXIT_AUTH_DENIED
     try:
         return _run_active(args, target, auth_meta)
-    except (AdapterError, TransportError, _InjectionError, OSError) as exc:
+    except (
+        AdapterError,
+        TransportError,
+        _InjectionError,
+        PlanError,
+        OSError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
         # Budget exhaustion and scope denial carry a structured outcome and the
         # accurate per-kind physical totals; surface them with the documented
         # exit codes instead of a generic runtime error.
@@ -273,6 +354,119 @@ def _authorization_metadata(args: argparse.Namespace) -> dict[str, object]:
     return {"mode": "interactive"}
 
 
+def _headless_v1_receipt_blocks_kitchen_sink(
+    args: argparse.Namespace, auth_meta: dict[str, object]
+) -> bool:
+    """A v1 receipt cannot authorize headless Kitchen Sink active execution."""
+    selected_mode = getattr(args, "mode", "reliable")
+    if args.command == "run":
+        try:
+            selected_mode = _load_plan_file(args.plan).mode
+        except (OSError, json.JSONDecodeError, PlanError):
+            return False
+    return (
+        selected_mode == "kitchen-sink"
+        and getattr(args, "non_interactive", False)
+        and auth_meta.get("mode") == "receipt"
+    )
+
+
+def _load_json_file(path: str) -> dict[str, object]:
+    with open(path, encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError("JSON document must be an object")
+    return data
+
+
+def _load_plan_file(path: str) -> Plan:
+    return load_plan(_load_json_file(path))
+
+
+def _write_or_print(rendered: str, path: str | None) -> None:
+    if path:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(rendered)
+            handle.write("\n")
+    else:
+        print(rendered)
+
+
+def _load_legacy_report_file(path: str) -> Report:
+    data = _load_json_file(path)
+    return _report_from_dict(data)
+
+
+def _report_from_dict(data: dict[str, object]) -> Report:
+    """Rehydrate the stable legacy report shape for offline renderers."""
+    target_origin = str(data["target_origin"])
+    authorization = data.get("authorization")
+    request_budget = data.get("request_budget")
+    evidence = data.get("evidence", [])
+    if not isinstance(authorization, dict):
+        raise ValueError("report authorization must be an object")
+    if not isinstance(request_budget, dict):
+        raise ValueError("report request_budget must be an object")
+    if not isinstance(evidence, list):
+        raise ValueError("report evidence must be a list")
+    return Report(
+        target_origin=target_origin,
+        authorization=authorization,
+        fingerprint=None,
+        injection=_injection_from_dict(data.get("injection")),
+        request_budget=request_budget,
+        evidence=[item for item in evidence if isinstance(item, dict)],
+        created_at=str(data.get("created_at", "1970-01-01T00:00:00+00:00")),
+    )
+
+
+def _injection_from_dict(data: object) -> InjectionResult | None:
+    from ai_scan.injection import InjectionFinding, InjectionStatus
+
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError("report injection must be an object")
+    findings: list[InjectionFinding] = []
+    raw_findings = data.get("findings", [])
+    if not isinstance(raw_findings, list):
+        raise ValueError("report injection.findings must be a list")
+    for item in raw_findings:
+        if not isinstance(item, dict):
+            raise ValueError("report finding must be an object")
+        findings.append(
+            InjectionFinding(
+                family=str(item.get("family", "unknown")),
+                status=InjectionStatus(str(item.get("status", "inconclusive"))),
+                prompt=str(item.get("prompt", "")),
+                proof=str(item["proof"]) if item.get("proof") is not None else None,
+            )
+        )
+    return InjectionResult(
+        status=InjectionStatus(str(data.get("status", "inconclusive"))),
+        findings=findings,
+        request_count=int(data.get("request_count", 0)),
+        canary="",
+        goal=str(data.get("goal", "")),
+    )
+
+
+def _render_report(
+    report: Report, format_name: str, *, mode: str, include_leads: bool
+) -> str:
+    if format_name == "json":
+        return render_json(report, mode=mode)
+    if format_name == "jsonl":
+        return render_jsonl(report, mode=mode)
+    if format_name == "markdown":
+        return render_markdown(report, mode=mode)
+    if format_name == "html":
+        return render_html(report, mode=mode)
+    if format_name == "sarif":
+        return render_sarif(report, mode=mode, include_leads=include_leads)
+    raise ValueError("unknown report format")
+
+
 def _cmd_plan(args: argparse.Namespace) -> int:
     """Compile an execution plan offline; no auth prompt or transport construction."""
     try:
@@ -289,6 +483,74 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         print(f"error: {scrub_text(str(exc))}")
         return EXIT_RUNTIME_ERROR
     return EXIT_OK
+
+
+def _cmd_adapters(args: argparse.Namespace, registry: AdapterRegistry | None = None) -> int:
+    """Offline adapter discovery. Never constructs adapters, transport, or requests."""
+    registry = registry or default_registry()
+    if args.adapters_command is None:
+        print("error: adapters requires a subcommand")
+        return EXIT_RUNTIME_ERROR
+    try:
+        if args.adapters_command == "list":
+            for name in registry.names():
+                print(name)
+            return EXIT_OK
+        if args.adapters_command == "show":
+            caps = registry.capabilities(args.adapter)
+            print(
+                json.dumps(
+                    {
+                        "name": caps.name,
+                        "methods": sorted(caps.methods),
+                        "prompt_encodings": sorted(caps.prompt_encodings),
+                        "extraction_modes": sorted(caps.extraction_modes),
+                        "supports_sessions": caps.supports_sessions,
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return EXIT_OK
+    except AdapterError as exc:
+        print(f"error: {scrub_text(str(exc))}")
+        return EXIT_RUNTIME_ERROR
+    print("error: unknown adapters subcommand")
+    return EXIT_RUNTIME_ERROR
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    try:
+        report = _load_legacy_report_file(args.file)
+        rendered = _render_report(
+            report, args.format, mode=args.mode, include_leads=args.include_leads
+        )
+        _write_or_print(rendered, args.out)
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        print(f"error: {scrub_text(str(exc))}")
+        return EXIT_RUNTIME_ERROR
+    return EXIT_OK
+
+
+def _cmd_baseline(args: argparse.Namespace) -> int:
+    if args.baseline_command is None:
+        print("error: baseline requires a subcommand")
+        return EXIT_RUNTIME_ERROR
+    try:
+        if args.baseline_command == "create":
+            report = _load_legacy_report_file(args.file)
+            _write_or_print(render_baseline(create_baseline(report, mode=args.mode)), args.out)
+            return EXIT_OK
+        if args.baseline_command == "diff":
+            old = _load_json_file(args.old)
+            new = _load_json_file(args.new)
+            _write_or_print(render_baseline(compare_baselines(old, new)), args.out)
+            return EXIT_OK
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        print(f"error: {scrub_text(str(exc))}")
+        return EXIT_RUNTIME_ERROR
+    print("error: unknown baseline subcommand")
+    return EXIT_RUNTIME_ERROR
 
 
 def _cmd_bundle(args: argparse.Namespace) -> int:
@@ -345,11 +607,87 @@ def _build_generic_adapter(target: Target, *, method: str, body_template: str) -
     return GenericHttpAdapter(target=target, method=method, body_template=body_template)
 
 
+def _run_plan_active(
+    args: argparse.Namespace,
+    target: Target,
+    auth_meta: dict[str, object],
+) -> int:
+    """Execute a compiled plan through the runner after full offline validation."""
+    plan = _load_plan_file(args.plan)
+    if plan.origin != target.origin:
+        raise PlanError("plan origin does not match requested target")
+    body_template = _load_body_template(args)
+    adapter = _build_generic_adapter(target, method="POST", body_template=body_template)
+    controller = RequestController(
+        max_requests=plan.limits.max_physical_requests,
+        min_interval=1.0 / plan.limits.requests_per_second,
+    )
+    transport = _make_transport(controller)
+    evidence: list[dict[str, object]] = []
+    run_secrets: set[str] = set()
+    canary = generate_canary()
+
+    def responder(case: InjectionCase) -> ExchangeOutcome:
+        try:
+            resp = transport.send_prepared(target, adapter.build_request(case.rendered_prompt))
+        except TransportError as exc:
+            if getattr(exc, "outcome", None) is not None:
+                raise
+            return ExchangeOutcome(body="", transport_ok=False)
+        run_secrets.update(resp.known_secrets)
+        evidence.append(resp.evidence())
+        return ExchangeOutcome(
+            body=adapter.extract(resp),
+            status=resp.status,
+            redirected=resp.redirected,
+            truncated=resp.truncated,
+            transport_ok=True,
+            attempts=resp.attempts,
+        )
+
+    result = run_plan(
+        plan,
+        responder,
+        canary=canary,
+        goal="planned run",
+        checkpoint_path=getattr(args, "checkpoint", None),
+    )
+    budget = {
+        "max_requests": controller.max_requests,
+        "used": controller.count,
+        "runner_count": result.request_count,
+        "plan_digest": plan.digest,
+    }
+    auth = dict(auth_meta)
+    auth["run_mode"] = plan.mode
+    report = Report.build(
+        target=target,
+        authorization=auth,
+        fingerprint=None,
+        injection=InjectionResult(
+            result.status, list(result.findings), result.request_count, canary
+        ),
+        request_budget=budget,
+        evidence=evidence,
+    )
+    secrets_seen = frozenset(run_secrets)
+    if getattr(args, "out", None):
+        write_report_atomic(report, args.out, known_secrets=secrets_seen)
+        print(f"report written to {args.out}")
+    print(scrub_text(report.console_summary(), secrets_seen))
+    if result.coverage_gaps:
+        print(f"coverage gaps: {len(result.coverage_gaps)}")
+    return exit_code_for(report)
+
+
 def _run_active(
     args: argparse.Namespace,
     target: Target,
     auth_meta: dict[str, object],
 ) -> int:
+    if args.command == "run":
+        return _run_plan_active(args, target, auth_meta)
+
     raw_method = getattr(args, "method", "POST")
     method = raw_method.upper()
     if method not in ACTIVE_METHODS:
@@ -365,6 +703,8 @@ def _run_active(
     # sending a request (safety invariant 1). The payload pack (`--profile`) is
     # resolved up front, so an invalid profile fails closed with zero requests
     # for both `inject` and `assess` (raised InjectionError → exit 1 in main()).
+    if args.command == "assess":
+        compile_plan(target, getattr(args, "mode", "reliable"), adapter="generic_http")
     needs_injection = args.command in ("inject", "assess")
     pack = load_payloads(getattr(args, "profile", "safe")) if needs_injection else None
 
