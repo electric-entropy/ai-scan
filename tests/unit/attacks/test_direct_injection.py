@@ -154,3 +154,80 @@ def test_non_attackcase_item_fails_before_responder() -> None:
 
     with pytest.raises(AttackError):
         run_attack(BadItems(), _never, _ctx())
+
+
+def test_hostile_non_string_field_fails_without_rendering() -> None:
+    class Hostile:
+        def __str__(self) -> str:
+            raise RuntimeError(f"leak {_SECRET}")
+
+    class BadFieldPlugin:
+        id = "bf"
+        validators = frozenset(DirectInjectionPlugin().validators)
+        trial_policy = TrialPolicy(1, 1, 1)
+        side_effects = False
+
+        def success_token(self, ctx: AttackContext) -> str:
+            return ctx.attack_canary
+
+        def build_cases(self, ctx: AttackContext):  # type: ignore[no-untyped-def]
+            return [AttackCase(family=Hostile(), kind="attack", prompt="p")]  # type: ignore[arg-type]
+
+    with pytest.raises(AttackError) as exc:
+        run_attack(BadFieldPlugin(), _never, _ctx())
+    assert _SECRET not in str(exc.value)
+    assert "must be a non-empty string" in str(exc.value)
+
+
+def test_hostile_exception_str_is_contained() -> None:
+    class HostileExc(Exception):
+        def __str__(self) -> str:
+            raise RuntimeError(f"leak {_SECRET}")
+
+    class HostileExcPlugin:
+        id = "he"
+        validators = frozenset(DirectInjectionPlugin().validators)
+        trial_policy = TrialPolicy(1, 1, 1)
+        side_effects = False
+
+        def success_token(self, ctx: AttackContext) -> str:
+            raise HostileExc()
+
+        def build_cases(self, ctx: AttackContext) -> list[AttackCase]:
+            return []
+
+    with pytest.raises(AttackError) as exc:
+        run_attack(HostileExcPlugin(), _never, _ctx())
+    assert _SECRET not in str(exc.value)
+
+
+@pytest.mark.parametrize("hook", ["success_token", "build_cases"])
+def test_plugin_raised_attack_error_is_scrubbed(hook: str) -> None:
+    class PluginRaisesAttackError:
+        id = "pae"
+        validators = frozenset(DirectInjectionPlugin().validators)
+        trial_policy = TrialPolicy(1, 1, 1)
+        side_effects = False
+
+        def success_token(self, ctx: AttackContext) -> str:
+            if hook == "success_token":
+                raise AttackError(f"leak {_SECRET}")
+            return ctx.attack_canary
+
+        def build_cases(self, ctx: AttackContext) -> list[AttackCase]:
+            if hook == "build_cases":
+                raise AttackError(f"leak {_SECRET}")
+            return []
+
+    with pytest.raises(AttackError) as exc:
+        run_attack(PluginRaisesAttackError(), _never, _ctx())
+    assert _SECRET not in str(exc.value)
+    assert "REDACTED" in str(exc.value)
+
+
+def test_trusted_internal_attack_errors_still_behave() -> None:
+    # A malformed mode (trusted internal check) still raises a plain AttackError
+    # that is NOT wrapped as a plugin-hook failure.
+    with pytest.raises(AttackError) as exc:
+        run_attack(DirectInjectionPlugin(), _never, AttackContext(AC, HC, "turbo"))
+    assert "attack plugin" not in str(exc.value)  # not a re-wrapped plugin-hook error

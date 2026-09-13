@@ -120,14 +120,33 @@ def _validate_plugin(plugin: AttackPlugin) -> None:
         raise AttackError("attack plugin side_effects must be a boolean")
 
 
+def _safe_render(exc: BaseException) -> str:
+    """Render an exception's message, scrubbed — and never re-raise.
+
+    A plugin's exception ``__str__`` is itself plugin-controlled and may raise
+    (leaking raw text), so rendering is guarded: if it raises, we return a
+    generic redaction rather than letting that secondary exception escape.
+    """
+    try:
+        rendered = str(exc)
+    except Exception:  # noqa: BLE001 - hostile __str__; do not render plugin text
+        return "REDACTED"
+    return scrub_text(rendered)
+
+
 def _guarded(thunk: Callable[[], object], where: str) -> object:
-    """Run a plugin-controlled callable, converting any error to a scrubbed AttackError."""
+    """Run a plugin-controlled callable, converting any error to a scrubbed AttackError.
+
+    Every exception from a plugin hook is treated as plugin-controlled output —
+    including :class:`AttackError` itself (plugins can import and raise it) — so
+    its message is always re-rendered through :func:`_safe_render` and can never
+    escape raw. The harness's own trusted ``AttackError``\\s are raised outside
+    this guard.
+    """
     try:
         return thunk()
-    except AttackError:
-        raise
-    except Exception as exc:  # noqa: BLE001 - scrub untrusted plugin error text
-        raise AttackError(f"attack plugin {where} failed: {scrub_text(str(exc))}") from exc
+    except Exception as exc:  # noqa: BLE001 - all plugin-hook output is untrusted
+        raise AttackError(f"attack plugin {where} failed: {_safe_render(exc)}") from exc
 
 
 def _validate_cases(cases: object) -> list[AttackCase]:
@@ -144,11 +163,10 @@ def _validate_cases(cases: object) -> list[AttackCase]:
             raise AttackError("attack plugin produced a non-AttackCase item")
         for field_name in ("family", "kind", "prompt"):
             value = getattr(item, field_name)
+            # Never render a non-string value: its __str__ is plugin-controlled
+            # and could raise (leaking raw text). The field name is trusted.
             if not isinstance(value, str) or not value:
-                raise AttackError(
-                    f"attack case {field_name} must be a non-empty string, got "
-                    f"{scrub_text(str(value))!r}"
-                )
+                raise AttackError(f"attack case {field_name} must be a non-empty string")
         if item.kind not in _VALID_KINDS:
             raise AttackError(
                 f"attack plugin produced an invalid case kind {scrub_text(item.kind)!r}"
