@@ -38,6 +38,7 @@ from ai_scan.injection import (
     InjectionError as _InjectionError,
 )
 from ai_scan.models import Probe
+from ai_scan.orchestration import PlanError, compile_plan, plan_to_json
 from ai_scan.packs import (
     PackError,
     PackResolutionError,
@@ -120,6 +121,18 @@ def build_parser() -> argparse.ArgumentParser:
     _add_active_args(p_assess)
     p_assess.add_argument("--profile", default="safe", help="Payload profile.")
 
+    p_plan = subparsers.add_parser(
+        "plan",
+        help="Compile an offline, digested execution plan without authorization or network.",
+    )
+    p_plan.add_argument("--target", required=True, help="Target URL.")
+    p_plan.add_argument(
+        "--mode", choices=["reliable", "kitchen-sink"], default="reliable", help="Run mode."
+    )
+    p_plan.add_argument("--adapter", default="generic_http", help="Adapter identifier.")
+    p_plan.add_argument("--seed", type=int, default=0, help="Deterministic scheduling seed.")
+    p_plan.add_argument("--out", help="Plan output path; stdout when omitted.")
+
     p_validate = subparsers.add_parser(
         "validate-receipt",
         help="Validate an authorization receipt against a target.",
@@ -194,6 +207,8 @@ def main(
         return _cmd_validate_config(args)
     if args.command == "packs":
         return _cmd_packs(args)
+    if args.command == "plan":
+        return _cmd_plan(args)
 
     # Active, network-touching commands. Fail closed before any transport.
     try:
@@ -239,6 +254,24 @@ def _authorization_metadata(args: argparse.Namespace) -> dict[str, object]:
             "expires": receipt.expires,
         }
     return {"mode": "interactive"}
+
+
+def _cmd_plan(args: argparse.Namespace) -> int:
+    """Compile an execution plan offline; no auth prompt or transport construction."""
+    try:
+        target = normalize_target(args.target)
+        plan = compile_plan(target, args.mode, adapter=args.adapter, seed=args.seed)
+        rendered = plan_to_json(plan)
+        if args.out:
+            with open(args.out, "w", encoding="utf-8") as handle:
+                handle.write(rendered)
+                handle.write("\n")
+        else:
+            print(rendered)
+    except (TargetError, PlanError, OSError) as exc:
+        print(f"error: {scrub_text(str(exc))}")
+        return EXIT_RUNTIME_ERROR
+    return EXIT_OK
 
 
 def _load_body_template(args: argparse.Namespace) -> str:
