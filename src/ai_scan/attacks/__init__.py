@@ -27,6 +27,9 @@ from ai_scan.attacks.multi_agent import MultiAgentPlugin
 from ai_scan.attacks.output_handling import OutputHandlingPlugin
 from ai_scan.attacks.prompt_disclosure import PromptDisclosurePlugin
 from ai_scan.attacks.rag import RagIsolationPlugin
+from ai_scan.attacks.resource_amplification import ResourceAmplificationPlugin
+from ai_scan.attacks.router_consistency import RouterConsistencyPlugin
+from ai_scan.attacks.supply_chain import SupplyChainPlugin
 from ai_scan.attacks.tool_abuse import ToolAbusePlugin
 
 __all__ = [
@@ -44,6 +47,9 @@ __all__ = [
     "OutputHandlingPlugin",
     "PromptDisclosurePlugin",
     "RagIsolationPlugin",
+    "ResourceAmplificationPlugin",
+    "RouterConsistencyPlugin",
+    "SupplyChainPlugin",
     "ToolAbusePlugin",
     "run_attack",
 ]

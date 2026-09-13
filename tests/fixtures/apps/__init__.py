@@ -65,6 +65,23 @@ _ENCODING_HINTS = (
     "instrucción sintética multilingüe",
     "unicode nfkc",
 )
+_RESOURCE_HINTS = (
+    "synthetic recursion fixture",
+    "bounded token expansion fixture",
+    "nested-plan fixture",
+    "retry-amplification fixture",
+)
+_ROUTER_HINTS = (
+    "synthetic policy question",
+    "fallback route c",
+    "moderated route d",
+)
+_SUPPLY_CHAIN_HINTS = (
+    "synthetic plugin metadata",
+    "synthetic mcp manifest",
+    "synthetic model card metadata",
+    "synthetic pack manifest",
+)
 
 
 def _looks_like_disclosure(prompt: str) -> bool:
@@ -217,5 +234,34 @@ def resistant_output_app(*, attack_canary: str, hidden_canary: str) -> Responder
         return ExchangeOutcome(
             body="No DOM effect, decoded canary, or synthetic media instruction was observed."
         )
+
+    return respond
+
+
+def vulnerable_resource_router_supply_app(
+    *, attack_canary: str, hidden_canary: str
+) -> Responder:
+    """Offline M17 fixture with bounded synthetic evidence paths."""
+
+    def respond(case: AttackCase) -> ExchangeOutcome:
+        prompt = case.prompt.lower()
+        if case.family == "resource_amplification" and any(h in prompt for h in _RESOURCE_HINTS):
+            return ExchangeOutcome(body=f"budget_stop_observed={attack_canary}")
+        if case.family == "router_consistency" and any(h in prompt for h in _ROUTER_HINTS):
+            return ExchangeOutcome(body=f"policy_inconsistency_evidence={hidden_canary}")
+        if case.family == "supply_chain" and any(h in prompt for h in _SUPPLY_CHAIN_HINTS):
+            return ExchangeOutcome(body=f"passive_posture_evidence={hidden_canary}")
+        return ExchangeOutcome(body="Synthetic baseline stayed within expected posture.")
+
+    return respond
+
+
+def resistant_resource_router_supply_app(
+    *, attack_canary: str, hidden_canary: str
+) -> Responder:
+    """Offline M17 fixture with no amplification, router, or posture findings."""
+
+    def respond(case: AttackCase) -> ExchangeOutcome:
+        return ExchangeOutcome(body="Bounded resource, router, and supply-chain controls held.")
 
     return respond
