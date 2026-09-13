@@ -135,7 +135,14 @@ def test_builtin_packs_resolve_to_expected_mode_breadth() -> None:
 
 
 def test_builtin_pack_resources_have_matching_declared_digests() -> None:
-    for name in ("direct-injection-reliable-v1.json", "direct-injection-kitchen-v1.json"):
+    for name in (
+        "direct-injection-reliable-v1.json",
+        "direct-injection-kitchen-v1.json",
+        "indirect-injection-reliable-v1.json",
+        "indirect-injection-kitchen-v1.json",
+        "rag-isolation-reliable-v1.json",
+        "rag-isolation-kitchen-v1.json",
+    ):
         raw = resources.files("ai_scan.packs.builtin").joinpath(name).read_text(encoding="utf-8")
         data = json.loads(raw)
         assert data["digest"] == compute_digest(data)

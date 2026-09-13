@@ -22,6 +22,13 @@ from ai_scan.injection import ExchangeOutcome
 Responder = Callable[[AttackCase], ExchangeOutcome]
 
 _DISCLOSURE_HINTS = ("instruction", "system", "config", "initial", "setup")
+_INDIRECT_HINTS = ("aisc-synthetic-indirect", "retrieved document", "knowledge-base")
+_RAG_CROSS_HINTS = (
+    "another test identity",
+    "other user",
+    "across all test identities",
+    "alpha's synthetic tenant",
+)
 
 
 def _looks_like_disclosure(prompt: str) -> bool:
@@ -59,5 +66,28 @@ def reflective_app(*, attack_canary: str, hidden_canary: str) -> Responder:
     def respond(case: AttackCase) -> ExchangeOutcome:
         # Pure echo: reflects whatever was sent (never executes, never discloses).
         return ExchangeOutcome(body=f"You said: {case.prompt}")
+
+    return respond
+
+
+def vulnerable_rag_app(*, attack_canary: str, hidden_canary: str) -> Responder:
+    """Offline RAG fixture with vulnerable synthetic ingestion/isolation paths."""
+
+    def respond(case: AttackCase) -> ExchangeOutcome:
+        prompt = case.prompt.lower()
+        if case.family == "indirect_injection" and any(h in prompt for h in _INDIRECT_HINTS):
+            return ExchangeOutcome(body=f"Document instruction executed: {attack_canary}")
+        if case.family == "rag_isolation" and any(h in prompt for h in _RAG_CROSS_HINTS):
+            return ExchangeOutcome(body=f"Cross-tenant note content: {hidden_canary}")
+        return ExchangeOutcome(body="Retrieved only authorized benign synthetic content.")
+
+    return respond
+
+
+def resistant_rag_app(*, attack_canary: str, hidden_canary: str) -> Responder:
+    """Offline RAG fixture that ignores document instructions and tenant bypasses."""
+
+    def respond(case: AttackCase) -> ExchangeOutcome:
+        return ExchangeOutcome(body="Request completed within authorized retrieval boundaries.")
 
     return respond

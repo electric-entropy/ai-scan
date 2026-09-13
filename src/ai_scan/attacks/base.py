@@ -53,6 +53,8 @@ class AttackContext:
     attack_canary: str
     hidden_canary: str
     mode: str = "reliable"
+    capabilities: frozenset[str] = frozenset()
+    identities: tuple[str, ...] = ()
 
 
 @runtime_checkable

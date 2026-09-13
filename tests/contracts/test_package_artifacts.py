@@ -31,6 +31,10 @@ EXPECTED_DATA = [
     "payloads/safe.json",
     "packs/builtin/direct-injection-reliable-v1.json",
     "packs/builtin/direct-injection-kitchen-v1.json",
+    "packs/builtin/indirect-injection-reliable-v1.json",
+    "packs/builtin/indirect-injection-kitchen-v1.json",
+    "packs/builtin/rag-isolation-reliable-v1.json",
+    "packs/builtin/rag-isolation-kitchen-v1.json",
 ]
 
 

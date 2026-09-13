@@ -21,6 +21,10 @@ from ai_scan.transport import scrub_text
 _BUILTIN: dict[str, str] = {
     "direct-injection-reliable": "direct-injection-reliable-v1.json",
     "direct-injection-kitchen": "direct-injection-kitchen-v1.json",
+    "indirect-injection-reliable": "indirect-injection-reliable-v1.json",
+    "indirect-injection-kitchen": "indirect-injection-kitchen-v1.json",
+    "rag-isolation-reliable": "rag-isolation-reliable-v1.json",
+    "rag-isolation-kitchen": "rag-isolation-kitchen-v1.json",
 }
 
 _VALID_MODES = frozenset({"reliable", "kitchen-sink"})

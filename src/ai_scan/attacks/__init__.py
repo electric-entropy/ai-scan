@@ -1,4 +1,4 @@
-"""Attack plugins: direct injection and controlled prompt disclosure.
+"""Attack plugins: direct injection, disclosure, indirect injection, and RAG.
 
 An attack plugin declares its cases (attack + benign control prompts), the
 success token that confirms it, and its validator/trial policy. Classification
@@ -19,7 +19,9 @@ from ai_scan.attacks.base import (
     run_attack,
 )
 from ai_scan.attacks.direct_injection import DirectInjectionPlugin
+from ai_scan.attacks.indirect_injection import IndirectInjectionPlugin
 from ai_scan.attacks.prompt_disclosure import PromptDisclosurePlugin
+from ai_scan.attacks.rag import RagIsolationPlugin
 
 __all__ = [
     "AttackCase",
@@ -28,6 +30,8 @@ __all__ = [
     "AttackPlugin",
     "AttackResult",
     "DirectInjectionPlugin",
+    "IndirectInjectionPlugin",
     "PromptDisclosurePlugin",
+    "RagIsolationPlugin",
     "run_attack",
 ]
