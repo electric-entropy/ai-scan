@@ -13,14 +13,40 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from ai_scan.adapters.anthropic import AnthropicAdapter
 from ai_scan.adapters.base import Adapter, AdapterCapabilities, AdapterConfigError
 from ai_scan.adapters.captured_http import CAPABILITIES as _CAPTURED_CAPS
 from ai_scan.adapters.captured_http import CapturedHttpAdapter
+from ai_scan.adapters.gemini import GeminiAdapter
 from ai_scan.adapters.generic_http import CAPABILITIES as _GENERIC_CAPS
 from ai_scan.adapters.generic_http import GenericHttpAdapter
+from ai_scan.adapters.ollama import OllamaAdapter
+from ai_scan.adapters.openai_compatible import OpenAICompatibleAdapter
+from ai_scan.adapters.sse import SseAdapter
+from ai_scan.adapters.websocket import WebSocketAdapter
 from ai_scan.transport import scrub_text
 
 Factory = Callable[..., Adapter]
+
+
+def _json_caps(name: str) -> AdapterCapabilities:
+    return AdapterCapabilities(
+        name=name,
+        methods=frozenset({"POST"}),
+        prompt_encodings=frozenset({"json"}),
+        extraction_modes=frozenset({"json_pointer", "text"}),
+        supports_sessions=False,
+    )
+
+
+def _stream_caps(name: str, methods: frozenset[str], mode: str) -> AdapterCapabilities:
+    return AdapterCapabilities(
+        name=name,
+        methods=methods,
+        prompt_encodings=frozenset({"json"}),
+        extraction_modes=frozenset({mode}),
+        supports_sessions=True,
+    )
 
 
 @dataclass
@@ -62,6 +88,14 @@ def default_registry() -> AdapterRegistry:
     registry = AdapterRegistry()
     registry.register("generic_http", GenericHttpAdapter, _GENERIC_CAPS)
     registry.register("captured_http", CapturedHttpAdapter, _CAPTURED_CAPS)
+    registry.register("openai_compatible", OpenAICompatibleAdapter, _json_caps("openai_compatible"))
+    registry.register("anthropic", AnthropicAdapter, _json_caps("anthropic"))
+    registry.register("gemini", GeminiAdapter, _json_caps("gemini"))
+    registry.register("ollama", OllamaAdapter, _json_caps("ollama"))
+    registry.register("sse", SseAdapter, _stream_caps("sse", frozenset({"POST"}), "sse_delta"))
+    registry.register(
+        "websocket", WebSocketAdapter, _stream_caps("websocket", frozenset({"GET"}), "ws_delta")
+    )
     return registry
 
 

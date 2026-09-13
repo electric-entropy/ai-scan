@@ -13,7 +13,19 @@ from ai_scan.targets import normalize_target
 
 def test_default_registry_lists_builtin_adapters_without_config() -> None:
     registry = default_registry()
-    assert registry.names() == ["captured_http", "generic_http"]
+    names = registry.names()
+    # Built-in adapters are discoverable offline; the set now includes the
+    # provider + streaming adapters added in M11.
+    assert {
+        "generic_http",
+        "captured_http",
+        "openai_compatible",
+        "anthropic",
+        "gemini",
+        "ollama",
+        "sse",
+        "websocket",
+    } <= set(names)
     assert registry.capabilities("generic_http").name == "generic_http"
     assert registry.capabilities("captured_http").name == "captured_http"
 

@@ -21,8 +21,9 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ClassVar, Protocol, runtime_checkable
 
+from ai_scan.targets import Target
 from ai_scan.transport import HttpResponse, scrub_text
 
 MARKER = "*"
@@ -142,6 +143,25 @@ class Adapter(Protocol):
     def session(self) -> Iterator[Adapter]: ...
 
 
+def _validate_max_chars(value: object) -> int:
+    """Validate a positive-integer character bound (shared by the adapters)."""
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise AdapterConfigError("max_chars must be positive")
+    return int(value)
+
+
+def validate_extra_headers(headers: Mapping[str, str]) -> Mapping[str, str]:
+    """Validate and freeze adapter-controlled headers at construction time."""
+    if not isinstance(headers, Mapping):
+        raise AdapterConfigError("extra_headers must be a mapping")
+    frozen_headers: dict[str, str] = {}
+    for key, value in headers.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise AdapterConfigError("extra header names and values must be strings")
+        frozen_headers[key] = value
+    return MappingProxyType(frozen_headers)
+
+
 def extract_text(response: HttpResponse, spec: ExtractionSpec) -> str:
     """Extract and bound the text-of-interest from ``response`` per ``spec``.
 
@@ -198,3 +218,66 @@ def _extract_json_pointer(body: str, pointer: str) -> str:
     if isinstance(node, str):
         return node
     raise ExtractionError("JSON pointer target is not a scalar field")
+
+
+@dataclass
+class HttpJsonAdapter:
+    """Shared base for JSON provider adapters (OpenAI/Anthropic/Gemini/Ollama).
+
+    Subclasses set the class attributes ``name``, ``extraction_path`` (a JSON
+    pointer into the provider's response), and implement :meth:`_payload`
+    (the request JSON for a prompt). The base handles config validation (no
+    transport), request encoding, extraction via the central
+    :func:`extract_text`, capabilities, and a no-op session. It never performs
+    I/O — it only *shapes* a :class:`PreparedRequest`.
+    """
+
+    name: ClassVar[str] = "http_json"
+    extraction_path: ClassVar[str] = "/"
+
+    target: Target
+    model: str = ""
+    extra_headers: Mapping[str, str] = field(default_factory=dict)
+    max_chars: int = 1_000_000
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.model, str) or not self.model.strip():
+            raise AdapterConfigError(f"{self.name} adapter requires a non-empty model")
+        _validate_max_chars(self.max_chars)
+        self.extra_headers = validate_extra_headers(self.extra_headers)
+
+    def _payload(self, prompt: str) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        headers.update(self.extra_headers)
+        return headers
+
+    def build_request(self, prompt: str) -> PreparedRequest:
+        body = json.dumps(self._payload(prompt)).encode("utf-8")
+        return PreparedRequest(
+            method="POST", url=self.target.url, headers=self._headers(), body=body
+        )
+
+    def extract(self, response: HttpResponse) -> str:
+        spec = ExtractionSpec(
+            mode="json_pointer", path=self.extraction_path, max_chars=self.max_chars
+        )
+        return extract_text(response, spec)
+
+    def capabilities(self) -> AdapterCapabilities:
+        return AdapterCapabilities(
+            name=self.name,
+            methods=frozenset({"POST"}),
+            prompt_encodings=frozenset({"json"}),
+            extraction_modes=frozenset({"json_pointer", "text"}),
+            supports_sessions=False,
+        )
+
+    @contextmanager
+    def session(self) -> Iterator[HttpJsonAdapter]:
+        try:
+            yield self
+        finally:
+            pass

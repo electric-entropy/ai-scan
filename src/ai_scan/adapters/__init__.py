@@ -9,6 +9,7 @@ configuration fails closed with zero requests.
 
 from __future__ import annotations
 
+from ai_scan.adapters.anthropic import AnthropicAdapter
 from ai_scan.adapters.base import (
     Adapter,
     AdapterCapabilities,
@@ -16,16 +17,22 @@ from ai_scan.adapters.base import (
     AdapterError,
     ExtractionError,
     ExtractionSpec,
+    HttpJsonAdapter,
     PreparedRequest,
     extract_text,
 )
 from ai_scan.adapters.captured_http import CapturedHttpAdapter, parse_captured_request
+from ai_scan.adapters.gemini import GeminiAdapter
 from ai_scan.adapters.generic_http import GenericHttpAdapter
+from ai_scan.adapters.ollama import OllamaAdapter
+from ai_scan.adapters.openai_compatible import OpenAICompatibleAdapter
 from ai_scan.adapters.registry import (
     AdapterRegistry,
     available_adapters,
     default_registry,
 )
+from ai_scan.adapters.sse import SseAdapter
+from ai_scan.adapters.websocket import WebSocketAdapter
 
 __all__ = [
     "Adapter",
@@ -33,11 +40,18 @@ __all__ = [
     "AdapterConfigError",
     "AdapterError",
     "AdapterRegistry",
+    "AnthropicAdapter",
     "CapturedHttpAdapter",
     "ExtractionError",
     "ExtractionSpec",
+    "GeminiAdapter",
     "GenericHttpAdapter",
+    "HttpJsonAdapter",
+    "OllamaAdapter",
+    "OpenAICompatibleAdapter",
     "PreparedRequest",
+    "SseAdapter",
+    "WebSocketAdapter",
     "available_adapters",
     "default_registry",
     "extract_text",
