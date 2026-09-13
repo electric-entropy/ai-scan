@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import pytest
 
@@ -80,9 +81,11 @@ def test_classification_is_never_a_confirmation_label() -> None:
         assert fp.classification != "confirmed"
 
 
-@pytest.mark.parametrize("kwargs", [{"min_score": 0.0}, {"min_score": 1.5}, {"min_margin": -0.1},
-                                    {"top_k": 0}])
-def test_invalid_parameters_fail_closed(kwargs) -> None:
+@pytest.mark.parametrize("kwargs", [{"min_score": 0.0}, {"min_score": 1.5}, {"min_score": True},
+                                    {"min_score": "0.5"}, {"min_margin": -0.1},
+                                    {"min_margin": 0.0}, {"min_margin": float("inf")},
+                                    {"top_k": 0}, {"top_k": True}, {"top_k": 1.5}])
+def test_invalid_parameters_fail_closed(kwargs: dict[str, Any]) -> None:
     with pytest.raises(FingerprintError):
         build_fingerprint([_ex("a", _OPENAI)], **kwargs)
 

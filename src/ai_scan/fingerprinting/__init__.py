@@ -19,6 +19,8 @@ from ai_scan.fingerprinting.fingerprint import (
     Fingerprint,
     FingerprintError,
     build_fingerprint,
+    load_fingerprint_document,
+    parse_fingerprint_document,
 )
 from ai_scan.fingerprinting.shapes import PROVIDER_SHAPES, infer_shape
 
@@ -30,4 +32,6 @@ __all__ = [
     "build_fingerprint",
     "extract_features",
     "infer_shape",
+    "load_fingerprint_document",
+    "parse_fingerprint_document",
 ]
