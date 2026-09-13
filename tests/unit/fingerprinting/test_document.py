@@ -155,6 +155,47 @@ def test_redigested_confidence_not_top_score_rejected() -> None:
         load_fingerprint_document(_redigest(doc))
 
 
+def test_redigested_duplicate_shape_entries_rejected() -> None:
+    doc = _valid_fp().to_document()
+    doc["shapes"] = [["openai_compatible", 0.5], ["openai_compatible", 0.4]]
+    doc["confidence"] = 0.5
+    doc["margin"] = 0.1
+    with pytest.raises(FingerprintError):
+        load_fingerprint_document(_redigest(doc))
+
+
+def test_redigested_wrong_margin_rejected() -> None:
+    # build_fingerprint() would emit margin == 0.6 - 0.3 == 0.3 here; any other
+    # digest-consistent margin is semantically impossible.
+    for bad_margin in (0.1, 0.4):
+        doc = _valid_fp().to_document()
+        doc["classification"] = "identified"
+        doc["shapes"] = [["openai_compatible", 0.6], ["anthropic", 0.3]]
+        doc["confidence"] = 0.6
+        doc["margin"] = bad_margin
+        with pytest.raises(FingerprintError):
+            load_fingerprint_document(_redigest(doc))
+
+
+def test_redigested_inconsistent_single_shape_rejected() -> None:
+    doc = _valid_fp().to_document()
+    doc["classification"] = "inconsistent"
+    doc["shapes"] = [["openai_compatible", 1.0]]
+    doc["confidence"] = 1.0
+    doc["margin"] = 1.0
+    with pytest.raises(FingerprintError):
+        load_fingerprint_document(_redigest(doc))
+
+
+def test_redigested_unknown_with_maximal_evidence_rejected() -> None:
+    # A single known shape at full confidence/margin is always an identification;
+    # claiming "unknown" for it is semantically impossible for any threshold.
+    doc = _valid_fp().to_document()
+    doc["classification"] = "unknown"
+    with pytest.raises(FingerprintError):
+        load_fingerprint_document(_redigest(doc))
+
+
 def test_direct_invalid_construction_is_rejected() -> None:
     # The domain object is self-validating: an invalid state cannot exist.
     with pytest.raises(FingerprintError):

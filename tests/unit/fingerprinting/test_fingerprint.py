@@ -56,9 +56,14 @@ def test_fingerprint_is_deterministic_and_digested() -> None:
     assert a.to_canonical() == b.to_canonical()
 
 
-def test_top_k_is_bounded() -> None:
-    fp = build_fingerprint([_ex("a", _OPENAI), _ex("b", _ANTHROPIC)], top_k=1)
-    assert len(fp.shapes) == 1
+def test_top_k_bounds_reported_shapes() -> None:
+    # top_k caps how many shapes are reported; with three distinct shapes and
+    # top_k=2 only two are kept (the runner-up is always retained for audit).
+    gemini = json.dumps({"candidates": [{"content": {"parts": [{"text": "hi"}]}}]})
+    fp = build_fingerprint(
+        [_ex("a", _OPENAI), _ex("b", _ANTHROPIC), _ex("c", gemini)], top_k=2
+    )
+    assert len(fp.shapes) == 2
 
 
 def test_features_are_aggregated_as_counts() -> None:

@@ -107,25 +107,56 @@ class Fingerprint:
                 raise FingerprintError("inconclusive fingerprint must carry no evidence")
             return
         # Every other classification rests on usable evidence.
-        if not self.shapes or self.sample_size <= 0:
-            raise FingerprintError("classification requires usable probe evidence")
+        if self.sample_size <= 0:
+            raise FingerprintError("a classified fingerprint requires usable probe evidence")
+
+        names = [name for name, _ in self.shapes]
+        if len(set(names)) != len(names):
+            raise FingerprintError("duplicate shape entries are not permitted")
+        if any(name == "unknown" for name in names):
+            # 'unknown' is the open-set verdict, not a provider identity; it is
+            # never a ranked shape (build_fingerprint ranks known shapes only).
+            raise FingerprintError("'unknown' is not a provider identity and cannot be a shape")
         scores = [score for _, score in self.shapes]
         # Scores are vote fractions: non-increasing and summing to at most one.
         if any(later > earlier + _TOL for earlier, later in zip(scores, scores[1:], strict=False)):
             raise FingerprintError("shape scores must be non-increasing")
         if sum(scores) > 1.0 + _SUM_TOL:
             raise FingerprintError("shape scores cannot sum above 1.0")
-        # Confidence is the top shape's score; margin is the lead over the
-        # runner-up and so can never exceed the confidence.
+
+        if not self.shapes:
+            # Usable responses but no recognizable provider shape → only 'unknown'.
+            if self.classification != "unknown" or self.confidence != 0.0 or self.margin != 0.0:
+                raise FingerprintError("a fingerprint with no known shape must be 'unknown'")
+            return
+
+        # Confidence is the top shape's score; margin is its lead over the
+        # runner-up (0 when there is none), so it can never exceed confidence.
         if abs(self.confidence - scores[0]) > _SUM_TOL:
             raise FingerprintError("confidence must equal the top shape score")
+        runner_up = scores[1] if len(scores) >= 2 else 0.0
+        if abs(self.margin - (scores[0] - runner_up)) > _SUM_TOL:
+            raise FingerprintError("margin must equal the top shape's lead over the runner-up")
         if self.margin > self.confidence + _TOL:
             raise FingerprintError("margin cannot exceed confidence")
+
         if self.classification == "identified":
-            if self.shapes[0][0] == "unknown":
-                raise FingerprintError("identified fingerprint cannot have an unknown top shape")
             if self.margin <= 0.0:
                 raise FingerprintError("identified fingerprint requires a positive margin")
+        elif self.classification == "inconsistent":
+            # A router/inconsistent verdict must show at least two competing
+            # provider shapes; a single dominant shape cannot be "inconsistent".
+            if len(self.shapes) < 2 or runner_up <= 0.0:
+                raise FingerprintError("inconsistent fingerprint requires two competing shapes")
+        elif self.classification == "unknown":
+            # 'unknown' with a known shape must be an under-threshold /
+            # insufficiently separated result. Maximal confidence *and* margin is
+            # always an identification for any valid min_score/min_margin, so it
+            # can never be reported as 'unknown'.
+            if self.confidence >= 1.0 - _TOL and self.margin >= 1.0 - _TOL:
+                raise FingerprintError(
+                    "unknown fingerprint cannot show maximal confidence and margin"
+                )
 
     def to_canonical(self) -> dict[str, Any]:
         return {
@@ -193,27 +224,35 @@ def build_fingerprint(
 
     votes: Counter[str] = Counter(infer_shape(e.response_text, e.headers) for e in usable)
     total = sum(votes.values())
-    ranked = sorted(votes.items(), key=lambda kv: (-kv[1], kv[0]))
+    # Rank known provider shapes only; 'unknown' votes dilute the denominator but
+    # are never a ranked identity, so the reported shapes are always auditable.
+    ranked = sorted(
+        ((shape, count) for shape, count in votes.items() if shape != "unknown"),
+        key=lambda kv: (-kv[1], kv[0]),
+    )
     scores = [(shape, count / total) for shape, count in ranked]
-    top_scores = tuple(scores[:top_k])
 
-    top_shape, top_score = scores[0]
+    top_score = scores[0][1] if scores else 0.0
     runner_up = scores[1][1] if len(scores) > 1 else 0.0
     margin = top_score - runner_up
-    known_with_votes = [s for s, _ in scores if s != "unknown"]
+    known_count = len(scores)
 
-    if top_shape == "unknown":
-        classification = "unknown"
-    elif len(known_with_votes) >= 2 and margin < min_margin:
+    if known_count >= 2 and margin < min_margin:
         # Votes split across multiple provider shapes (e.g. a router) → report
         # the inconsistency rather than a false single identity.
         classification = "inconsistent"
-    elif top_score >= min_score and margin >= min_margin:
+    elif known_count >= 1 and top_score >= min_score and margin >= min_margin:
         classification = "identified"
     else:
+        # Usable responses that do not resolve to one dominant known shape
+        # (including all-unrecognized responses) stay open-set unknown.
         classification = "unknown"
 
-    return _finalize(classification, top_scores, margin, top_score, len(usable), feature_counts)
+    # Report the top shapes (bounded by top_k) but always retain the runner-up so
+    # the margin and any inconsistency remain auditable from the document alone.
+    keep = max(top_k, 2) if runner_up > 0.0 else top_k
+    reported = tuple(scores[:keep])
+    return _finalize(classification, reported, margin, top_score, len(usable), feature_counts)
 
 
 def _finalize(
