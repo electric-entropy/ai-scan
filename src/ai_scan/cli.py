@@ -12,7 +12,6 @@ Exit codes are stable and part of the tool's contract:
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from collections.abc import Callable, Sequence
 
@@ -44,7 +43,7 @@ from ai_scan.packs import (
     PackResolutionError,
     available_packs,
     load_builtin_pack,
-    load_pack,
+    parse_pack_document,
     resolve_packs,
 )
 from ai_scan.reporting import Report, exit_code_for, write_report_atomic
@@ -481,7 +480,10 @@ def _cmd_packs(args: argparse.Namespace) -> int:
                 pack = load_builtin_pack(args.pack)
             else:
                 with open(args.pack, encoding="utf-8") as handle:
-                    pack = load_pack(json.load(handle), verify=True)
+                    text = handle.read()
+                # Use the same parser as built-in loading so the CLI rejects
+                # duplicate JSON keys (and every other schema check) identically.
+                pack = parse_pack_document(text, verify=True)
         except (OSError, PackError, PackResolutionError, ValueError) as exc:
             print(f"invalid: {scrub_text(str(exc))}")
             return EXIT_RUNTIME_ERROR

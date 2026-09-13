@@ -22,6 +22,7 @@ from ai_scan.packs.schema import (
     PackError,
     TrialPolicy,
     load_pack,
+    parse_pack_document,
 )
 from ai_scan.packs.signatures import compute_digest, verify_digest
 
@@ -35,6 +36,7 @@ __all__ = [
     "compute_digest",
     "load_builtin_pack",
     "load_pack",
+    "parse_pack_document",
     "resolve_packs",
     "verify_digest",
 ]

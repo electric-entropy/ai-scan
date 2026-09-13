@@ -83,3 +83,23 @@ def test_pack_file_validation_fails_closed_before_transport(
 
     assert cli.main(["packs", "validate", str(bad)]) == cli.EXIT_RUNTIME_ERROR
     assert "invalid:" in capsys.readouterr().out
+
+
+def test_packs_validate_rejects_duplicate_json_keys_in_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    # A duplicate key (malicious unsupported first value, valid second) must be
+    # rejected by the CLI file path, exactly as built-in loading rejects it.
+    def fail_transport(*args: object, **kwargs: object) -> object:
+        raise AssertionError("transport must not be constructed for pack commands")
+
+    monkeypatch.setattr(cli, "_make_transport", fail_transport)
+    dup = tmp_path / "dup.json"
+    dup.write_text(
+        '{"schema_version": 99, "schema_version": 1, "id": "dup"}', encoding="utf-8"
+    )
+
+    assert cli.main(["packs", "validate", str(dup)]) == cli.EXIT_RUNTIME_ERROR
+    out = capsys.readouterr().out
+    assert "invalid:" in out
+    assert "duplicate key" in out
