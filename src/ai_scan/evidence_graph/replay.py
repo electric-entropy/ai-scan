@@ -44,6 +44,70 @@ def _family_key(pack_id: str, family: str) -> str:
     return f"{pack_id}:{family}"
 
 
+def _expected_prompt(case: Any, canary: str) -> str:
+    """The prompt the runner recorded for ``case`` (rendered for attacks).
+
+    Attacks record the canary-substituted template; controls record the template
+    verbatim. Replay derives this from the *verified plan*, never trusting the
+    prompt stored on the (potentially re-digested) record.
+    """
+    if case.kind == "attack":
+        return str(case.template).replace("{canary}", canary)
+    return str(case.template)
+
+
+def _bind_records_to_plan(
+    records: list[dict[str, Any]],
+    case_by_id: Mapping[str, Any],
+    canary: str,
+    trial_policy: tuple[int, int, int],
+) -> None:
+    """Fail closed unless every record matches its plan case exactly.
+
+    Runs before any control aggregation or classification, so a forged record
+    (re-digested with a mutated prompt/pack/family/kind, referencing a case not
+    in the plan, or inflating its physical trial counts) can never contribute
+    its metadata to the replayed result.
+    """
+    # The runner runs at most trial_policy[0] physical attempts per attack case
+    # (trial_policy[2] for controls), so those are the plan-substantiated per-case
+    # ceilings; a re-digested bundle cannot claim more attempts than the plan
+    # could physically have produced.
+    attack_ceiling, control_ceiling = trial_policy[0], trial_policy[2]
+    for record in records:
+        case_id = str(record.get("case_id"))
+        case = case_by_id.get(case_id)
+        if case is None:
+            raise ReplayError(f"record {case_id} references a case not in the plan")
+        if str(record.get("pack_id")) != case.pack_id:
+            raise ReplayError(f"record {case_id} pack_id does not match the plan case")
+        if str(record.get("family")) != case.family:
+            raise ReplayError(f"record {case_id} family does not match the plan case")
+        if str(record.get("kind")) != case.kind:
+            raise ReplayError(f"record {case_id} kind does not match the plan case")
+        if str(record.get("prompt", "")) != _expected_prompt(case, canary):
+            raise ReplayError(
+                f"record {case_id} prompt does not match the rendered plan case"
+            )
+        finding = record.get("finding")
+        if not isinstance(finding, Mapping):
+            raise ReplayError(f"record {case_id} is missing its finding metadata")
+        trials = finding.get("attack_trials")
+        successes = finding.get("successes")
+        ceiling = attack_ceiling if case.kind == "attack" else control_ceiling
+        if (
+            not isinstance(trials, int) or isinstance(trials, bool) or trials < 0
+            or not isinstance(successes, int) or isinstance(successes, bool) or successes < 0
+        ):
+            raise ReplayError(f"record {case_id} has invalid trial metadata")
+        if successes > trials:
+            raise ReplayError(f"record {case_id} reports more successes than trials")
+        if trials > ceiling:
+            raise ReplayError(
+                f"record {case_id} claims more physical trials than the plan can substantiate"
+            )
+
+
 def _usable(response: Mapping[str, Any]) -> bool:
     return (
         bool(response.get("transport_ok"))
@@ -72,15 +136,23 @@ def replay_bundle(source: str | Bundle) -> ReplayResult:
     packs = _resolve_packs(plan.mode)
     case_kinds = {c.case_id: c for c in plan.cases}
 
+    # Bind every record to its verified plan case (case_id → exact
+    # pack_id/family/kind/rendered-prompt) BEFORE any field is used for control
+    # aggregation or classification. A re-digested forgery cannot smuggle a
+    # mutated prompt/pack/family/kind past this gate.
+    _bind_records_to_plan(records, case_kinds, canary, plan.trial_policy)
+
     # Re-derive per-family control coverage from the stored control evidence
-    # (tri-state, mirroring the runner: emitted > clean > gap).
+    # (tri-state, mirroring the runner: emitted > clean > gap). pack_id/family
+    # come from the bound plan case, not the (now-verified-equal) record fields.
     _control_priority = {"emitted": 2, "clean": 1, "gap": 0}
     control_results: dict[str, str] = {}
     for record in records:
         if record.get("kind") != "control":
             continue
         response = record["response"]
-        key = _family_key(str(record["pack_id"]), str(record["family"]))
+        case = case_kinds[str(record["case_id"])]
+        key = _family_key(case.pack_id, case.family)
         if _usable(response) and canary in str(response.get("body", "")):
             result = "emitted"
         elif _usable(response):
@@ -96,12 +168,13 @@ def replay_bundle(source: str | Bundle) -> ReplayResult:
         if record.get("kind") != "attack":
             continue
         case_id = str(record["case_id"])
-        if case_id not in case_kinds:
-            raise ReplayError("record references a case not in the plan")
+        # case_id/pack_id/family/kind/prompt were bound to the plan above; use
+        # the plan-derived case fields from here on, not the record's.
+        case = case_kinds[case_id]
         response = record.get("response")
         if not isinstance(response, dict) or "body" not in response:
             raise ReplayError("finding is missing its response evidence")
-        pack = packs.get(str(record["pack_id"]))
+        pack = packs.get(case.pack_id)
         if pack is None:
             raise ReplayError("record references a pack not in the plan")
 
@@ -122,14 +195,19 @@ def replay_bundle(source: str | Bundle) -> ReplayResult:
         if not isinstance(trials, int) or isinstance(trials, bool) or trials < 0 or \
                 not isinstance(successes, int) or isinstance(successes, bool) or successes < 0:
             raise ReplayError(f"attack record {case_id} lacks valid trial metadata")
-        control = control_results.get(
-            _family_key(str(record["pack_id"]), str(record["family"]))
-        )
+        # The canary is public (it is in the rendered prompt): a confirmed record
+        # whose response evidence is only the bare canary — with no surrounding
+        # response context — is not genuine execution evidence and fails closed.
+        if str(stored.get("status")) == "confirmed" and not str(response["body"]).replace(
+            canary, ""
+        ).strip():
+            raise ReplayError(f"confirmed record {case_id} has bare/public-canary evidence")
+        control = control_results.get(_family_key(case.pack_id, case.family))
         try:
             status, proof = classify_record(
                 outcome,
                 canary,
-                str(record.get("prompt", "")),
+                _expected_prompt(case, canary),
                 _select_validators(pack.validators),
                 control_succeeded=control == "emitted",
                 matched_clean_control=control == "clean",

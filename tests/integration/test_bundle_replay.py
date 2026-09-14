@@ -20,7 +20,9 @@ def _plan():  # type: ignore[no-untyped-def]
 
 
 def _confirming_responder(case):  # type: ignore[no-untyped-def]
-    return ExchangeOutcome(body=CANARY if "{canary}" in case.template else "benign")
+    # Realistic execution response: canary in response context, not a bare echo.
+    body = f"model output: {CANARY} (executed)" if "{canary}" in case.template else "benign"
+    return ExchangeOutcome(body=body)
 
 
 def test_run_bundle_replay_reproduces_findings(tmp_path) -> None:

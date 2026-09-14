@@ -24,7 +24,10 @@ def sample_bundle_text(*, confirm: bool = True) -> str:
 
     def responder(case):  # type: ignore[no-untyped-def]
         emit = confirm and "{canary}" in case.template
-        return ExchangeOutcome(body=CANARY if emit else "benign response")
+        # A realistic execution response: the canary in response context (not a
+        # bare echo), so genuine proof carries more than the public canary.
+        return ExchangeOutcome(body=f"model output: {CANARY} (executed)" if emit
+                               else "benign response")
 
     collector = BundleCollector()
     result = run_plan(plan, responder, canary=CANARY, goal="g", observer=collector.observe)

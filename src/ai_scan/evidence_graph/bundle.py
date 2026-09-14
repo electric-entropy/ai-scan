@@ -137,8 +137,15 @@ def build_bundle(
     tool_version: str = "0.1.0",
     provenance: Mapping[str, str] | None = None,
     coverage_gaps: Sequence[str] = (),
+    known_secrets: frozenset[str] = frozenset(),
 ) -> Bundle:
-    """Assemble a secret-free, digested bundle from a completed run's evidence."""
+    """Assemble a secret-free, digested bundle from a completed run's evidence.
+
+    ``known_secrets`` are the transport-known secret literals observed during the
+    run (e.g. ``ExchangeOutcome.known_secrets``). They are threaded into the final
+    recursive scrub so a secret that is not globally pattern-shaped still cannot
+    cross the export boundary.
+    """
     observations = [
         Observation(
             case_id=r.case_id,
@@ -172,8 +179,11 @@ def build_bundle(
         "graph": graph.to_canonical(),
         "graph_digest": graph.digest(),
     }
-    # Final recursive value scrub before the content is sealed/exported.
-    scrubbed = scrub_structure(content)
+    # Final recursive value scrub before the content is sealed/exported. The
+    # run's transport-known secrets are passed alongside the global patterns so
+    # non-pattern-shaped secrets are redacted too. Scrub happens BEFORE the
+    # digest is computed, so the digest seals the redacted content.
+    scrubbed = scrub_structure(content, known_secrets)
     scrubbed["digest"] = compute_digest(scrubbed)
     return Bundle(content=scrubbed)
 
@@ -188,9 +198,13 @@ class BundleCollector:
 
     def __init__(self) -> None:
         self._records: list[CaseRecord] = []
+        self._known_secrets: set[str] = set()
 
     def observe(self, case: Any, outcome: Any, finding: Any) -> None:
         status = finding.status
+        # Aggregate every outcome's transport-known secrets (control and attack
+        # alike) so they can be scrubbed at export. Missing/empty is a no-op.
+        self._known_secrets.update(getattr(outcome, "known_secrets", None) or ())
         self._records.append(
             CaseRecord(
                 case_id=case.case_id,
@@ -218,6 +232,7 @@ class BundleCollector:
         run_id: str,
         coverage_gaps: Sequence[str] = (),
         provenance: Mapping[str, str] | None = None,
+        known_secrets: frozenset[str] = frozenset(),
     ) -> Bundle:
         control_results: dict[str, bool] = {}
         for record in self._records:
@@ -241,6 +256,9 @@ class BundleCollector:
             run_id=run_id,
             coverage_gaps=coverage_gaps,
             provenance=provenance,
+            # Union the transport-observed secrets with any the caller supplies
+            # (e.g. a secret embedded in provenance metadata).
+            known_secrets=frozenset(self._known_secrets | set(known_secrets)),
         )
 
 
@@ -276,6 +294,7 @@ def load_bundle(text: str) -> Bundle:
         raise BundleError("bundle has unknown or missing top-level fields")
     if data.get("bundle_version") != BUNDLE_VERSION:
         raise BundleError("unsupported or missing bundle_version")
+    _validate_metadata(data.get("metadata"))
     _reject_non_finite_numbers(data)
 
     if not verify_digest(data):
@@ -323,6 +342,33 @@ def load_bundle(text: str) -> Bundle:
         raise BundleError("bundle contains an unredacted secret-like value")
 
     return Bundle(content=data)
+
+
+_METADATA_KEYS = frozenset({"tool", "version", "run_id", "provenance"})
+
+
+def _validate_metadata(raw: Any) -> None:
+    """Enforce a closed metadata schema and bind the tool identity/version.
+
+    A tampered bundle cannot smuggle unknown metadata fields, forge a different
+    producing tool, or drop the version — each fails closed here (the whole
+    document is already digest-bound, so this also rejects a re-digested forge).
+    """
+    if not isinstance(raw, dict) or set(raw) != _METADATA_KEYS:
+        raise BundleError("bundle metadata has unknown or missing fields")
+    if raw.get("tool") != _TOOL:
+        raise BundleError("bundle metadata names an unexpected tool")
+    version = raw.get("version")
+    if not isinstance(version, str) or not version:
+        raise BundleError("bundle metadata is missing a tool version")
+    run_id = raw.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise BundleError("bundle metadata is malformed")
+    provenance = raw.get("provenance")
+    if not isinstance(provenance, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in provenance.items()
+    ):
+        raise BundleError("bundle metadata provenance is malformed")
 
 
 def _metadata_run_id(raw: Any) -> str:

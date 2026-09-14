@@ -248,6 +248,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_bundle_replay.add_argument("--file", required=True, help="Path to the bundle JSON file.")
 
+    p_replay = subparsers.add_parser(
+        "replay",
+        help="Verify an evidence bundle and reproduce its classification offline (no network).",
+    )
+    p_replay.add_argument("--bundle", required=True, help="Path to the bundle JSON file.")
+    p_replay.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Verify and reproduce offline only; replay never constructs transport regardless.",
+    )
+
     return parser
 
 
@@ -302,6 +313,8 @@ def main(
         return _cmd_baseline(args)
     if args.command == "bundle":
         return _cmd_bundle(args)
+    if args.command == "replay":
+        return _cmd_replay(args)
 
     # Active, network-touching commands. Fail closed before any transport.
     try:
@@ -655,6 +668,29 @@ def _cmd_bundle(args: argparse.Namespace) -> int:
         return EXIT_RUNTIME_ERROR
     print("error: unknown bundle subcommand")
     return EXIT_RUNTIME_ERROR
+
+
+def _cmd_replay(args: argparse.Namespace) -> int:
+    """Offline `replay --bundle FILE [--validate-only]`; constructs no transport.
+
+    Replay is always offline: it verifies the bundle's digests/graph/plan binding
+    and reproduces statuses from the stored redacted evidence only, contacting no
+    target. A valid bundle exits OK; a tampered one exits nonzero with a scrubbed
+    error.
+    """
+    try:
+        with open(args.bundle, encoding="utf-8") as handle:
+            text = handle.read()
+        result = replay_bundle(text)
+    except (BundleError, ReplayError, OSError) as exc:
+        print(f"invalid: {scrub_text(str(exc))}")
+        return EXIT_RUNTIME_ERROR
+    confirmed = sum(1 for s in result.findings.values() if s == "confirmed")
+    print(
+        f"replayed: verified={result.verified} findings={len(result.findings)} "
+        f"confirmed={confirmed} gaps={len(result.coverage_gaps)}"
+    )
+    return EXIT_OK
 
 
 def _load_body_template(args: argparse.Namespace) -> str:
