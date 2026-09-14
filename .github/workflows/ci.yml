@@ -60,6 +60,7 @@ jobs:
           /tmp/ai-scan-wheel-smoke/bin/python -m pip install --upgrade pip
           /tmp/ai-scan-wheel-smoke/bin/pip install dist/*.whl
           /tmp/ai-scan-wheel-smoke/bin/ai-scan --help
+          /tmp/ai-scan-wheel-smoke/bin/ai-scan doctor
           /tmp/ai-scan-wheel-smoke/bin/python - <<'PY'
           from importlib import metadata, resources
           dist = metadata.distribution('ai-scan')

@@ -20,7 +20,13 @@ ai-scan report --file report.json --format markdown
 ai-scan bundle validate --file evidence-bundle.json
 ai-scan bundle replay --file evidence-bundle.json
 ai-scan replay --bundle evidence-bundle.json --validate-only
+ai-scan doctor
 ```
+
+`ai-scan doctor` is an **offline** health check: it validates the packaged
+schemas, builtin packs, `py.typed`, and version/license metadata via
+`importlib.resources`, constructs no transport, needs no authorization/target,
+and exits `0` with a concise summary (add `--json` for machine-readable output).
 
 `bundle validate`/`bundle replay` and the top-level `replay --bundle ... --validate-only`
 are **offline** — they verify digests/graph and reproduce the stored

@@ -259,6 +259,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Verify and reproduce offline only; replay never constructs transport regardless.",
     )
 
+    p_doctor = subparsers.add_parser(
+        "doctor",
+        help="Offline health check: validate packaged schemas, packs, py.typed, and "
+        "metadata (no network, no auth).",
+    )
+    p_doctor.add_argument(
+        "--json", action="store_true", help="Emit the health report as JSON."
+    )
+
     return parser
 
 
@@ -315,6 +324,8 @@ def main(
         return _cmd_bundle(args)
     if args.command == "replay":
         return _cmd_replay(args)
+    if args.command == "doctor":
+        return _cmd_doctor(args)
 
     # Active, network-touching commands. Fail closed before any transport.
     try:
@@ -691,6 +702,92 @@ def _cmd_replay(args: argparse.Namespace) -> int:
         f"confirmed={confirmed} gaps={len(result.coverage_gaps)}"
     )
     return EXIT_OK
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    """Offline ``doctor`` health check.
+
+    Validates the resources that ship in the wheel — metadata/version/license,
+    ``py.typed``, every JSON schema, every built-in pack (parsed, validated, and
+    digest-verified), the safe payloads, and the report template — through
+    ``importlib.resources``. It constructs no transport, sends no network
+    traffic, and requires no authorization, receipt, or target. Exits ``0`` only
+    when every check passes; otherwise ``1`` with a scrubbed summary.
+    """
+    from importlib import metadata, resources
+
+    root = resources.files("ai_scan")
+    checks: list[dict[str, object]] = []
+
+    def record(name: str, fn: Callable[[], str]) -> None:
+        try:
+            checks.append({"name": name, "ok": True, "detail": fn()})
+        except Exception as exc:  # report any failure, scrubbed
+            checks.append({"name": name, "ok": False, "detail": scrub_text(str(exc))})
+
+    try:
+        version = metadata.version("ai-scan")
+    except metadata.PackageNotFoundError:  # pragma: no cover - always installed
+        version = ""
+
+    def _metadata() -> str:
+        ver = metadata.version("ai-scan")
+        license_expr = metadata.metadata("ai-scan")["License-Expression"]
+        if not ver or not license_expr:
+            raise ValueError("missing version or license metadata")
+        return f"version={ver} license={license_expr}"
+
+    def _py_typed() -> str:
+        if not root.joinpath("py.typed").is_file():
+            raise FileNotFoundError("py.typed missing")
+        return "present"
+
+    def _schemas() -> str:
+        count = 0
+        for kind, versions in SUPPORTED_SCHEMAS.items():
+            for ver in sorted(versions):
+                text = root.joinpath(f"schemas/{kind}-v{ver}.schema.json").read_text(
+                    encoding="utf-8"
+                )
+                json.loads(text)
+                count += 1
+        if count == 0:
+            raise ValueError("no schemas packaged")
+        return f"{count} valid"
+
+    def _packs() -> str:
+        ids = available_packs()
+        if not ids:
+            raise ValueError("no built-in packs packaged")
+        for pack_id in ids:
+            load_builtin_pack(pack_id)  # parses, validates, and digest-verifies
+        return f"{len(ids)} valid"
+
+    def _payloads() -> str:
+        json.loads(root.joinpath("payloads/safe.json").read_text(encoding="utf-8"))
+        return "loaded"
+
+    def _report_template() -> str:
+        if not root.joinpath("reporting/templates/report.html").is_file():
+            raise FileNotFoundError("report.html missing")
+        return "present"
+
+    record("metadata", _metadata)
+    record("py.typed", _py_typed)
+    record("schemas", _schemas)
+    record("packs", _packs)
+    record("payloads", _payloads)
+    record("report-template", _report_template)
+
+    healthy = all(bool(check["ok"]) for check in checks)
+    if args.json:
+        print(json.dumps({"ok": healthy, "version": version, "checks": checks}, sort_keys=True))
+    else:
+        print(f"ai-scan doctor: {'healthy' if healthy else 'UNHEALTHY'} (version {version})")
+        for check in checks:
+            mark = "ok" if check["ok"] else "FAIL"
+            print(f"  [{mark}] {check['name']}: {check['detail']}")
+    return EXIT_OK if healthy else EXIT_RUNTIME_ERROR
 
 
 def _load_body_template(args: argparse.Namespace) -> str:

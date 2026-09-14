@@ -97,6 +97,12 @@ def test_package_uploads_sbom_artifact() -> None:
     assert "sbom.cdx.json" in text
 
 
+@pytest.mark.parametrize("path", [_CI, _PACKAGE])
+def test_fresh_wheel_smoke_runs_doctor(path: Path) -> None:
+    # The offline `doctor` health check must run against the installed wheel.
+    assert "ai-scan doctor" in _text(path)
+
+
 # Known-good SHAs for the pinned actions (comment version -> commit SHA).
 _KNOWN_ACTION_SHAS = {
     "actions/upload-artifact": {"v4.6.2": _UPLOAD_ARTIFACT_V462_SHA},
