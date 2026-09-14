@@ -11,8 +11,10 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CI = _REPO_ROOT / ".github" / "workflows" / "ci.yml"
 _PACKAGE = _REPO_ROOT / ".github" / "workflows" / "package.yml"
 
-# v4.6.2 of actions/upload-artifact (independently verified in the audit).
+# actions/upload-artifact SHAs (v4.6.2 verified in the audit; v7.0.1 verified
+# upstream during v0.2.1 release maintenance).
 _UPLOAD_ARTIFACT_V462_SHA = "ea165f8d65b6e75b540449e92b4886f43607fa02"
+_UPLOAD_ARTIFACT_V701_SHA = "043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
 
 
 def _text(path: Path) -> str:
@@ -44,8 +46,8 @@ def test_upload_artifact_pin_matches_comment() -> None:
     line = next(
         ln for ln in text.splitlines() if "actions/upload-artifact@" in ln
     )
-    assert _UPLOAD_ARTIFACT_V462_SHA in line
-    assert "v4.6.2" in line
+    assert _UPLOAD_ARTIFACT_V701_SHA in line
+    assert "v7.0.1" in line
 
 
 def test_package_gates_precede_upload() -> None:
@@ -105,7 +107,10 @@ def test_fresh_wheel_smoke_runs_doctor(path: Path) -> None:
 
 # Known-good SHAs for the pinned actions (comment version -> commit SHA).
 _KNOWN_ACTION_SHAS = {
-    "actions/upload-artifact": {"v4.6.2": _UPLOAD_ARTIFACT_V462_SHA},
+    "actions/upload-artifact": {
+        "v4.6.2": _UPLOAD_ARTIFACT_V462_SHA,
+        "v7.0.1": _UPLOAD_ARTIFACT_V701_SHA,
+    },
 }
 _USES_RE = re.compile(
     r"uses:\s*(?P<action>[^@\s]+)@(?P<sha>[0-9a-fA-F]{40})\s*#\s*(?P<ver>v[\w.]+)"

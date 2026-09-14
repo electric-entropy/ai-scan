@@ -102,6 +102,35 @@ def test_readme_states_assess_is_legacy_v1() -> None:
     assert "legacy v1" in " ".join(_text(_README).split()).lower()
 
 
+def test_readme_documents_shipped_v020_capabilities() -> None:
+    lowered = _text(_README).lower()
+    assert "v0.2.0" in lowered
+    for token in ("doctor", "kitchen sink", "reliable", "evidence bundle", "replay",
+                  "adapter", "pack", "worker"):
+        assert token in lowered, token
+
+
+def test_readme_keeps_authorized_use_warning() -> None:
+    lowered = _text(_README).lower()
+    assert "authorized use only" in lowered
+    assert "not touch the network" in lowered or "before any network traffic" in lowered
+
+
+def test_readme_out_of_scope_is_not_stale() -> None:
+    # RAG isolation and multimodal are shipped, so they must not be listed as
+    # out of scope. Find the "Out of scope" line and check it.
+    for line in _text(_README).splitlines():
+        if line.lower().startswith("out of scope"):
+            assert "rag" not in line.lower(), line
+            assert "multimodal" not in line.lower(), line
+
+
+def test_readme_signed_receipts_framed_as_future() -> None:
+    normalized = " ".join(_text(_README).split()).lower()
+    assert "not yet implemented" in normalized or "not authenticated" in normalized
+    assert "tamper-evident" in normalized
+
+
 def test_docs_do_not_reference_missing_paths() -> None:
     # Referenced tooling paths must exist.
     for path in _OPERATOR_FACING:

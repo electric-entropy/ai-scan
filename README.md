@@ -1,7 +1,10 @@
 # ai-scan
 
-**CLI-only, authorized LLM assessment tool** — behavioral model fingerprinting and
-safe, canary-based prompt-injection testing for HTTP(S) LLM endpoints.
+**CLI-only, authorized LLM security-assessment platform** (v0.2.0) — behavioral
+model fingerprinting and safe, canary-based prompt-injection testing for HTTP(S)
+LLM endpoints, with a repeatable **Reliable** confirmation engine, tamper-evident
+evidence bundles, and fully offline replay. Python 3.11+, standard library only,
+zero runtime dependencies.
 
 > ⚠️ **Authorized use only.** ai-scan sends active requests to a target. It will
 > not touch the network until you have either confirmed authorization
@@ -11,13 +14,27 @@ safe, canary-based prompt-injection testing for HTTP(S) LLM endpoints.
 
 ## Install
 
+From a source checkout (development):
+
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e '.[dev]'
 ai-scan --help
+ai-scan doctor          # offline health check of the installed package
 ```
 
-Requires Python 3.11+. Zero runtime dependencies (standard library only).
+From a built release artifact (wheel or sdist):
+
+```bash
+python -m build                       # produces dist/*.whl and dist/*.tar.gz
+python -m venv /tmp/ai-scan && /tmp/ai-scan/bin/pip install dist/ai_scan-*.whl
+/tmp/ai-scan/bin/ai-scan doctor       # exits 0 when packaged resources validate
+```
+
+Requires Python 3.11+. Zero runtime dependencies (standard library only); the
+`[dev]` extra pulls in pytest, ruff, mypy, and build for development/release.
+The wheel and sdist ship the runtime package, JSON schemas, builtin packs,
+`py.typed`, and the license; tests are not shipped in the sdist.
 
 ## Commands
 
@@ -28,24 +45,36 @@ ai-scan inject           --target URL --goal GOAL [--request-template FILE] [--p
 ai-scan assess           --target URL [--request-template FILE] [--profile safe] [--auth-receipt FILE]
 ai-scan plan             --target URL [--mode reliable|kitchen-sink] [--out plan.json]
 ai-scan run              --target URL --plan plan.json --auth-receipt FILE --non-interactive [--out report.json]
-ai-scan packs            list|validate
+ai-scan packs            list|validate PACK
 ai-scan adapters         list|show NAME
 ai-scan report           --file report.json --format json|jsonl|markdown|html|sarif
 ai-scan baseline         create|diff
-ai-scan bundle           validate|replay
+ai-scan bundle           validate|replay --file bundle.json
+ai-scan replay           --bundle bundle.json --validate-only
 ai-scan validate-receipt --auth-receipt FILE --target URL
+ai-scan validate-config  --kind KIND --file doc.json
+ai-scan doctor           [--json]
 ```
+
+`bundle validate|replay`, the top-level `replay`, `report`, `baseline`,
+`validate-receipt`, `validate-config`, `packs`, `adapters`, and `doctor` are all
+**offline** — they construct no transport and touch no network.
 
 Active commands (`fingerprint`, `inject`, `assess`, `run`) require authorization. Without
 `--auth-receipt` they prompt for a literal confirmation phrase for the normalized
 target origin. With `--non-interactive` and no valid receipt, they exit `2`
-**before any network traffic is sent**. `assess` runs **legacy v1 semantics**
-(a single response per attack case, single-origin, no repeated-trial
-confirmation, controls, or evidence graph) — it is *not* Reliable (v2) mode.
-Reliable v2 (repeated trials, clean controls, confirmation, evidence graph,
-replayable bundles) is the `plan` + `run` path. A v1 receipt cannot authorize
-headless `kitchen-sink` execution; use an interactive authorization path until
-signed v2 receipts land.
+**before any network traffic is sent**.
+
+`assess`/`inject`/`fingerprint` run **legacy v1 semantics** (a single response per
+attack case, single-origin, no repeated-trial confirmation, controls, or evidence
+graph) — *not* Reliable (v2) mode. The **Reliable v2** engine (repeated trials,
+clean controls, non-reflected confirmation, evidence graph, replayable bundles) is
+the `plan` + `run` path. Headless `run` execution requires a receipt that is
+**plan-bound to the exact plan and target** (matching plan digest and target);
+an origin-only or mismatched receipt authorizes nothing and fails closed before
+any transport. Interactive confirmation remains available. Authenticated (signed)
+receipts are not yet implemented; receipts are tamper-evident, not authenticated
+(see [Receipt threat model](#receipt-threat-model)).
 
 ### Exit codes
 
@@ -70,6 +99,51 @@ from the `2` used for authorization failures.
   physical-request budget bounds every attempt (retries included).
 - **Redaction & scope** — see [SECURITY.md](SECURITY.md) for the full list
   (no-redirect-follow, header/URL/body redaction, exact-origin scoping).
+
+## Platform capabilities (v0.2.0)
+
+**Reliable vs Kitchen Sink modes** (`plan --mode ...`). Both share the same
+authorization, scope, budget, redaction, and confirmation rules — Kitchen Sink
+only broadens coverage, it never weakens safety.
+
+- **Reliable** — the default, conservative mode. Resolves the reliable-tier packs
+  and confirms only with repeatable, controlled, non-reflected execution evidence
+  (repeated attack trials, a clean control per family, and a genuine canary
+  execution — never inferred from a single 1/1 result).
+- **Kitchen Sink** — broader coverage that resolves the additional packs for
+  separately labeled analyst leads. Headless Kitchen Sink still requires a
+  plan-bound exact-target receipt.
+
+**Attack packs** (`ai-scan packs list`). Eight digest-verified builtin packs:
+`direct-injection`, `indirect-injection`, `rag-isolation`, and `tool-abuse`, each
+in a reliable and a kitchen-sink variant. Packs are declarative, validated, and
+content-digested; the plan records each pack's id/version/digest.
+
+**Adapters** (`ai-scan adapters list`). Built-in request/extraction adapters
+include `generic_http`, `openai_compatible`, `anthropic`, `gemini`, `ollama`,
+`captured_http`, `sse`, `mcp`, `multimodal`, and `websocket`. All active traffic
+still flows through the single brokered, origin-scoped transport.
+
+**Evidence bundles + offline replay.** A `run` can export a portable,
+content-digested, secret-free evidence bundle (plan + digest, redacted per-case
+records, findings, controls, and a provenance graph). `ai-scan bundle
+validate|replay --file` and `ai-scan replay --bundle ... --validate-only` verify
+every digest and graph invariant and **reproduce the classification entirely
+offline** — no transport, no network — binding each record to the verified plan;
+any tamper (digest mismatch, altered prompt/proof, inflated trial counts, unknown
+fields) fails closed with a scrubbed, non-zero error.
+
+**Offline `doctor`.** `ai-scan doctor` validates the packaged schemas, builtin
+packs, `py.typed`, and version/license metadata via `importlib.resources`,
+constructs no transport, needs no authorization, and exits `0` with a concise
+health summary (`--json` for machine-readable output).
+
+**Optional isolated worker.** An opt-in local worker runs a bounded JSON request
+in a short-lived, hardened container (`Dockerfile.worker`): read-only rootfs,
+`--network none`, all capabilities dropped, non-root uid, tmpfs scratch, and
+bounded CPU/memory/PID limits. The launcher streams bounded stdin/stdout under a
+timeout and exposes only an empty dedicated output directory. It changes no
+active-network semantics; egress stays disabled.
 
 ## Manual example (interactive authorization)
 
@@ -163,23 +237,32 @@ forge a receipt. Receipts are an operator convenience for staying in scope
 during authorized engagements — not an access-control mechanism. See
 [SECURITY.md](SECURITY.md).
 
-## Roadmap (beyond MVP)
+## Roadmap
 
-- Adapter for an upstream academic/PyTorch LLMmap backend and a current-model
-  template registry.
-- Expanded, versioned injection payload packs.
-- Authenticated (signed) receipts / centralized authorization.
-- Additional transports and non-JSON body templating.
+Not yet implemented:
 
-Explicitly out of scope for the MVP: REST/web UI, browser automation,
-distributed workers, aggressive/destructive payloads, RAG/multimodal injection,
-and LLM-as-judge scoring.
+- Authenticated (signed) receipts and centralized authorization (today's receipts
+  are tamper-evident, not authenticated).
+- An adapter for an upstream academic/PyTorch LLMmap backend and a current-model
+  template registry (the built-in fingerprinter stays heuristic).
+- A signed/attested release supply chain (the release produces a CycloneDX SBOM
+  and a reproducible wheel, but no signing/attestation/provenance).
+
+Already shipped in v0.2.0 (previously roadmap): versioned digest-verified attack
+packs (direct/indirect injection, RAG isolation, tool abuse), multiple request
+adapters, the Reliable v2 confirmation engine, tamper-evident evidence bundles
+with offline replay, and an optional hardened local worker.
+
+Out of scope: REST/web UI, browser automation, distributed/multi-host workers,
+aggressive or destructive payloads, and LLM-as-judge scoring.
 
 ### Platform direction
 
-This MVP (report schema v1) is the stable base for a broader **local, CLI-first
-AI-pentest platform**. The public contracts are frozen and documented under
-[`docs/architecture/`](docs/architecture/):
+v0.2.0 is a **local, CLI-first AI security-assessment platform**. Legacy v1
+commands (`assess`, `inject`, `fingerprint`) keep report schema v1 for
+compatibility, while the Reliable v2 path (`plan` + `run`) emits schema v2
+evidence/finding artifacts, evidence bundles, and offline replay. The public
+contracts are documented under [`docs/architecture/`](docs/architecture/):
 
 - [platform-boundaries.md](docs/architecture/platform-boundaries.md) — in/out of scope.
 - [mode-contracts.md](docs/architecture/mode-contracts.md) — the `reliable` and
@@ -190,7 +273,7 @@ AI-pentest platform**. The public contracts are frozen and documented under
 - ADRs: [0001 CLI-first engine](docs/architecture/adr/0001-cli-first-engine.md),
   [0002 confirmation & confidence](docs/architecture/adr/0002-confirmation-and-confidence.md).
 
-The MVP behavior these docs freeze is guarded by the golden compatibility
+The legacy-v1 behavior these docs freeze is guarded by the golden compatibility
 contract in [`tests/contracts/`](tests/contracts/).
 
 ## Development
@@ -212,7 +295,17 @@ Release/operator documentation:
 - [Threat model](docs/threat-model.md) — trust boundaries and release-hardening controls.
 - [Changelog](CHANGELOG.md) — release history.
 
-CI runs Python 3.11 and 3.12, contracts, full tests, Ruff, strict Mypy, wheel/sdist builds, fresh-wheel package-resource smoke checks, a local secret scan, a zero-runtime-dependency audit, SBOM generation, and static container-worker checks. GitHub Actions are pinned to immutable commit SHAs.
+CI (`.github/workflows/ci.yml`) runs on Python 3.11 and 3.12 with least-privilege
+permissions, per-job timeouts, and concurrency cancellation. Gates: a deterministic
+credential scan, contract tests, the full suite, Ruff, strict Mypy, wheel/sdist
+builds, a fresh-wheel package-resource smoke check that also runs `ai-scan doctor`,
+a zero-runtime-dependency audit, CycloneDX SBOM generation/validation, a
+reproducible-build check (two builds compared by hash), and a hardened
+container-worker build/scan. The tag-gated release workflow
+(`.github/workflows/package.yml`) re-runs every gate and verifies the tag equals
+the project version before uploading the built `dist/*` and SBOM as artifacts; it
+does not publish to any index and produces no signing/attestation/provenance. All
+GitHub Actions are pinned to immutable commit SHAs.
 
 ## License
 
