@@ -26,7 +26,7 @@ Existing `assess --target ... --auth-receipt ... --non-interactive --out report.
 
 ## Mode behavior
 
-`assess` continues to use Reliable mode for compatibility. It intentionally does not expose a Kitchen Sink selector; use `plan --mode kitchen-sink` plus `run` for broader authorized coverage.
+`assess` remains **legacy v1 compatibility semantics** (a single response per attack case, no repeated-trial confirmation, controls, or evidence graph) — it is *not* Reliable (v2) mode. Reliable v2 is the `plan --mode reliable` + `run` path. `assess` intentionally does not expose a Kitchen Sink selector; use `plan --mode kitchen-sink` plus `run` for broader authorized coverage.
 
 `kitchen-sink` is broader but does not weaken authorization, scope, budgets, redaction, cleanup, or confirmation rules. A v1 receipt cannot authorize headless Kitchen Sink execution. If `--mode kitchen-sink` or a Kitchen Sink plan is supplied with `--auth-receipt ... --non-interactive`, the CLI exits `2` before constructing transport or sending requests. Use an interactive authorization path until signed v2 receipts are introduced.
 

@@ -22,12 +22,11 @@ def test_store_writes_digest_named_private_artifact(tmp_path) -> None:
 
 def test_store_scrubs_before_persisting_and_hashing(tmp_path) -> None:
     store = ArtifactStore(tmp_path)
-    ref = store.write_json(
-        {"headers": {"Authorization": "Bearer ghp_abcdefghijklmnopqrstuvwxyz123456"}}
-    )
+    token = "ghp_abcdefghijklmnopqrstuvwxyz123456"  # pragma: allowlist secret
+    ref = store.write_json({"headers": {"Authorization": f"Bearer {token}"}})
     text = ref.path.read_text(encoding="utf-8")
 
-    assert "ghp_abcdefghijklmnopqrstuvwxyz123456" not in text
+    assert token not in text
     assert "REDACTED" in text
     assert store.read_json(ref.digest)["digest"] == ref.digest
 

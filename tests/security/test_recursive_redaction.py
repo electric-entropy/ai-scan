@@ -33,12 +33,12 @@ from ai_scan.transport.redaction import (
 
 # Credential-format literals spanning the supported families.
 SECRET_LITERALS = [
-    "AKIA1234567890ABCDEF",
-    "ASIA1234567890ABCDEF",
+    "AKIA1234567890ABCDEF",  # pragma: allowlist secret
+    "ASIA1234567890ABCDEF",  # pragma: allowlist secret
     "sk-abcdef0123456789XYZ",
-    "ghp_abcdefghijklmnopqrstuvwxyz0123",
-    "xoxb-abcdef-123456-ABCDEF",
-    "-----BEGIN RSA PRIVATE KEY-----",
+    "ghp_abcdefghijklmnopqrstuvwxyz0123",  # pragma: allowlist secret
+    "xoxb-abcdef-123456-ABCDEF",  # pragma: allowlist secret
+    "-----BEGIN RSA PRIVATE KEY-----",  # pragma: allowlist secret
     "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl",
     "Bearer abcdef0123456789ABCDEF",
 ]
@@ -137,7 +137,8 @@ def test_non_sensitive_header_preserved() -> None:
 
 
 def test_url_userinfo_stripped() -> None:
-    assert "user:pass" not in redact_url("https://user:pass@api.example.com/x?a=1")
+    url = "https://user:pass@api.example.com/x?a=1"  # pragma: allowlist secret
+    assert "user:pass" not in redact_url(url)
 
 
 @pytest.mark.parametrize("param", ["token", "api_key", "access_token", "sig", "session"])
@@ -160,7 +161,8 @@ def test_encoded_sensitive_query_key_redacted(encoded_key: str) -> None:
 def test_url_secret_values_collects_encoded_and_userinfo() -> None:
     from ai_scan.transport.redaction import url_secret_values
 
-    vals = url_secret_values("https://u:PASSWORDSECRET@api.example.com/x?%74oken=TOKSECRET")
+    url = "https://u:PASSWORDSECRET@api.example.com/x?%74oken=TOKSECRET"  # pragma: allowlist secret
+    vals = url_secret_values(url)
     assert "PASSWORDSECRET" in vals
     assert "TOKSECRET" in vals
 
@@ -199,7 +201,8 @@ def test_nested_url_field_query_secret_redacted(key: str) -> None:
 
 
 def test_nested_redirect_location_userinfo_redacted() -> None:
-    out = redact_value({"redirect_location": "https://user:pass@api.example.com/x"})
+    url = "https://user:pass@api.example.com/x"  # pragma: allowlist secret
+    out = redact_value({"redirect_location": url})
     assert "user:pass" not in json.dumps(out)
 
 
@@ -223,7 +226,7 @@ def test_over_encoded_nested_url_fails_closed() -> None:
 
 
 def test_reflected_known_secret_replaced_in_place() -> None:
-    secret = "opaque-runtime-" + _secrets.token_hex(8)
+    secret = "opaque-runtime-" + _secrets.token_hex(8)  # pragma: allowlist secret
     text = f"prefix {secret} suffix"
     out = scrub_text(text, frozenset({secret}))
     assert secret not in out
@@ -231,7 +234,7 @@ def test_reflected_known_secret_replaced_in_place() -> None:
 
 
 def test_reflected_known_secret_redacted_even_when_encoded() -> None:
-    secret = "opaque-runtime-" + _secrets.token_hex(8)
+    secret = "opaque-runtime-" + _secrets.token_hex(8)  # pragma: allowlist secret
     out = scrub_text(quote(secret, safe=""), frozenset({secret}))
     assert secret not in out
 
@@ -373,8 +376,8 @@ def test_invalid_method_exception_has_no_secret() -> None:
     "method",
     [
         "Bearer sk-abcdef0123456789",
-        "AKIA1234567890ABCDEF",
-        "Bearer ghp_abcdefghijklmnopqrst0",
+        "AKIA1234567890ABCDEF",  # pragma: allowlist secret
+        "Bearer ghp_abcdefghijklmnopqrst0",  # pragma: allowlist secret
     ],
 )
 def test_secret_like_invalid_method_not_leaked_library(method: str) -> None:
@@ -384,8 +387,8 @@ def test_secret_like_invalid_method_not_leaked_library(method: str) -> None:
         transport.send(target, method=method, prompt="x", body_template="*")
     msg = str(exc.value)
     assert "sk-abcdef0123456789" not in msg
-    assert "AKIA1234567890ABCDEF" not in msg
-    assert "ghp_abcdefghijklmnopqrst0" not in msg
+    assert "AKIA1234567890ABCDEF" not in msg  # pragma: allowlist secret
+    assert "ghp_abcdefghijklmnopqrst0" not in msg  # pragma: allowlist secret
 
 
 def test_secret_like_invalid_method_not_leaked_cli(mock_server, tmp_path, capsys) -> None:
@@ -447,7 +450,7 @@ def test_cli_assess_output_and_report_have_no_seeded_secret(mock_server, tmp_pat
     from ai_scan.authorization import Receipt, write_receipt
     from tests.conftest import MockRequest, MockResponse
 
-    seed = "AKIA1234567890ABCDEF"  # credential-format literal
+    seed = "AKIA1234567890ABCDEF"  # credential-format literal  # pragma: allowlist secret
 
     def reflecting(req: MockRequest) -> MockResponse:
         return MockResponse(

@@ -46,8 +46,10 @@ EXPECTED_SDIST_FILES = [
     "docs/pack-authoring.md",
     "docs/evidence-and-retention.md",
     "docs/threat-model.md",
-    "tests/integration/test_container_worker.py",
 ]
+# Phase D contract change: tests are intentionally no longer shipped in the sdist
+# (they depend on the source-tree layout). See tests/release/test_packaging_contents.py
+# ::test_sdist_does_not_ship_tests for the enforced "tests absent" contract.
 
 
 @pytest.fixture(scope="module")

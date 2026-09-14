@@ -54,6 +54,9 @@ ai_scan = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "slow: end-to-end release checks that build artifacts (deselect with -m 'not slow')",
+]
 
 [tool.ruff]
 line-length = 100
@@ -65,7 +68,7 @@ select = ["E", "F", "I", "B", "UP", "W"]
 
 [tool.mypy]
 python_version = "3.11"
-packages = ["ai_scan"]
+packages = ["ai_scan", "scripts"]
 mypy_path = "src"
 strict = true
 warn_unused_configs = true

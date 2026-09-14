@@ -6,11 +6,18 @@ on:
     tags:
       - 'v*'
 
+# Least privilege: building/uploading workflow artifacts needs only read access.
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -23,6 +30,37 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e '.[dev]'
+
+      # --- Release gates: ALL must pass before any artifact is uploaded. ---
+
+      - name: Verify tag matches project version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import os
+          from importlib import metadata
+          tag = os.environ["TAG_NAME"].lstrip("v")
+          version = metadata.version("ai-scan")
+          assert tag == version, f"tag {tag!r} does not match project version {version!r}"
+          print(f"tag matches version {version}")
+          PY
+
+      - name: Credential scan
+        run: python -m scripts.credential_scan --root .
+
+      - name: Contract tests
+        run: python -m pytest tests/contracts -q
+
+      - name: Full tests
+        run: python -m pytest -q
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: Mypy
+        run: mypy
 
       - name: Build distributions
         run: python -m build
@@ -56,7 +94,33 @@ jobs:
               assert root.joinpath(rel).is_file(), rel
           PY
 
-      - name: Reproducible artifact listing
+      - name: Dependency audit
+        run: |
+          python - <<'PY'
+          from importlib import metadata
+          deps = metadata.metadata('ai-scan').get_all('Requires-Dist') or []
+          runtime_deps = [d for d in deps if 'extra ==' not in d]
+          assert runtime_deps == [], runtime_deps
+          print('runtime dependencies: none')
+          PY
+
+      - name: Generate and validate SBOM
+        run: python -m scripts.generate_sbom --out sbom.cdx.json
+
+      - name: Reproducible build check
+        run: python -m scripts.reproducible_build
+
+      - name: Container worker build and scan
+        run: |
+          test -f Dockerfile.worker
+          test -f .dockerignore
+          grep -q '^USER ' Dockerfile.worker
+          grep -q 'network none' docs/container-worker.md
+          docker build -f Dockerfile.worker -t ai-scan-worker:release .
+          uid="$(docker run --rm --entrypoint id ai-scan-worker:release -u)"
+          test "$uid" != "0"
+
+      - name: Artifact contents listing
         run: |
           python - <<'PY'
           import json, tarfile, zipfile
@@ -69,14 +133,19 @@ jobs:
               elif artifact.name.endswith('.tar.gz'):
                   with tarfile.open(artifact, 'r:gz') as tf:
                       listing[artifact.name] = sorted(tf.getnames())
-          Path('dist/artifact-contents.json').write_text(json.dumps(listing, indent=2, sort_keys=True) + '\n')
+          listing['sbom.cdx.json'] = json.loads(Path('sbom.cdx.json').read_text(encoding='utf-8'))
+          Path('dist/artifact-contents.json').write_text(
+              json.dumps(listing, indent=2, sort_keys=True) + '\n'
+          )
           PY
 
+      # --- Only reached when every gate above passed. ---
       - name: Upload artifacts
-        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.6.2
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ai-scan-dist
           path: |
             dist/*.whl
             dist/*.tar.gz
+            sbom.cdx.json
             dist/artifact-contents.json

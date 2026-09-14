@@ -1,5 +1,15 @@
-include LICENSE README.md CHANGELOG.md Dockerfile.worker
+include LICENSE README.md CHANGELOG.md Dockerfile.worker .dockerignore
 recursive-include docker *.py
 recursive-include docs *.md
 recursive-include src/ai_scan *.py *.typed *.json *.html
-recursive-include tests *.py
+
+# Defensive exclusions so local/generated state can never enter an artifact.
+prune tests
+prune scripts
+prune .hermes
+prune dist
+prune build
+prune .github
+global-exclude *.pyc *.pyo
+global-exclude *.checkpoint.json *.bundle.json *.receipt.json sbom.cdx.json
+global-exclude __pycache__/*

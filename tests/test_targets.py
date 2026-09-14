@@ -36,7 +36,7 @@ def test_retains_non_default_ports() -> None:
 
 def test_rejects_embedded_credentials() -> None:
     with pytest.raises(TargetError):
-        normalize_target("http://user:pass@example.com/")
+        normalize_target("http://user:pass@example.com/")  # pragma: allowlist secret
 
 
 def test_rejects_missing_host() -> None:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import IO, Any
 
 MAX_PAYLOAD_BYTES = 64 * 1024
 MAX_MESSAGE_BYTES = 128 * 1024
@@ -20,6 +21,32 @@ SUPPORTED_OPERATIONS = frozenset({"ping", "echo"})
 
 class WorkerProtocolError(ValueError):
     """Raised when a worker message is malformed or unsupported."""
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in out:
+            raise WorkerProtocolError("worker message has duplicate JSON keys")
+        out[key] = value
+    return out
+
+
+def _reject_non_finite(_constant: str) -> float:
+    raise WorkerProtocolError("worker message contains a non-finite number")
+
+
+def read_bounded(stream: IO[bytes]) -> bytes:
+    """Read at most one message from ``stream``, bounding the allocation.
+
+    Reads only ``MAX_MESSAGE_BYTES + 1`` bytes so an unbounded/huge stdin cannot
+    force a large allocation before the size is checked; anything larger than the
+    limit fails closed without consuming the rest of the stream.
+    """
+    raw = stream.read(MAX_MESSAGE_BYTES + 1)
+    if len(raw) > MAX_MESSAGE_BYTES:
+        raise WorkerProtocolError("worker message exceeds the maximum size")
+    return raw
 
 
 def _require_string(value: object, field: str, *, allow_empty: bool = False) -> str:
@@ -42,7 +69,11 @@ def _loads_object(raw: bytes | str, where: str) -> dict[str, object]:
     if len(encoded) > MAX_MESSAGE_BYTES:
         raise WorkerProtocolError(f"{where} exceeds the maximum message size")
     try:
-        parsed = json.loads(encoded.decode("utf-8"))
+        parsed = json.loads(
+            encoded.decode("utf-8"),
+            object_pairs_hook=_no_duplicate_keys,
+            parse_constant=_reject_non_finite,
+        )
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise WorkerProtocolError(f"{where} must be valid UTF-8 JSON") from exc
     if not isinstance(parsed, dict):

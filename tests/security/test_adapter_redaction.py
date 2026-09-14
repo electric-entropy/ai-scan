@@ -19,7 +19,7 @@ from ai_scan.adapters import (
 from ai_scan.targets import normalize_target
 
 # Credential-format literal that the central scrubber redacts on sight.
-_SECRET = "ghp_abcdefghijklmnopqrstuvwxyz0123"
+_SECRET = "ghp_abcdefghijklmnopqrstuvwxyz0123"  # pragma: allowlist secret
 _TARGET = normalize_target("http://127.0.0.1:8080/chat")
 
 

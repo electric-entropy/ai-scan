@@ -17,9 +17,15 @@ ai-scan authorize --target https://example.test/chat --client Client --engagemen
 ai-scan plan --target https://example.test/chat --mode reliable --out plan.json
 ai-scan run --target https://example.test/chat --plan plan.json --auth-receipt auth.json --non-interactive --out report.json
 ai-scan report --file report.json --format markdown
-ai-scan bundle validate --bundle evidence-bundle.json
-ai-scan bundle replay --bundle evidence-bundle.json --out replay-report.json
+ai-scan bundle validate --file evidence-bundle.json
+ai-scan bundle replay --file evidence-bundle.json
+ai-scan replay --bundle evidence-bundle.json --validate-only
 ```
+
+`bundle validate`/`bundle replay` and the top-level `replay --bundle ... --validate-only`
+are **offline** — they verify digests/graph and reproduce the stored
+classification without constructing any transport. A tampered bundle exits
+non-zero with a scrubbed error.
 
 ## Interpreting outcomes
 
@@ -45,3 +51,25 @@ ai-scan --help
 ```
 
 Release validation uses only local fixtures and package-resource checks. Do not point release jobs at external targets.
+
+## Shipped package contents
+
+The wheel and sdist ship the runtime package only: `ai_scan/` source, `py.typed`,
+the JSON `schemas`, the builtin `packs`, the report template, and the `LICENSE`
+(PolyForm Shield 1.0.0 — a source-available, not OSI/open-source, license). The
+CLI entry point (`ai-scan`) is registered in the wheel metadata.
+**Tests are not shipped in the sdist** (they depend on the source-tree layout);
+run the suite from a source checkout. Release-gate tooling under `scripts/`
+(credential scan, SBOM generation, reproducible-build check) is not shipped either.
+
+## Release path
+
+The supported release path is: (1) run the local gates above from a clean tree;
+(2) build artifacts (`python -m build`); (3) inspect wheel/sdist contents; (4)
+fresh-wheel install smoke; (5) the tag-gated `Package` workflow, which re-runs
+every gate — tests, ruff, mypy, credential scan, SBOM generation, reproducible
+build, worker image build/scan — and verifies the pushed tag equals the project
+version **before** uploading the built `dist/*` and SBOM as workflow artifacts.
+The workflow does **not** publish to any index on push; publishing is a separate,
+deliberate step. No artifact signing, attestation, or provenance is produced or
+claimed.

@@ -24,7 +24,7 @@ All notable changes to AI-Scan are documented here. The project uses a conservat
 
 ### Compatibility
 
-- Existing MVP command shapes remain available; `assess` resolves to Reliable mode by default.
+- Existing MVP command shapes remain available; `assess` remains legacy v1 compatibility semantics (single response per attack case), while Reliable v2 (repeated trials, controls, evidence graph, replayable bundles) is the `plan --mode reliable` + `run` path.
 - Report schema v1 compatibility is preserved for legacy commands while v2 evidence/finding artifacts support the new run path.
 
 ## 0.1.0 - 2026-09-11

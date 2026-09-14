@@ -1,21 +1,30 @@
 """Docker-backed optional local worker launcher.
 
 The launcher builds a deterministic `docker run` command with fail-closed
-hardening. It uses `subprocess.run([...], shell=False)` only, validates all
-operator-controlled values before command construction, and keeps Docker network
-access disabled by default so the worker cannot create an out-of-broker egress
-path.
+hardening. It runs the process with `subprocess.Popen([...], shell=False)` and a
+bounded stdout read (never `capture_output`, which would fully buffer a hostile
+worker's stdout before validation), validates all operator-controlled values
+before command construction, and keeps Docker network access disabled by default
+so the worker cannot create an out-of-broker egress path.
 """
 
 from __future__ import annotations
 
+import math
 import re
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import IO, Final
 
-from ai_scan.worker.protocol import WorkerProtocolError, WorkerRequest, WorkerResult
+from ai_scan.worker.protocol import (
+    MAX_MESSAGE_BYTES,
+    WorkerProtocolError,
+    WorkerRequest,
+    WorkerResult,
+)
 
 _IMAGE_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/@-]{0,255}$")
 _SECRET_ENV_RE: Final = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
@@ -36,6 +45,8 @@ def _validate_positive_int(value: int, field: str) -> None:
 def _validate_positive_float(value: float, field: str) -> None:
     if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
         raise ValueError(f"{field} must be a positive number")
+    if not math.isfinite(value):
+        raise ValueError(f"{field} must be a finite number")
 
 
 def _validate_docker_token(value: str, field: str) -> str:
@@ -50,7 +61,23 @@ def _artifact_dir(path: Path | None) -> Path | None:
     resolved = path.expanduser().resolve()
     if not resolved.exists() or not resolved.is_dir():
         raise ValueError("artifact_dir must be an existing directory")
+    # Expose an EMPTY dedicated output directory, never one with arbitrary
+    # pre-existing contents that could leak into or out of the worker.
+    if any(resolved.iterdir()):
+        raise ValueError("artifact_dir must be an empty dedicated directory")
     return resolved
+
+
+def _read_capped(stream: IO[bytes], cap: int) -> bytes:
+    """Read at most ``cap`` bytes; fail closed if the stream exceeds it.
+
+    Reads ``cap + 1`` bytes so an unbounded worker stdout cannot force a large
+    allocation before the size is checked.
+    """
+    raw = stream.read(cap + 1)
+    if len(raw) > cap:
+        raise WorkerExecutionError("isolated worker produced too much output")
+    return raw
 
 
 @dataclass(frozen=True)
@@ -136,20 +163,71 @@ class LocalWorker:
 
     def run(self, request: WorkerRequest) -> WorkerResult:
         command = self.options.docker_run_command()
+        request_bytes = request.to_json().encode("utf-8")
+        # Stream stdout with a bounded read instead of subprocess.run(
+        # capture_output=True), which would fully buffer a hostile worker's
+        # stdout in memory before any size check. stderr is redirected to
+        # /dev/null so the same allocation issue cannot move there.
         try:
-            completed = subprocess.run(
+            proc = subprocess.Popen(
                 command,
-                input=request.to_json(),
-                text=True,
-                capture_output=True,
-                timeout=self.options.timeout_seconds,
-                check=False,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except OSError as exc:
             raise WorkerExecutionError("isolated worker execution failed") from exc
-        if completed.returncode != 0:
-            raise WorkerExecutionError("isolated worker exited unsuccessfully")
+
+        assert proc.stdin is not None and proc.stdout is not None
+        stdin, stdout_stream = proc.stdin, proc.stdout
+
+        def _write() -> None:
+            try:
+                stdin.write(request_bytes)
+                stdin.close()
+            except OSError:
+                # Worker exited/closed stdin early; stdout/return code decide.
+                pass
+
+        read_result: dict[str, object] = {}
+
+        def _read() -> None:
+            try:
+                read_result["stdout"] = _read_capped(stdout_stream, MAX_MESSAGE_BYTES)
+            except WorkerExecutionError as exc:  # oversized output
+                read_result["error"] = exc
+
+        # The whole IO (stdin write, bounded stdout read, and process exit) must
+        # complete within timeout_seconds. Both the write and the read run on
+        # daemon threads so a worker that never reads stdin, or that emits a
+        # partial result and holds stdout open, cannot hang past the deadline.
+        deadline = time.monotonic() + self.options.timeout_seconds
+        writer = threading.Thread(target=_write, daemon=True)
+        reader = threading.Thread(target=_read, daemon=True)
+        writer.start()
+        reader.start()
         try:
-            return WorkerResult.from_json(completed.stdout)
+            writer.join(max(0.0, deadline - time.monotonic()))
+            reader.join(max(0.0, deadline - time.monotonic()))
+            if writer.is_alive() or reader.is_alive():
+                raise WorkerExecutionError("isolated worker timed out")
+            if "error" in read_result:
+                raise read_result["error"]  # type: ignore[misc]
+            try:
+                returncode = proc.wait(timeout=max(0.0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired as exc:
+                raise WorkerExecutionError("isolated worker timed out") from exc
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            # Reap the IO threads once the process is gone (their blocking pipe
+            # operations unblock on kill).
+            writer.join(1.0)
+            reader.join(1.0)
+        if returncode != 0:
+            raise WorkerExecutionError("isolated worker exited unsuccessfully")
+        stdout = read_result.get("stdout", b"")
+        try:
+            return WorkerResult.from_json(stdout)  # type: ignore[arg-type]
         except WorkerProtocolError as exc:
             raise WorkerExecutionError("isolated worker returned invalid protocol output") from exc

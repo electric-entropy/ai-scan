@@ -39,9 +39,13 @@ ai-scan validate-receipt --auth-receipt FILE --target URL
 Active commands (`fingerprint`, `inject`, `assess`, `run`) require authorization. Without
 `--auth-receipt` they prompt for a literal confirmation phrase for the normalized
 target origin. With `--non-interactive` and no valid receipt, they exit `2`
-**before any network traffic is sent**. `assess` uses the conservative
-`reliable` mode. A v1 receipt cannot authorize headless `kitchen-sink` execution;
-use an interactive authorization path until signed v2 receipts land.
+**before any network traffic is sent**. `assess` runs **legacy v1 semantics**
+(a single response per attack case, single-origin, no repeated-trial
+confirmation, controls, or evidence graph) — it is *not* Reliable (v2) mode.
+Reliable v2 (repeated trials, clean controls, confirmation, evidence graph,
+replayable bundles) is the `plan` + `run` path. A v1 receipt cannot authorize
+headless `kitchen-sink` execution; use an interactive authorization path until
+signed v2 receipts land.
 
 ### Exit codes
 

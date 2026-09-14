@@ -93,36 +93,62 @@ def test_entrypoint_does_not_reflect_malformed_payload() -> None:
     assert result.output == "invalid worker request"
 
 
+class _FakePopen:
+    """Minimal stand-in for subprocess.Popen used by LocalWorker.run()."""
+
+    def __init__(self, stdout: bytes, returncode: int = 0) -> None:
+        import io
+
+        self.stdin = io.BytesIO()
+        self.stdout = io.BytesIO(stdout)
+        self._rc = returncode
+        self.wait_timeout: float | None = None
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.wait_timeout = timeout
+        return self._rc
+
+    def poll(self) -> int:
+        return self._rc
+
+    def kill(self) -> None:  # pragma: no cover - not reached on the happy path
+        pass
+
+
 def test_local_worker_uses_shell_false_and_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
+    procs: list[_FakePopen] = []
 
-    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_popen(*args: object, **kwargs: object) -> _FakePopen:
         calls.append({"args": args, "kwargs": kwargs})
-        return subprocess.CompletedProcess(
-            args=cast(list[str], args[0]),
-            returncode=0,
-            stdout=WorkerResult("worker-v1", "ok", "pong").to_json(),
-            stderr="",
-        )
+        proc = _FakePopen(WorkerResult("worker-v1", "ok", "pong").to_json().encode("utf-8"))
+        procs.append(proc)
+        return proc
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    request = WorkerRequest("worker-v1", "ping", "")
-    result = LocalWorker(WorkerOptions(timeout_seconds=7)).run(request)
+    def forbid_run(*_a: object, **_k: object) -> None:
+        raise AssertionError("run() must stream via Popen, not subprocess.run")
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(subprocess, "run", forbid_run)
+    worker = LocalWorker(WorkerOptions(timeout_seconds=7))
+    result = worker.run(WorkerRequest("worker-v1", "ping", ""))
     assert result.output == "pong"
-    assert calls
     kwargs = cast(dict[str, Any], calls[0]["kwargs"])
     args = cast(tuple[object, ...], calls[0]["args"])
-    assert kwargs["timeout"] == 7
     assert "shell" not in kwargs
+    assert "capture_output" not in kwargs
+    assert kwargs["stdout"] is subprocess.PIPE
+    assert kwargs["stderr"] is subprocess.DEVNULL
     assert isinstance(args[0], list)
+    # timeout is enforced as the remaining deadline budget (0 < t <= 7).
+    assert procs[0].wait_timeout is not None
+    assert 0 < procs[0].wait_timeout <= 7
 
 
 def test_local_worker_fail_closed_on_bad_worker_output(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fake_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            args=cast(list[str], args[0]), returncode=0, stdout="{}", stderr=""
-        )
+    def fake_popen(*args: object, **kwargs: object) -> _FakePopen:
+        return _FakePopen(b"{}", returncode=0)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
     with pytest.raises(WorkerExecutionError):
         LocalWorker().run(WorkerRequest("worker-v1", "ping", ""))

@@ -90,7 +90,7 @@ def test_malformed_plugin_fails_closed_before_any_request() -> None:
 
 
 def test_plugin_build_exception_is_scrubbed() -> None:
-    secret = "ghp_abcdefghijklmnopqrstuvwxyz0123"
+    secret = "ghp_abcdefghijklmnopqrstuvwxyz0123"  # pragma: allowlist secret
 
     class ExplodingPlugin:
         id = "boom"
@@ -110,7 +110,7 @@ def test_plugin_build_exception_is_scrubbed() -> None:
     assert "REDACTED" in str(exc.value)
 
 
-_SECRET = "ghp_abcdefghijklmnopqrstuvwxyz0123"
+_SECRET = "ghp_abcdefghijklmnopqrstuvwxyz0123"  # pragma: allowlist secret
 
 
 def _never(_case: AttackCase) -> ExchangeOutcome:

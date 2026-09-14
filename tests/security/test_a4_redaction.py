@@ -85,7 +85,7 @@ def test_run_plan_checkpoint_redacts_reflected_secret(tmp_path) -> None:
     from ai_scan.orchestration import compile_plan, run_plan
     from ai_scan.targets import normalize_target
 
-    secret = "opaqueReflectedRunSecret"
+    secret = "opaqueReflectedRunSecret"  # pragma: allowlist secret
     plan = compile_plan(normalize_target("http://127.0.0.1:9/chat"), "reliable")
     checkpoint_path = str(tmp_path / "run.ckpt")
 
@@ -104,7 +104,7 @@ def test_run_plan_checkpoint_redacts_reflected_secret(tmp_path) -> None:
 
 
 def test_checkpoint_redacts_secrets_before_write_and_is_0600(tmp_path) -> None:
-    secret = "opaqueRunSecretValue"
+    secret = "opaqueRunSecretValue"  # pragma: allowlist secret
     digest_like = "d" * 64
     checkpoint = Checkpoint(
         plan_digest=digest_like,

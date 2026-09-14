@@ -176,13 +176,13 @@ def test_path_traversal_rejected(value: str) -> None:
 @pytest.mark.parametrize(
     "secret",
     [
-        "AKIA1234567890ABCDEF",
+        "AKIA1234567890ABCDEF",  # pragma: allowlist secret
         "sk-abcdefghijklmnop0123",
-        "ghp_abcdefghijklmnopqrstuvwxyz0123",
-        "-----BEGIN RSA PRIVATE KEY-----",
+        "ghp_abcdefghijklmnopqrstuvwxyz0123",  # pragma: allowlist secret
+        "-----BEGIN RSA PRIVATE KEY-----",  # pragma: allowlist secret
         "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl",
         "Bearer abcdef0123456789ABCDEF",
-        "ASIA1234567890ABCDEF",
+        "ASIA1234567890ABCDEF",  # pragma: allowlist secret
     ],
 )
 def test_secret_literals_rejected(secret: str) -> None:
@@ -195,7 +195,10 @@ def test_secret_literals_rejected(secret: str) -> None:
 
 def test_tokenlike_payload_text_is_allowed() -> None:
     # Field-aware: payload/body text that merely *resembles* a token is benign.
-    tokenlike = '{"q": "try Bearer sk-abcdef0123456789 / AKIA1234567890ABCDEF : *"}'
+    tokenlike = (
+        '{"q": "try Bearer sk-abcdef0123456789 / '
+        'AKIA1234567890ABCDEF : *"}'  # pragma: allowlist secret
+    )
     doc = _target(request={"method": "POST", "prompt_marker": "*", "body_template": tokenlike})
     assert load_document(json.dumps(doc), "target")["name"] == "app"
 
@@ -255,7 +258,7 @@ def test_plan_missing_required_field_rejected() -> None:
 @pytest.mark.parametrize(
     "scope",
     [
-        "https://user:pass@api.example.com/chat",  # credentials
+        "https://user:pass@api.example.com/chat",  # credentials  # pragma: allowlist secret
         "https://api.example.com/#frag",           # fragment
         "https://API.example.com/chat",            # not normalized (uppercase host)
         "ftp://api.example.com/chat",              # wrong scheme
@@ -270,7 +273,7 @@ def test_invalid_plan_target_rejected(scope: str) -> None:
 
 
 def test_endpoint_with_credentials_rejected() -> None:
-    doc = _target(endpoints=["https://user:pass@api.example.com/chat"])
+    doc = _target(endpoints=["https://user:pass@api.example.com/chat"])  # pragma: allowlist secret
     with pytest.raises(ConfigError):
         load_document(json.dumps(doc), "target")
 

@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import sys
 
-from ai_scan.worker.protocol import WorkerProtocolError, WorkerRequest, error_result, handle_request
+from ai_scan.worker.protocol import (
+    WorkerProtocolError,
+    WorkerRequest,
+    error_result,
+    handle_request,
+    read_bounded,
+)
 
 
 def main() -> int:
-    raw = sys.stdin.buffer.read()
     try:
+        raw = read_bounded(sys.stdin.buffer)  # bound stdin before full allocation
         request = WorkerRequest.from_json(raw)
         result = handle_request(request)
     except WorkerProtocolError:

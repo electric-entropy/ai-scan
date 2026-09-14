@@ -31,7 +31,7 @@ from ai_scan.transport.redaction import (
 )
 
 # A credential-format literal that scrub_text redacts on sight (gh token family).
-_CRED = "ghp_1234567890abcdefABCDEF12"
+_CRED = "ghp_1234567890abcdefABCDEF12"  # pragma: allowlist secret
 
 
 # --- Fix 1: expiry / created_at scrubbed before the error boundary ------------

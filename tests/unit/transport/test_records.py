@@ -54,15 +54,15 @@ def _record(**overrides) -> ExchangeRecord:
 
 def test_build_record_redacts_headers_body_url() -> None:
     rec = _record(
-        url="https://user:pass@api.example.com/chat?token=LEAK",
-        body="reflected AKIA1234567890ABCDEF here",
+        url="https://user:pass@api.example.com/chat?token=LEAK",  # pragma: allowlist secret
+        body="reflected AKIA1234567890ABCDEF here",  # pragma: allowlist secret
     )
     dumped = json.dumps(rec.to_dict())
     assert "Bearer sk-" not in dumped
     assert "sk-abcdef0123456789" not in dumped
     assert "user:pass" not in dumped
     assert "LEAK" not in dumped
-    assert "AKIA1234567890ABCDEF" not in dumped
+    assert "AKIA1234567890ABCDEF" not in dumped  # pragma: allowlist secret
     # sensitive headers redacted
     assert rec.request.headers["Authorization"] == "REDACTED"
     assert rec.response.headers["Set-Cookie"] == "REDACTED"
@@ -238,7 +238,7 @@ def test_record_is_rejected_if_nested_child_hides_a_secret() -> None:
     rec = _record()
     bad_response = ResponseRecord(
         status=200,
-        headers={"X-Leak": "AKIA1234567890ABCDEF"},  # credential literal survives
+        headers={"X-Leak": "AKIA1234567890ABCDEF"},  # pragma: allowlist secret
         body="{}",
         redirected=False,
         redirect_location=None,
@@ -313,24 +313,26 @@ def test_exchange_record_rejects_bad_schema_version() -> None:
 
 def test_secret_in_url_path_redacted() -> None:
     rec = build_exchange_record(
-        method="POST", url="https://api.example.com/AKIA1234567890ABCDEF/x",
+        method="POST",
+        url="https://api.example.com/AKIA1234567890ABCDEF/x",  # pragma: allowlist secret
         request_headers={}, status=200, response_headers={}, body="{}",
         redirected=False, redirect_location=None, truncated=False, attempts=1,
     )
-    assert "AKIA1234567890ABCDEF" not in json.dumps(rec.to_dict())
+    assert "AKIA1234567890ABCDEF" not in json.dumps(rec.to_dict())  # pragma: allowlist secret
 
 
 def test_secret_in_response_header_value_redacted() -> None:
     rec = build_exchange_record(
         method="POST", url="https://api.example.com/x", request_headers={},
-        status=200, response_headers={"X-Thing": "AKIA1234567890ABCDEF"},
+        status=200,
+        response_headers={"X-Thing": "AKIA1234567890ABCDEF"},  # pragma: allowlist secret
         body="{}", redirected=False, redirect_location=None, truncated=False, attempts=1,
     )
-    assert "AKIA1234567890ABCDEF" not in json.dumps(rec.to_dict())
+    assert "AKIA1234567890ABCDEF" not in json.dumps(rec.to_dict())  # pragma: allowlist secret
 
 
 def test_known_secret_in_body_redacted() -> None:
-    secret = "runtime-opaque-0123456789abcdef"
+    secret = "runtime-opaque-0123456789abcdef"  # pragma: allowlist secret
     rec = build_exchange_record(
         method="POST", url="https://api.example.com/x", request_headers={},
         status=200, response_headers={}, body=f"reply: {secret}",
