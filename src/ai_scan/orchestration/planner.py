@@ -29,6 +29,7 @@ _ALLOWED_TOP_LEVEL = frozenset(
         "plan_version",
         "mode",
         "origin",
+        "target",
         "adapter",
         "seed",
         "packs",
@@ -49,6 +50,22 @@ def _canonical_origin(origin: str) -> str:
     if normalized.origin != origin or normalized.path or normalized.query:
         raise PlanError("plan origin is not a bare canonical origin")
     return origin
+
+
+def _canonical_target(url: str, origin: str) -> str:
+    """Validate the exact target URL: canonical, and sharing ``origin``.
+
+    The plan binds the *exact* target (scheme/host/port/path/query), not only
+    the origin, so a plan compiled for one path cannot be run against another
+    path on the same origin.
+    """
+    try:
+        normalized = normalize_target(url)
+    except TargetError as exc:
+        raise PlanError("plan target is not a valid target URL") from exc
+    if normalized.url != url or normalized.origin != origin:
+        raise PlanError("plan target is not canonical or does not match the plan origin")
+    return url
 
 
 class PlanError(Exception):
@@ -99,6 +116,7 @@ class Plan:
     plan_version: int
     mode: str
     origin: str
+    target: str
     adapter: str
     seed: int
     packs: tuple[tuple[str, str, str], ...]  # (id, version, digest)
@@ -113,6 +131,7 @@ class Plan:
         if self.mode not in {"reliable", "kitchen-sink"}:
             raise PlanError("invalid plan mode")
         _canonical_origin(_require_str(self.origin, "origin"))
+        _canonical_target(_require_str(self.target, "target"), self.origin)
         _require_str(self.adapter, "adapter")
         _require_int(self.seed, "seed", positive=False)
         if not isinstance(self.packs, tuple):
@@ -163,7 +182,7 @@ def _case_rows(packs: list[Pack]) -> list[PlannedCase]:
 
 
 def _plan_body(
-    *, mode: str, origin: str, adapter: str, seed: int,
+    *, mode: str, origin: str, target: str, adapter: str, seed: int,
     packs: list[Pack], cases: list[PlannedCase], limits: PlanLimits,
     trial_policy: tuple[int, int, int],
 ) -> dict[str, Any]:
@@ -171,6 +190,7 @@ def _plan_body(
         "plan_version": PLAN_VERSION,
         "mode": mode,
         "origin": origin,
+        "target": target,
         "adapter": adapter,
         "seed": seed,
         "packs": [[p.id, p.version, p.digest] for p in packs],
@@ -217,7 +237,7 @@ def compile_plan(
         policy.minimum_control_trials,
     )
     body = _plan_body(
-        mode=mode, origin=target.origin, adapter=adapter, seed=seed,
+        mode=mode, origin=target.origin, target=target.url, adapter=adapter, seed=seed,
         packs=packs, cases=cases, limits=limits, trial_policy=trial_policy,
     )
     digest = compute_digest(body)
@@ -225,6 +245,7 @@ def compile_plan(
         plan_version=PLAN_VERSION,
         mode=mode,
         origin=target.origin,
+        target=target.url,
         adapter=adapter,
         seed=seed,
         packs=tuple((p.id, p.version, p.digest) for p in packs),
@@ -235,11 +256,38 @@ def compile_plan(
     )
 
 
+def verify_plan_integrity(plan: Plan) -> None:
+    """Reject a re-digested plan that does not match its policy/registry values.
+
+    A self-consistent digest only proves the plan has not been *corrupted*; it
+    does not prove the plan is the canonical one policy would compile. Here the
+    canonical plan for the plan's own ``(mode, origin, adapter, seed)`` is
+    recompiled offline and its digest compared: any widened limit, altered case,
+    swapped/added/removed pack, or changed trial policy changes the digest and
+    is rejected. The adapter must also be a *registered* adapter identifier.
+    """
+    from ai_scan.adapters.registry import available_adapters
+
+    if plan.adapter not in available_adapters():
+        raise PlanError("plan references an unregistered adapter")
+    try:
+        target = normalize_target(plan.target)
+    except TargetError as exc:
+        raise PlanError("plan target is not a valid target") from exc
+    canonical = compile_plan(target, plan.mode, adapter=plan.adapter, seed=plan.seed)
+    if plan.digest != canonical.digest:
+        raise PlanError(
+            "plan does not match the canonical policy-derived plan for its mode "
+            "(re-digested or tampered plan rejected)"
+        )
+
+
 def plan_to_dict(plan: Plan) -> dict[str, Any]:
     """Serialize a plan to a JSON-ready dict (digest included)."""
     body = _plan_body(
-        mode=plan.mode, origin=plan.origin, adapter=plan.adapter, seed=plan.seed,
-        packs=[], cases=list(plan.cases), limits=plan.limits, trial_policy=plan.trial_policy,
+        mode=plan.mode, origin=plan.origin, target=plan.target, adapter=plan.adapter,
+        seed=plan.seed, packs=[], cases=list(plan.cases), limits=plan.limits,
+        trial_policy=plan.trial_policy,
     )
     body["packs"] = [list(p) for p in plan.packs]
     body["digest"] = plan.digest
@@ -267,6 +315,7 @@ def load_plan(data: Mapping[str, Any]) -> Plan:
         if mode not in {"reliable", "kitchen-sink"}:
             raise PlanError("invalid plan mode")
         origin = _canonical_origin(_require_str(data["origin"], "origin"))
+        target = _canonical_target(_require_str(data["target"], "target"), origin)
         adapter = _require_str(data["adapter"], "adapter")
         seed = _require_int(data["seed"], "seed", positive=False)
         limits_raw = _require_sequence(data["limits"], "limits", length=4)
@@ -331,6 +380,7 @@ def load_plan(data: Mapping[str, Any]) -> Plan:
             plan_version=PLAN_VERSION,
             mode=mode,
             origin=origin,
+            target=target,
             adapter=adapter,
             seed=seed,
             packs=packs,

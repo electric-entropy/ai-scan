@@ -112,6 +112,16 @@ def test_control_success_blocks_confirmation() -> None:
     assert classify([_exec_signal()], ctx).status is FindingStatus.SUSPECTED
 
 
+def test_no_matched_clean_control_cannot_confirm() -> None:
+    # A clean, repeatable execution with NO usable matched control cannot confirm:
+    # "control did not emit the canary" is not the same as "a clean control ran".
+    ctx = GatingContext(
+        matched_clean_control=False,
+        attack_trials=3, successes=3, min_attack_trials=3, min_successes=2,
+    )
+    assert classify([_exec_signal()], ctx).status is FindingStatus.LIKELY
+
+
 def test_low_repeatability_downgrades_to_likely() -> None:
     ctx = GatingContext(successes=1, min_successes=2, attack_trials=3, min_attack_trials=3)
     assert classify([_exec_signal()], ctx).status is FindingStatus.LIKELY

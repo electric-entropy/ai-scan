@@ -39,9 +39,16 @@ from ai_scan.transport._errors import (
     TransportError,
 )
 from ai_scan.transport.broker import RawExchange, RequestBroker, _NoRedirect
-from ai_scan.transport.budgets import AttemptKind, BudgetLedger
+from ai_scan.transport.budgets import (
+    AttemptKind,
+    BudgetLedger,
+    _require_finite_non_negative,
+    _require_finite_positive,
+    _require_positive_int,
+)
 from ai_scan.transport.records import ExchangeRecord, build_exchange_record
 from ai_scan.transport.redaction import (
+    body_secret_values,
     redact_headers,
     redact_url,
     scrub_text,
@@ -109,7 +116,7 @@ class RequestController:
 
     max_requests: int
     min_interval: float = 0.0
-    max_duration_seconds: float = float("inf")
+    max_duration_seconds: float | None = None
     max_concurrency: int = 1
     clock: Callable[[], float] = time.monotonic
     sleeper: Callable[[float], None] = time.sleep
@@ -170,24 +177,21 @@ class TransportConfig:
     max_retries: int = 2
     max_requests: int = 64
     min_interval_seconds: float = 0.0
-    max_duration_seconds: float = float("inf")
+    max_duration_seconds: float | None = None
     max_concurrency: int = 1
 
     def __post_init__(self) -> None:
-        if self.timeout <= 0:
-            raise ValueError("timeout must be positive")
-        if self.max_response_bytes <= 0:
-            raise ValueError("max_response_bytes must be positive")
+        _require_finite_positive("timeout", self.timeout)
+        _require_positive_int("max_response_bytes", self.max_response_bytes)
+        if isinstance(self.max_retries, bool) or not isinstance(self.max_retries, int):
+            raise ValueError("max_retries must be an integer")
         if self.max_retries < 0:
             raise ValueError("max_retries must be non-negative")
-        if self.max_requests <= 0:
-            raise ValueError("max_requests must be positive")
-        if self.min_interval_seconds < 0:
-            raise ValueError("min_interval_seconds must be non-negative")
-        if self.max_duration_seconds <= 0:
-            raise ValueError("max_duration_seconds must be positive")
-        if self.max_concurrency <= 0:
-            raise ValueError("max_concurrency must be positive")
+        _require_positive_int("max_requests", self.max_requests)
+        _require_finite_non_negative("min_interval_seconds", self.min_interval_seconds)
+        if self.max_duration_seconds is not None:
+            _require_finite_positive("max_duration_seconds", self.max_duration_seconds)
+        _require_positive_int("max_concurrency", self.max_concurrency)
 
 
 @dataclass
@@ -371,7 +375,11 @@ class Transport:
             req_headers.setdefault("Content-Type", "application/json")
 
         redacted = redact_headers(req_headers)
-        secret_values = sensitive_header_values(req_headers) | url_secret_values(target.url)
+        secret_values = (
+            sensitive_header_values(req_headers)
+            | url_secret_values(target.url)
+            | body_secret_values(data, req_headers.get("Content-Type"))
+        )
         request_line = {
             "method": method,
             "url": redact_url(_apply_marker(target.url, "<PROMPT>")),
@@ -441,6 +449,7 @@ class Transport:
             sensitive_header_values(req_headers)
             | url_secret_values(target.url)
             | url_secret_values(prepared.url)
+            | body_secret_values(prepared.body, req_headers.get("Content-Type"))
         )
         request_line = {"method": method, "url": redact_url(prepared.url)}
 

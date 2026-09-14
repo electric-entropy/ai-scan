@@ -46,7 +46,8 @@ low false-positive operation.
 - No judge-only validators.
 - No uncontrolled concurrency.
 - Recommended default limits: 2 requests/second, 256 physical requests,
-  30-minute duration, explicit optional model-cost ceiling.
+  30-minute duration. A model-cost ceiling may be declared but is not yet
+  enforced at runtime.
 
 **Reliable confirmation predicate** — a finding is `confirmed` only when all
 applicable conditions hold:
@@ -83,7 +84,8 @@ an analyst.
   HTML, and SARIF.
 - Higher default request budget is allowed but remains finite and visible;
   recommended defaults: 5 requests/second, 2,000 physical requests, 2-hour
-  duration, explicit model-cost ceiling.
+  duration. A model-cost ceiling may be declared but is not yet enforced at
+  runtime.
 - Intrusive families still require separate receipt capabilities and, for
   interactive runs, a second exact confirmation naming the capability.
 - Any unconfirmed result is never phrased as a vulnerability.

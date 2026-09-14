@@ -19,6 +19,7 @@ deterministic validation still works.
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
@@ -287,6 +288,75 @@ def url_secret_values(url: str) -> frozenset[str]:
             if value:
                 values.update(_value_variants(value))
     return frozenset(values)
+
+
+def body_secret_values(
+    body: bytes | str | None, content_type: str | None = None
+) -> frozenset[str]:
+    """Collect credential values from a structured JSON or form request body.
+
+    A credential placed in a request body (``{"api_key": "<opaque>"}`` or
+    ``token=<opaque>``) must be tracked as a known secret *before* sending, so a
+    target that reflects the body cannot leak it into the response, evidence, or
+    stored record. Classification uses the same credential-key logic as headers
+    and URLs. Values are expanded through :func:`_value_variants` so an encoded
+    reflection is caught. Unparseable bodies contribute nothing (fail open only
+    on *collection* — the value scrubbers remain the enforcement boundary).
+    """
+    if not body:
+        return frozenset()
+    text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else body
+    ctype = (content_type or "").lower()
+    values: set[str] = set()
+
+    def _harvest_json() -> bool:
+        try:
+            parsed = json.loads(text)
+        except (ValueError, TypeError):
+            return False
+        _collect_structured_secrets(parsed, values)
+        return True
+
+    def _harvest_form() -> None:
+        for key, value in parse_qsl(text, keep_blank_values=True):
+            if value and _is_credential_key(key):
+                values.update(_value_variants(value))
+
+    if "json" in ctype:
+        _harvest_json()
+    elif "form-urlencoded" in ctype:
+        _harvest_form()
+    else:
+        # Unknown/absent content-type: try JSON, then fall back to form parsing.
+        if not _harvest_json():
+            _harvest_form()
+    return frozenset(v for v in values if v)
+
+
+def _collect_structured_secrets(node: Any, out: set[str]) -> None:
+    """Walk a parsed JSON structure, collecting values under credential keys."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if isinstance(key, str) and _is_credential_key(key):
+                _collect_leaf_strings(value, out)
+            # Always recurse: a credential key may be nested deeper too.
+            _collect_structured_secrets(value, out)
+    elif isinstance(node, list):
+        for item in node:
+            _collect_structured_secrets(item, out)
+
+
+def _collect_leaf_strings(node: Any, out: set[str]) -> None:
+    """Collect every string leaf under ``node`` (the value of a credential key)."""
+    if isinstance(node, str):
+        if node:
+            out.update(_value_variants(node))
+    elif isinstance(node, dict):
+        for value in node.values():
+            _collect_leaf_strings(value, out)
+    elif isinstance(node, list):
+        for item in node:
+            _collect_leaf_strings(item, out)
 
 
 def _value_variants(value: str) -> set[str]:

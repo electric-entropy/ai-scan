@@ -42,7 +42,8 @@ identically in both operating modes (see [mode-contracts.md](mode-contracts.md))
     declarative packs run. No path traversal and no arbitrary code execution.
 13. **Safe defaults survive CLI evolution.** GET/POST only by default, redirects
     blocked, low rate, finite timeouts, finite response size, finite
-    cost/request budgets.
+    request/rate/duration/concurrency budgets. (A monetary model-cost ceiling may
+    be *declared* on an engagement/receipt but is not yet enforced at runtime.)
 14. **All active tests have cleanup semantics.** If a capability can alter target
     state, it must declare a cleanup procedure and verify cleanup; otherwise it
     is blocked.

@@ -57,25 +57,6 @@ VALID_DOCS = {
         },
         "signer_key_id": "key-1",
     },
-    "plan": {
-        "schema_version": 1, "kind": "plan", "mode": "reliable",
-        "target_origin": "https://api.example.com",
-        "policy": {
-            "name": "reliable",
-            "pack_trust": ["builtin"],
-            "include_experimental": False,
-            "allow_adaptive_generation": False,
-            "minimum_attack_trials": 3,
-            "minimum_successes": 2,
-            "minimum_control_trials": 2,
-            "promote_statuses": ["confirmed"],
-            "max_physical_requests": 256, "max_duration_seconds": 1800,
-            "requests_per_second": 2.0, "max_concurrency": 1,
-            "require_deterministic_confirmation": True,
-        },
-        "packs": [{"id": "safe", "version": "safe-2026.09.1", "digest": _DIGEST}],
-        "seed": 7,
-    },
     "pack": {
         "schema_version": 1, "kind": "pack", "id": "safe", "version": "safe-2026.09.1",
         "trust": "builtin", "digest": _DIGEST, "families": ["instruction_conflict"],
@@ -105,3 +86,16 @@ VALID_DOCS = {
 def test_valid_documents_pass(kind: str) -> None:
     doc = load_document(json.dumps(VALID_DOCS[kind]), kind)
     assert doc["kind"] == kind
+
+
+def test_runtime_plan_document_validates() -> None:
+    # A plan is the canonical runtime artifact (plan_version, no schema_version/kind
+    # envelope); validate-config accepts exactly what the runner runs.
+    from ai_scan.orchestration import compile_plan, plan_to_dict
+    from ai_scan.targets import normalize_target
+
+    target = normalize_target("https://api.example.com/chat")
+    plan_doc = plan_to_dict(compile_plan(target, "reliable"))
+    validated = load_document(json.dumps(plan_doc), "plan")
+    assert validated["mode"] == "reliable"
+    assert validated["digest"] == plan_doc["digest"]

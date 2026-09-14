@@ -130,17 +130,30 @@ class RequestBroker:
         return RawExchange(status=status, headers=resp_headers, payload=payload)
 
 
+def _authorized_authority(endpoint: ResolvedEndpoint) -> str:
+    """The ``Host`` authority of the authorized target (host[:non-default-port])."""
+    target = endpoint.target
+    host = f"[{target.host}]" if ":" in target.host else target.host
+    if target.port != _DEFAULT_PORTS[target.scheme]:
+        return f"{host}:{target.port}"
+    return host
+
+
 def _pin_connection(
     endpoint: ResolvedEndpoint, url: str, headers: dict[str, str]
 ) -> tuple[str, dict[str, str]]:
-    """Rewrite the connection to the vetted IP, preserving the ``Host`` header.
+    """Rewrite the connection to the vetted IP and pin ``Host`` from the target.
+
+    The ``Host`` header is transport-managed authority: a caller/adapter may not
+    supply it (a forged ``Host`` could reach an unintended virtual host behind
+    the authorized origin), so any supplied ``Host`` is rejected and the broker
+    sets ``Host`` from the *authorized target* itself.
 
     For an IP-literal target the URL already *is* the vetted address, so it is
-    returned unchanged (byte-identical to a direct request), and an IP-literal
-    HTTPS target is likewise safe (no name to re-resolve). For a named host over
-    http, the authority is rewritten to the guard-validated IP and the original
-    ``Host`` header is pinned, so the socket cannot connect anywhere the guard
-    did not vet (closing the resolve→connect rebinding window).
+    returned unchanged (an IP-literal HTTPS target is likewise safe — no name to
+    re-resolve). For a named host over http, the authority is rewritten to the
+    guard-validated IP, so the socket cannot connect anywhere the guard did not
+    vet (closing the resolve→connect rebinding window).
 
     A named host over **https** is rejected: urllib would re-resolve the
     hostname during the TLS connect, reopening the rebinding window, and
@@ -148,8 +161,15 @@ def _pin_connection(
     validation. We fail closed until SNI/cert-preserving IP pinning is
     implemented, rather than connect to an unvetted address.
     """
-    req_headers = dict(headers)
+    req_headers = {k: v for k, v in headers.items() if k.lower() != "host"}
+    if len(req_headers) != len(headers):
+        raise ScopeError(
+            "a caller-supplied Host header is not permitted; Host is pinned from "
+            "the authorized target at the broker boundary"
+        )
+    authority = _authorized_authority(endpoint)
     if endpoint.host_is_literal:
+        req_headers["Host"] = authority
         return url, req_headers
     if endpoint.target.scheme != "http":
         raise ScopeError(
@@ -159,12 +179,11 @@ def _pin_connection(
         )
 
     parts = urlsplit(url)
-    authority = parts.netloc.rsplit("@", 1)[-1]
     ip_authority = f"[{endpoint.ip}]" if endpoint.family == 6 else endpoint.ip
     if endpoint.target.port != _DEFAULT_PORTS[endpoint.target.scheme]:
         ip_authority = f"{ip_authority}:{endpoint.target.port}"
     pinned_url = urlunsplit(
         (parts.scheme, ip_authority, parts.path, parts.query, parts.fragment)
     )
-    req_headers.setdefault("Host", authority)
+    req_headers["Host"] = authority
     return pinned_url, req_headers

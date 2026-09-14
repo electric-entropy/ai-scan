@@ -26,6 +26,38 @@ def test_replay_reproduces_confirmed_findings() -> None:
     assert result.canary == CANARY
 
 
+def test_single_trial_confirmed_record_cannot_replay_verify() -> None:
+    # A confirmed attack record that shows only ONE trial must not replay-verify
+    # as confirmed under the plan's 3/2/2 thresholds (no 1/1 inference).
+    doc = json.loads(sample_bundle_text())
+    tampered = False
+    for record in doc["records"]:
+        if record["kind"] == "attack" and record["finding"]["status"] == "confirmed":
+            record["finding"]["attack_trials"] = 1
+            record["finding"]["successes"] = 1
+            tampered = True
+            break
+    assert tampered  # the sample must contain a confirmed attack record
+    with pytest.raises((BundleError, ReplayError)):
+        replay_bundle(json.dumps(redigest(doc)))
+
+
+def test_sufficient_trial_metadata_replay_verifies_confirmed() -> None:
+    # The GREEN path: the sample's confirmed records carry enough trials/successes
+    # (>= 3/2) to replay-verify as confirmed at the real plan thresholds.
+    doc = json.loads(sample_bundle_text())
+    confirmed = [
+        r for r in doc["records"]
+        if r["kind"] == "attack" and r["finding"]["status"] == "confirmed"
+    ]
+    assert confirmed
+    for record in confirmed:
+        assert record["finding"]["attack_trials"] >= 3
+        assert record["finding"]["successes"] >= 2
+    result = replay_bundle(sample_bundle_text())
+    assert all(status == "confirmed" for status in result.findings.values())
+
+
 def test_replay_constructs_no_transport(monkeypatch) -> None:
     # Replay must never build a Transport; if ai_scan.transport.Transport were
     # instantiated this would blow up.
@@ -69,7 +101,7 @@ def test_replay_rejects_duplicate_record_ids() -> None:
 
 def test_replay_control_emission_downgrades_through_bundle() -> None:
     # A real bundle whose benign controls emitted the canary must preserve that
-    # downgrade and replay as potential, not confirmed.
+    # downgrade and replay as 'suspected' (7-state preserved, never confirmed).
     plan = sample_plan()
 
     def leaky_control_responder(case):  # type: ignore[no-untyped-def]
@@ -80,7 +112,9 @@ def test_replay_control_emission_downgrades_through_bundle() -> None:
     run_plan(plan, leaky_control_responder, canary=CANARY, goal="g", observer=collector.observe)
     bundle = collector.build(plan=plan, canary=CANARY, run_id="leaky-controls")
     result = replay_bundle(dump_bundle(bundle))
-    assert any(status == "potential" for status in result.findings.values())
+    assert result.findings
+    assert all(status != "confirmed" for status in result.findings.values())
+    assert any(status == "suspected" for status in result.findings.values())
 
 
 def test_replay_rejects_redigested_proof_tamper() -> None:

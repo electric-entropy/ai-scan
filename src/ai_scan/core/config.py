@@ -31,9 +31,7 @@ from importlib import resources
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
-from ai_scan.core.errors import ConfigError, PolicyError
-from ai_scan.core.models import FindingStatus, PackTrust
-from ai_scan.core.modes import ModePolicy, kitchen_sink_policy, reliable_policy
+from ai_scan.core.errors import ConfigError
 from ai_scan.targets import TargetError, normalize_target
 
 # Document kinds and the schema versions packaged for each. Evidence and finding
@@ -351,65 +349,12 @@ def _check_time_ordering(doc: dict[str, Any], kind: str) -> None:
             raise ConfigError(f"{start_key} ({doc[start_key]}) is after {end_key} ({doc[end_key]})")
 
 
-# --- plan policy semantics (validated through ModePolicy) --------------------
-
-_BASE_MODE = {"reliable": reliable_policy, "kitchen-sink": kitchen_sink_policy}
-
-
-def _validate_plan_policy(doc: dict[str, Any]) -> None:
-    """Validate a plan's policy *semantically* as a valid tightening of its mode."""
-    mode = doc["mode"]
-    policy = doc["policy"]
-    if policy.get("name") != mode:
-        raise ConfigError(
-            f"plan mode {mode!r} does not match policy.name {policy.get('name')!r}"
-        )
-    # Construct a real ModePolicy — this enforces type/positivity invariants and
-    # confirmation-minimum relationships (minimum_successes <= minimum_attack_trials,
-    # deterministic confirmation required).
-    try:
-        resolved = ModePolicy(
-            name=policy["name"],
-            pack_trust=frozenset(PackTrust(x) for x in policy["pack_trust"]),
-            include_experimental=policy["include_experimental"],
-            allow_adaptive_generation=policy["allow_adaptive_generation"],
-            minimum_attack_trials=policy["minimum_attack_trials"],
-            minimum_successes=policy["minimum_successes"],
-            minimum_control_trials=policy["minimum_control_trials"],
-            promote_statuses=frozenset(FindingStatus(x) for x in policy["promote_statuses"]),
-            requests_per_second=policy["requests_per_second"],
-            max_physical_requests=policy["max_physical_requests"],
-            max_duration_seconds=policy["max_duration_seconds"],
-            max_concurrency=policy["max_concurrency"],
-            require_deterministic_confirmation=policy["require_deterministic_confirmation"],
-        )
-    except (PolicyError, ValueError) as exc:
-        raise ConfigError(f"plan policy is not a valid ModePolicy: {exc}") from exc
-
-    base = _BASE_MODE[mode]()
-    # A plan policy may only tighten the mode — never exceed/contradict it.
-    if resolved.requests_per_second > base.requests_per_second:
-        raise ConfigError("plan policy requests_per_second exceeds the mode maximum")
-    if resolved.max_physical_requests > base.max_physical_requests:
-        raise ConfigError("plan policy max_physical_requests exceeds the mode maximum")
-    if resolved.max_duration_seconds > base.max_duration_seconds:
-        raise ConfigError("plan policy max_duration_seconds exceeds the mode maximum")
-    if resolved.max_concurrency > base.max_concurrency:
-        raise ConfigError("plan policy max_concurrency exceeds the mode maximum")
-    if resolved.include_experimental and not base.include_experimental:
-        raise ConfigError("plan policy enables experimental beyond the mode")
-    if resolved.allow_adaptive_generation and not base.allow_adaptive_generation:
-        raise ConfigError("plan policy enables adaptive generation beyond the mode")
-    if not resolved.promote_statuses <= base.promote_statuses:
-        raise ConfigError("plan policy promotes statuses beyond the mode")
-    if not resolved.pack_trust <= base.pack_trust:
-        raise ConfigError("plan policy widens pack trust beyond the mode")
-    if resolved.minimum_attack_trials < base.minimum_attack_trials:
-        raise ConfigError("plan policy lowers minimum_attack_trials below the mode")
-    if resolved.minimum_successes < base.minimum_successes:
-        raise ConfigError("plan policy lowers minimum_successes below the mode")
-    if resolved.minimum_control_trials < base.minimum_control_trials:
-        raise ConfigError("plan policy lowers minimum_control_trials below the mode")
+# --- plan semantics -----------------------------------------------------------
+#
+# An executable plan is the canonical runtime :class:`Plan` artifact, validated by
+# ``_validate_runtime_plan`` (strict parse + load_plan + verify_plan_integrity) — an
+# exact policy/registry-derived match, not a user-tightened policy document. The
+# former ``_validate_plan_policy`` "tightening" path has been removed (audit A1.1).
 
 
 # --- target structure semantics (discriminated unions) -----------------------
@@ -463,8 +408,34 @@ def _validate_target_semantics(doc: dict[str, Any]) -> None:
         _check_secret_ref(ref, "request.header_refs")
 
 
+def _validate_runtime_plan(text: str) -> dict[str, Any]:
+    """Validate the canonical *runtime* plan artifact — the same one the runner runs.
+
+    A plan document is the executable :class:`~ai_scan.orchestration.planner.Plan`:
+    strict-parsed (duplicate keys / non-finite rejected), semantically constructed
+    and digest-verified by ``load_plan``, then checked by ``verify_plan_integrity``
+    to be exactly the canonical policy/registry-derived plan for its mode. There is
+    no separate "tightening" path: an executable plan must match policy exactly.
+    """
+    from ai_scan.orchestration.planner import (
+        PlanError,
+        load_plan,
+        plan_to_dict,
+        verify_plan_integrity,
+    )
+
+    data = load_json_strict(text)
+    if not isinstance(data, dict):
+        raise ConfigError("Plan document must be a JSON object")
+    try:
+        plan = load_plan(data)
+        verify_plan_integrity(plan)
+    except PlanError as exc:
+        raise ConfigError(f"invalid plan: {exc}") from exc
+    return plan_to_dict(plan)
+
+
 _SEMANTIC_VALIDATORS = {
-    "plan": _validate_plan_policy,
     "target": _validate_target_semantics,
 }
 
@@ -479,6 +450,9 @@ def load_document(text: str, kind: str) -> dict[str, Any]:
         ConfigError: On any strict-loading or validation failure (the CLI maps
             this to exit code ``1`` before constructing any active object).
     """
+    if kind == "plan":
+        return _validate_runtime_plan(text)
+
     doc = load_json_strict(text)
     if not isinstance(doc, dict):
         raise ConfigError("Top-level document must be a JSON object")

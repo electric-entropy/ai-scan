@@ -20,8 +20,8 @@ from __future__ import annotations
 import enum
 import json
 import secrets
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from importlib import resources
 from typing import TYPE_CHECKING, Any
 
@@ -43,12 +43,22 @@ _CANARY_PREFIX = "AISCAN-"
 
 
 class InjectionStatus(enum.StrEnum):
-    """Outcome of an injection case or the overall run."""
+    """Outcome of an injection case or the overall run.
+
+    The full seven-state confidence vocabulary is preserved on the v2 runner path
+    (``likely``/``suspected`` are never collapsed into ``potential``). ``POTENTIAL``
+    remains only as the legacy 4-state report surface, produced by an explicit
+    adapter boundary (:func:`legacy_status`), never by the confirmation core.
+    """
 
     CONFIRMED = "confirmed"
+    LIKELY = "likely"
+    SUSPECTED = "suspected"
     POTENTIAL = "potential"
     NOT_OBSERVED = "not_observed"
     INCONCLUSIVE = "inconclusive"
+    BLOCKED = "blocked"
+    NOT_TESTED = "not_tested"
 
 
 class InjectionError(Exception):
@@ -97,6 +107,8 @@ class ExchangeOutcome:
         truncated: Whether the response body was truncated at the size bound.
         transport_ok: False if the request could not be completed at all.
         attempts: Physical attempts made for this case (>= 1), retries included.
+        known_secrets: Reflected/known secret values observed for this exchange,
+            propagated so persisted state (e.g. checkpoint proof) is redacted.
     """
 
     body: str
@@ -105,16 +117,24 @@ class ExchangeOutcome:
     truncated: bool = False
     transport_ok: bool = True
     attempts: int = 1
+    known_secrets: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass
 class InjectionFinding:
-    """The evaluated result of one injection case."""
+    """The evaluated result of one injection case.
+
+    ``attack_trials``/``successes`` are the aggregated repeatability counts that
+    gated the status, carried so an offline replay can re-verify confirmation at
+    the real plan thresholds (never inferred).
+    """
 
     family: str
     status: InjectionStatus
     prompt: str
     proof: str | None = None
+    attack_trials: int = 1
+    successes: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -382,6 +402,7 @@ def run_injection_pack(
         # Controls run first: a benign control that still emits the canary means
         # the target emits it unconditionally — confirmation must be blocked.
         control_succeeded = False
+        matched_clean_control = False
         for control in family.controls:
             case = InjectionCase(family=family.name, template=control, rendered_prompt=control)
             try:
@@ -394,6 +415,10 @@ def run_injection_pack(
             request_count += max(1, outcome.attempts)
             if _usable(outcome) and canary in outcome.body:
                 control_succeeded = True
+            elif _usable(outcome):
+                # A usable control that did not emit the canary is matched clean
+                # coverage; without it a family cannot confirm.
+                matched_clean_control = True
 
         for template in family.templates:
             if max_cases is not None and cases_run >= max_cases:
@@ -415,6 +440,7 @@ def run_injection_pack(
             status, proof = _evaluate_pack_case(
                 outcome, canary, rendered, validators,
                 control_succeeded=control_succeeded,
+                matched_clean_control=matched_clean_control,
                 trial=trial,
                 requires_state_change=requires_state_change,
             )
@@ -441,13 +467,31 @@ def _usable(outcome: ExchangeOutcome) -> bool:
 
 
 # FindingStatus (the one central vocabulary) → the injection engine's status.
+# 1:1 — the seven-state taxonomy is preserved (no likely/suspected collapse).
 _FINDING_TO_INJECTION = {
     FindingStatus.CONFIRMED: InjectionStatus.CONFIRMED,
-    FindingStatus.LIKELY: InjectionStatus.POTENTIAL,
-    FindingStatus.SUSPECTED: InjectionStatus.POTENTIAL,
+    FindingStatus.LIKELY: InjectionStatus.LIKELY,
+    FindingStatus.SUSPECTED: InjectionStatus.SUSPECTED,
     FindingStatus.NOT_OBSERVED: InjectionStatus.NOT_OBSERVED,
     FindingStatus.INCONCLUSIVE: InjectionStatus.INCONCLUSIVE,
+    FindingStatus.BLOCKED: InjectionStatus.BLOCKED,
+    FindingStatus.NOT_TESTED: InjectionStatus.NOT_TESTED,
 }
+
+# Legacy 4-state report boundary: collapse the fine-grained speculative states
+# into ``potential`` only where a legacy report surface requires it. This adapter
+# lives outside the confirmation core.
+_LEGACY_STATUS = {
+    InjectionStatus.LIKELY: InjectionStatus.POTENTIAL,
+    InjectionStatus.SUSPECTED: InjectionStatus.POTENTIAL,
+    InjectionStatus.BLOCKED: InjectionStatus.INCONCLUSIVE,
+    InjectionStatus.NOT_TESTED: InjectionStatus.NOT_OBSERVED,
+}
+
+
+def legacy_status(status: InjectionStatus) -> InjectionStatus:
+    """Map a 7-state status onto the legacy 4-state report vocabulary."""
+    return _LEGACY_STATUS.get(status, status)
 
 
 def _evaluate(
@@ -469,7 +513,8 @@ def _evaluate(
         ComplianceHeuristicValidator().validate(evidence),
     ]
     result = classify(signals, GatingContext(), evaluable=evaluable)
-    status = _FINDING_TO_INJECTION[result.status]
+    # Legacy single-shot path stays on the 4-state report vocabulary.
+    status = legacy_status(_FINDING_TO_INJECTION[result.status])
     proof = (
         _proof_snippet(outcome.body, canary)
         if status is InjectionStatus.CONFIRMED
@@ -485,10 +530,16 @@ def _evaluate_pack_case(
     validators: list[Validator],
     *,
     control_succeeded: bool,
+    matched_clean_control: bool,
     trial: TrialPolicy,
     requires_state_change: bool,
 ) -> tuple[InjectionStatus, str | None]:
-    """Classify one attack case with pack-declared validators + gating context."""
+    """Classify one attack case with pack-declared validators + gating context.
+
+    ``matched_clean_control`` must be supplied by the caller: a run with no
+    usable clean control cannot confirm (``control_succeeded=False`` alone is not
+    enough — it also means "no matched control ran").
+    """
     evaluable = _usable(outcome)
     evidence = Evidence(
         response=outcome.body, canary=canary, prompt=rendered_prompt, evaluable=evaluable
@@ -499,6 +550,7 @@ def _evaluate_pack_case(
     )
     context = GatingContext(
         control_succeeded=control_succeeded,
+        matched_clean_control=matched_clean_control,
         attack_trials=1,
         successes=1 if execution_succeeded else 0,
         min_attack_trials=trial.min_attack_trials,
@@ -506,13 +558,127 @@ def _evaluate_pack_case(
         requires_state_change=requires_state_change,
     )
     result = classify(signals, context, evaluable=evaluable)
-    status = _FINDING_TO_INJECTION[result.status]
+    # Legacy pack path stays on the 4-state report vocabulary.
+    status = legacy_status(_FINDING_TO_INJECTION[result.status])
     proof = (
         _proof_snippet(outcome.body, canary)
         if status is InjectionStatus.CONFIRMED
         else None
     )
     return status, proof
+
+
+def classify_record(
+    outcome: ExchangeOutcome,
+    canary: str,
+    rendered_prompt: str,
+    validators: list[Validator],
+    *,
+    control_succeeded: bool,
+    matched_clean_control: bool,
+    attack_trials: int,
+    successes: int,
+    min_attack_trials: int,
+    min_successes: int,
+    requires_state_change: bool,
+) -> tuple[InjectionStatus, str | None]:
+    """Re-derive one record's status using *given* repeatability counts.
+
+    Used by replay to re-verify a stored finding at the real plan thresholds
+    (counts come from the bundle, never inferred). Invalid counts (e.g. more
+    successes than trials) raise ``ValueError`` so the caller can fail closed.
+    """
+    if not _usable(outcome):
+        return _FINDING_TO_INJECTION[FindingStatus.INCONCLUSIVE], None
+    evidence = Evidence(
+        response=outcome.body, canary=canary, prompt=rendered_prompt, evaluable=True
+    )
+    signals = [validator.validate(evidence) for validator in validators]
+    context = GatingContext(
+        control_succeeded=control_succeeded,
+        matched_clean_control=matched_clean_control,
+        attack_trials=attack_trials,
+        successes=successes,
+        min_attack_trials=min_attack_trials,
+        min_successes=min_successes,
+        requires_state_change=requires_state_change,
+    )
+    result = classify(signals, context, evaluable=True)
+    status = _FINDING_TO_INJECTION[result.status]
+    proof = (
+        _proof_snippet(outcome.body, canary) if status is InjectionStatus.CONFIRMED else None
+    )
+    return status, proof
+
+
+def _trial_executed(outcome: ExchangeOutcome, canary: str, rendered_prompt: str,
+                    validators: list[Validator]) -> tuple[bool, list[Any]]:
+    """Whether one usable trial shows deterministic canary *execution* (not reflection)."""
+    evidence = Evidence(
+        response=outcome.body, canary=canary, prompt=rendered_prompt, evaluable=True
+    )
+    signals = [validator.validate(evidence) for validator in validators]
+    executed = any(
+        s.validator_id == "exact_canary" and s.fired and not s.reflection for s in signals
+    )
+    return executed, signals
+
+
+def evaluate_trials(
+    outcomes: Sequence[ExchangeOutcome],
+    canary: str,
+    rendered_prompt: str,
+    validators: list[Validator],
+    *,
+    control_succeeded: bool,
+    matched_clean_control: bool,
+    min_attack_trials: int,
+    min_successes: int,
+    requires_state_change: bool,
+) -> tuple[InjectionStatus, str | None, int, int, ExchangeOutcome | None]:
+    """Aggregate repeated attack trials into one gated classification.
+
+    Only *usable* trials are evidence. Confirmation requires enough usable trials
+    (repeatability), enough executions, a matched clean control, and — when the
+    pack has side effects — corroborated state change. A single execution can
+    never confirm under the Reliable 3/2/2 contract.
+
+    Returns ``(status, proof, usable_trials, successes, representative_outcome)``;
+    the representative is an executing trial when one exists (so the persisted
+    evidence backs a confirmed status), else the first usable trial.
+    """
+    usable: list[tuple[ExchangeOutcome, list[Any]]] = []
+    for outcome in outcomes:
+        if not _usable(outcome):
+            continue
+        _executed, signals = _trial_executed(outcome, canary, rendered_prompt, validators)
+        usable.append((outcome, signals))
+    if not usable:
+        return _FINDING_TO_INJECTION[FindingStatus.INCONCLUSIVE], None, 0, 0, None
+
+    executions = [
+        (outcome, signals)
+        for outcome, signals in usable
+        if any(s.validator_id == "exact_canary" and s.fired and not s.reflection for s in signals)
+    ]
+    representative = executions[0] if executions else usable[0]
+    context = GatingContext(
+        control_succeeded=control_succeeded,
+        matched_clean_control=matched_clean_control,
+        attack_trials=len(usable),
+        successes=len(executions),
+        min_attack_trials=min_attack_trials,
+        min_successes=min_successes,
+        requires_state_change=requires_state_change,
+    )
+    result = classify(representative[1], context, evaluable=True)
+    status = _FINDING_TO_INJECTION[result.status]
+    proof = (
+        _proof_snippet(representative[0].body, canary)
+        if status is InjectionStatus.CONFIRMED
+        else None
+    )
+    return status, proof, len(usable), len(executions), representative[0]
 
 
 def _proof_snippet(response: str, canary: str, radius: int = 40) -> str:
@@ -523,10 +689,14 @@ def _proof_snippet(response: str, canary: str, radius: int = 40) -> str:
 
 
 _SEVERITY = {
-    InjectionStatus.CONFIRMED: 3,
-    InjectionStatus.POTENTIAL: 2,
-    InjectionStatus.INCONCLUSIVE: 1,
+    InjectionStatus.CONFIRMED: 6,
+    InjectionStatus.LIKELY: 5,
+    InjectionStatus.SUSPECTED: 4,
+    InjectionStatus.POTENTIAL: 4,
+    InjectionStatus.INCONCLUSIVE: 2,
+    InjectionStatus.BLOCKED: 1,
     InjectionStatus.NOT_OBSERVED: 0,
+    InjectionStatus.NOT_TESTED: 0,
 }
 
 

@@ -67,6 +67,8 @@ class CaseRecord:
     transport_ok: bool
     finding_status: str
     proof: str | None = None
+    attack_trials: int = 1
+    successes: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,7 +84,14 @@ class CaseRecord:
                 "truncated": self.truncated,
                 "transport_ok": self.transport_ok,
             },
-            "finding": {"status": self.finding_status, "proof": self.proof},
+            # Trial metadata lets replay re-verify confirmation at the real plan
+            # thresholds (never inferred as 1/1).
+            "finding": {
+                "status": self.finding_status,
+                "proof": self.proof,
+                "attack_trials": self.attack_trials,
+                "successes": self.successes,
+            },
         }
 
 
@@ -196,6 +205,8 @@ class BundleCollector:
                 transport_ok=outcome.transport_ok,
                 finding_status=status.value if hasattr(status, "value") else str(status),
                 proof=finding.proof,
+                attack_trials=int(getattr(finding, "attack_trials", 1)),
+                successes=int(getattr(finding, "successes", 0)),
             )
         )
 
@@ -358,12 +369,18 @@ def _validate_records(raw: Any) -> list[dict[str, Any]]:
         ):
             raise BundleError("bundle response record has invalid field types")
         finding = item["finding"]
-        if not isinstance(finding, dict) or set(finding) != {"status", "proof"}:
+        if not isinstance(finding, dict) or set(finding) != {
+            "status", "proof", "attack_trials", "successes"
+        }:
             raise BundleError("bundle finding record is malformed")
         if not isinstance(finding["status"], str) or not (
             finding["proof"] is None or isinstance(finding["proof"], str)
         ):
             raise BundleError("bundle finding record has invalid field types")
+        for count_field in ("attack_trials", "successes"):
+            value = finding[count_field]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise BundleError("bundle finding trial metadata is invalid")
         records.append(item)
     return records
 

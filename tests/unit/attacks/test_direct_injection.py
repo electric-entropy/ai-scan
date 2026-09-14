@@ -53,6 +53,22 @@ def test_matched_control_blocks_confirmation() -> None:
     assert result.status is InjectionStatus.POTENTIAL
 
 
+def test_no_usable_clean_control_cannot_confirm() -> None:
+    # Attacks execute normally, but every control is unusable → no matched clean
+    # control ran → confirmation is impossible ('control_succeeded=False' is not
+    # enough; the plugin path must not default to clean coverage).
+    app = vulnerable_app(attack_canary=AC, hidden_canary=HC)
+
+    def no_clean_control(case: AttackCase) -> ExchangeOutcome:
+        if case.kind == "control":
+            return ExchangeOutcome(body="benign", transport_ok=False)  # unusable control
+        return app(case)  # attack executes exactly as the vulnerable app
+
+    result = run_attack(DirectInjectionPlugin(), no_clean_control, _ctx())
+    assert not result.confirmed
+    assert all(f.status is not InjectionStatus.CONFIRMED for f in result.findings)
+
+
 def test_malformed_plugin_fails_closed_before_any_request() -> None:
     class BadPlugin:
         id = "bad"

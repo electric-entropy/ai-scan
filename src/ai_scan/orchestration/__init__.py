@@ -27,6 +27,7 @@ from ai_scan.orchestration.planner import (
     load_plan,
     plan_to_dict,
     plan_to_json,
+    verify_plan_integrity,
 )
 from ai_scan.orchestration.runner import RunResult, RunState, run_plan
 from ai_scan.orchestration.scheduler import Schedule, schedule
@@ -48,5 +49,6 @@ __all__ = [
     "load_checkpoint",
     "run_plan",
     "schedule",
+    "verify_plan_integrity",
     "write_checkpoint_atomic",
 ]

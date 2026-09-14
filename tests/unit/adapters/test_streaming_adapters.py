@@ -179,6 +179,7 @@ def test_truncated_streaming_response_classifies_inconclusive() -> None:
         "prompt",
         _select_validators(frozenset({DeterminismClass.DETERMINISTIC})),
         control_succeeded=False,
+        matched_clean_control=False,
         trial=TrialPolicy(1, 1, 1),
         requires_state_change=False,
     )

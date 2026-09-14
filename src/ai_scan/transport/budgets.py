@@ -14,12 +14,39 @@ duration limits are testable without real delays.
 from __future__ import annotations
 
 import enum
+import math
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
 from ai_scan.transport._errors import BudgetExceededError
+
+
+def _require_positive_int(name: str, value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+
+
+def _require_finite_non_negative(name: str, value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number")
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be finite")
+    if value < 0:
+        raise ValueError(f"{name} must be non-negative")
+
+
+def _require_finite_positive(name: str, value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number")
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be finite")
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
 
 
 class AttemptKind(enum.StrEnum):
@@ -38,7 +65,7 @@ class BudgetLedger:
 
     max_requests: int
     min_interval: float = 0.0
-    max_duration_seconds: float = float("inf")
+    max_duration_seconds: float | None = None
     max_concurrency: int = 1
     clock: Callable[[], float] = time.monotonic
     sleeper: Callable[[float], None] = time.sleep
@@ -49,45 +76,65 @@ class BudgetLedger:
     _active: int = 0
     _last: float | None = field(default=None, repr=False)
     _start: float | None = field(default=None, repr=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        if self.max_requests <= 0:
-            raise ValueError("max_requests must be positive")
-        if self.min_interval < 0:
-            raise ValueError("min_interval must be non-negative")
-        if self.max_duration_seconds <= 0:
-            raise ValueError("max_duration_seconds must be positive")
-        if self.max_concurrency <= 0:
-            raise ValueError("max_concurrency must be positive")
+        # Every budget is finite and non-boolean; an unbounded duration is
+        # expressed as ``None`` (absence of a limit), never a non-finite float.
+        _require_positive_int("max_requests", self.max_requests)
+        _require_finite_non_negative("min_interval", self.min_interval)
+        if self.max_duration_seconds is not None:
+            _require_finite_positive("max_duration_seconds", self.max_duration_seconds)
+        _require_positive_int("max_concurrency", self.max_concurrency)
+
+    def _over_duration(self, now: float) -> bool:
+        return (
+            self.max_duration_seconds is not None
+            and self._start is not None
+            and now - self._start > self.max_duration_seconds
+        )
 
     @contextmanager
     def attempt(self, kind: AttemptKind) -> Iterator[None]:
         """Reserve one physical attempt of ``kind``, enforcing every budget.
 
         Budgets are checked *before* yielding (i.e. before the caller performs
-        any socket I/O). Raises :class:`BudgetExceededError` when exhausted.
+        any socket I/O). The check-and-reserve is guarded by a lock so the
+        counters stay consistent and ``max_concurrency`` holds under true
+        parallelism. Raises :class:`BudgetExceededError` when exhausted.
         """
-        now = self.clock()
-        if self._start is None:
-            self._start = now
-        if self._active >= self.max_concurrency:
-            raise BudgetExceededError(f"concurrency budget of {self.max_concurrency} exceeded")
-        if self._total >= self.max_requests:
-            raise BudgetExceededError(f"request budget of {self.max_requests} exhausted")
-        if now - self._start > self.max_duration_seconds:
-            raise BudgetExceededError(f"time budget of {self.max_duration_seconds}s exceeded")
-        if self.min_interval > 0 and self._last is not None:
-            wait = self.min_interval - (now - self._last)
-            if wait > 0:
-                self.sleeper(wait)
-        self._last = self.clock()
-        self._total += 1
-        self._counts[kind] += 1
-        self._active += 1
+        with self._lock:
+            now = self.clock()
+            if self._start is None:
+                self._start = now
+            if self._active >= self.max_concurrency:
+                raise BudgetExceededError(f"concurrency budget of {self.max_concurrency} exceeded")
+            if self._total >= self.max_requests:
+                raise BudgetExceededError(f"request budget of {self.max_requests} exhausted")
+            if self._over_duration(now):
+                raise BudgetExceededError(
+                    f"time budget of {self.max_duration_seconds}s exceeded"
+                )
+            if self.min_interval > 0 and self._last is not None:
+                wait = self.min_interval - (now - self._last)
+                if wait > 0:
+                    self.sleeper(wait)
+            # Re-check duration after any rate-limit sleep: a long throttle can
+            # push the attempt past the wall-clock budget.
+            now = self.clock()
+            if self._over_duration(now):
+                raise BudgetExceededError(
+                    f"time budget of {self.max_duration_seconds}s exceeded"
+                )
+            self._last = now
+            self._total += 1
+            self._counts[kind] += 1
+            self._active += 1
         try:
             yield
         finally:
-            self._active -= 1
+            with self._lock:
+                self._active -= 1
 
     @property
     def count(self) -> int:

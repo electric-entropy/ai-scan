@@ -8,8 +8,18 @@ import pytest
 
 from ai_scan.core.config import load_document, load_json_strict
 from ai_scan.core.errors import ConfigError
+from ai_scan.orchestration import compile_plan, plan_to_dict
+from ai_scan.packs.signatures import compute_digest
+from ai_scan.targets import normalize_target
 
 _TS = "2026-09-12T00:00:00Z"
+
+
+def _reseal_plan(doc: dict) -> dict:
+    doc = dict(doc)
+    doc.pop("digest", None)
+    doc["digest"] = compute_digest(doc)
+    return doc
 
 
 def _target(**overrides) -> dict:
@@ -216,42 +226,25 @@ _DIGEST = "a" * 64
 _TS_Z = "2026-09-12T00:00:00Z"
 
 
-def _plan(**policy_overrides) -> dict:
-    policy = {
-        "name": "reliable", "pack_trust": ["builtin"],
-        "include_experimental": False, "allow_adaptive_generation": False,
-        "minimum_attack_trials": 3, "minimum_successes": 2, "minimum_control_trials": 2,
-        "promote_statuses": ["confirmed"],
-        "requests_per_second": 2.0, "max_physical_requests": 256,
-        "max_duration_seconds": 1800, "max_concurrency": 1,
-        "require_deterministic_confirmation": True,
-    }
-    policy.update(policy_overrides)
-    return {
-        "schema_version": 1, "kind": "plan", "mode": "reliable",
-        "target_origin": "https://api.example.com",
-        "policy": policy,
-        "packs": [{"id": "safe", "version": "v1", "digest": _DIGEST}],
-        "seed": 1,
-    }
+def _plan() -> dict:
+    # The canonical *runtime* plan artifact — the exact document the runner runs.
+    return plan_to_dict(compile_plan(normalize_target("https://api.example.com/chat"), "reliable"))
 
 
-def test_integer_one_does_not_satisfy_boolean_const_true() -> None:
+def test_canonical_runtime_plan_validates() -> None:
+    assert load_document(json.dumps(_plan()), "plan")["mode"] == "reliable"
+
+
+def test_plan_with_duplicate_key_rejected() -> None:
+    text = json.dumps(_plan())
+    dup = text[:-1] + ', "seed": 3}'
     with pytest.raises(ConfigError):
-        load_document(json.dumps(_plan(require_deterministic_confirmation=1)), "plan")
+        load_document(dup, "plan")
 
 
-def test_boolean_true_does_not_satisfy_integer_const_schema_version() -> None:
-    # schema_version const is integer 1; boolean True must not satisfy it.
+def test_plan_missing_required_field_rejected() -> None:
     doc = _plan()
-    doc["schema_version"] = True
-    with pytest.raises(ConfigError):
-        load_document(json.dumps(doc), "plan")
-
-
-def test_plan_requires_full_resolved_policy() -> None:
-    doc = _plan()
-    del doc["policy"]["promote_statuses"]
+    del doc["digest"]
     with pytest.raises(ConfigError):
         load_document(json.dumps(doc), "plan")
 
@@ -262,17 +255,16 @@ def test_plan_requires_full_resolved_policy() -> None:
 @pytest.mark.parametrize(
     "scope",
     [
-        "https://user:pass@api.example.com",  # credentials
-        "https://api.example.com/#frag",       # fragment
-        "https://api.example.com/path",        # not a bare origin
-        "https://API.example.com",             # not normalized (uppercase host)
-        "ftp://api.example.com",               # wrong scheme
+        "https://user:pass@api.example.com/chat",  # credentials
+        "https://api.example.com/#frag",           # fragment
+        "https://API.example.com/chat",            # not normalized (uppercase host)
+        "ftp://api.example.com/chat",              # wrong scheme
         "not-a-url",
     ],
 )
-def test_invalid_scope_rejected(scope: str) -> None:
-    doc = _plan()
-    doc["target_origin"] = scope
+def test_invalid_plan_target_rejected(scope: str) -> None:
+    # A re-digested plan whose target is not a canonical HTTP(S) URL is rejected.
+    doc = _reseal_plan({**_plan(), "target": scope})
     with pytest.raises(ConfigError):
         load_document(json.dumps(doc), "plan")
 
@@ -348,40 +340,38 @@ def test_valid_timestamps_and_ordering_accepted() -> None:
     assert load_document(json.dumps(doc), "engagement")["engagement_id"] == "E"
 
 
-# --- blocker 1: plan policy validated through ModePolicy ---------------------
+# --- exact-match executable plan semantics (tightening path removed) ---------
 
 
-def test_plan_mode_must_match_policy_name() -> None:
-    doc = _plan()
-    doc["mode"] = "kitchen-sink"  # policy.name is still "reliable"
+def test_plan_widened_limit_rejected() -> None:
+    # A re-digested plan that widens a mode ceiling is not policy-derived → reject.
+    doc = _reseal_plan({**_plan(), "limits": _widened_limits()})
     with pytest.raises(ConfigError):
         load_document(json.dumps(doc), "plan")
 
 
-def test_plan_policy_budget_cannot_exceed_mode() -> None:
-    # 2000 is the kitchen-sink max; for reliable (256) it exceeds the mode.
+def _widened_limits() -> list:
+    limits = list(_plan()["limits"])
+    limits[0] = limits[0] + 10_000  # widen max_physical_requests beyond policy
+    return limits
+
+
+def test_plan_lowered_trial_policy_rejected() -> None:
+    doc = _plan()
+    trial = list(doc["trial_policy"])
+    trial[0] = 1  # below the mode's minimum_attack_trials
+    doc = _reseal_plan({**doc, "trial_policy": trial})
     with pytest.raises(ConfigError):
-        load_document(json.dumps(_plan(max_physical_requests=2000)), "plan")
+        load_document(json.dumps(doc), "plan")
 
 
-def test_plan_policy_cannot_enable_experimental_beyond_reliable() -> None:
+def test_plan_altered_case_rejected() -> None:
+    doc = _plan()
+    cases = [list(row) for row in doc["cases"]]
+    cases[0][5] = cases[0][5] + " tamper"
+    doc = _reseal_plan({**doc, "cases": cases})
     with pytest.raises(ConfigError):
-        load_document(json.dumps(_plan(include_experimental=True)), "plan")
-
-
-def test_plan_policy_cannot_lower_minimum_below_mode() -> None:
-    with pytest.raises(ConfigError):
-        load_document(json.dumps(_plan(minimum_attack_trials=1)), "plan")
-
-
-def test_plan_policy_successes_exceeding_trials_rejected() -> None:
-    with pytest.raises(ConfigError):
-        load_document(json.dumps(_plan(minimum_successes=5, minimum_attack_trials=3)), "plan")
-
-
-def test_valid_tightened_plan_accepted() -> None:
-    doc = _plan(max_physical_requests=100, minimum_attack_trials=5)
-    assert load_document(json.dumps(doc), "plan")["mode"] == "reliable"
+        load_document(json.dumps(doc), "plan")
 
 
 # --- blocker 2: discriminated target request/response/session ----------------

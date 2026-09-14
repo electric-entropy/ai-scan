@@ -190,14 +190,19 @@ def run_attack(plugin: AttackPlugin, responder: Responder, ctx: AttackContext) -
 
     cases = _validate_cases(_guarded(lambda: list(plugin.build_cases(ctx)), "build_cases"))
 
-    control_succeeded: dict[str, bool] = {}
+    # Track control emission and matched *clean* control coverage separately: a
+    # family with no usable clean control cannot confirm (not merely "no emission").
+    control_emitted: dict[str, bool] = {}
+    control_clean: dict[str, bool] = {}
     attack_cases: list[AttackCase] = []
     for case in cases:
         if case.kind == "control":
             outcome = responder(case)
-            control_succeeded[case.family] = control_succeeded.get(case.family, False) or (
-                _usable(outcome) and token in outcome.body
-            )
+            usable = _usable(outcome)
+            if usable and token in outcome.body:
+                control_emitted[case.family] = True
+            elif usable:
+                control_clean[case.family] = True
         else:
             attack_cases.append(case)
 
@@ -209,7 +214,8 @@ def run_attack(plugin: AttackPlugin, responder: Responder, ctx: AttackContext) -
             token,
             case.prompt,
             validators,
-            control_succeeded=control_succeeded.get(case.family, False),
+            control_succeeded=control_emitted.get(case.family, False),
+            matched_clean_control=control_clean.get(case.family, False),
             trial=plugin.trial_policy,
             requires_state_change=plugin.side_effects,
         )

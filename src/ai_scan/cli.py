@@ -26,8 +26,9 @@ from ai_scan.authorization import (
     validate_receipt,
     write_receipt,
 )
-from ai_scan.core.config import SUPPORTED_SCHEMAS, load_document
+from ai_scan.core.config import SUPPORTED_SCHEMAS, load_document, load_json_strict
 from ai_scan.core.errors import ConfigError
+from ai_scan.core.modes import resolve_policy
 from ai_scan.evidence_graph import BundleError, ReplayError, load_bundle, replay_bundle
 from ai_scan.fingerprint import DEFAULT_PROBES, ProbeExchange, run_fingerprint
 from ai_scan.injection import (
@@ -42,7 +43,15 @@ from ai_scan.injection import (
     InjectionError as _InjectionError,
 )
 from ai_scan.models import Probe
-from ai_scan.orchestration import Plan, PlanError, compile_plan, load_plan, plan_to_json, run_plan
+from ai_scan.orchestration import (
+    Plan,
+    PlanError,
+    compile_plan,
+    load_plan,
+    plan_to_json,
+    run_plan,
+    verify_plan_integrity,
+)
 from ai_scan.packs import (
     PackError,
     PackResolutionError,
@@ -303,15 +312,18 @@ def main(
             prompt=ask,
         )
     except AuthorizationError as exc:
-        print(f"authorization: {exc}")
+        print(f"authorization: {scrub_text(str(exc))}")
         return EXIT_AUTH_DENIED
 
     auth_meta = _authorization_metadata(args)
-    if _headless_v1_receipt_blocks_kitchen_sink(args, auth_meta):
+    if _receipt_blocks_kitchen_sink(args, auth_meta):
         print(
-            "authorization: Kitchen Sink requires an interactive "
-            "or v2+ receipt authorization"
+            "authorization: a v1 receipt cannot authorize Kitchen Sink; an "
+            "interactive confirmation or a plan-bound receipt is required"
         )
+        return EXIT_AUTH_DENIED
+    if not _interactive_kitchen_sink_confirmed(args, auth_meta, ask):
+        print("authorization: Kitchen Sink second confirmation failed or declined")
         return EXIT_AUTH_DENIED
     try:
         return _run_active(args, target, auth_meta)
@@ -331,12 +343,12 @@ def main(
         totals = getattr(exc, "totals", None)
         suffix = f" (physical attempts: {totals})" if totals else ""
         if outcome == "blocked":
-            print(f"blocked: {exc}{suffix}")
+            print(f"blocked: {scrub_text(str(exc))}{suffix}")
             return EXIT_AUTH_DENIED
         if outcome == "inconclusive":
-            print(f"inconclusive: {exc}{suffix}")
+            print(f"inconclusive: {scrub_text(str(exc))}{suffix}")
             return EXIT_INCONCLUSIVE
-        print(f"error: {exc}")
+        print(f"error: {scrub_text(str(exc))}")
         return EXIT_RUNTIME_ERROR
 
 
@@ -350,30 +362,95 @@ def _authorization_metadata(args: argparse.Namespace) -> dict[str, object]:
             "engagement": receipt.engagement,
             "receipt_origin": receipt.origin,
             "expires": receipt.expires,
+            "plan_digest": receipt.plan_digest,
+            "receipt_target": receipt.target,
         }
     return {"mode": "interactive"}
 
 
-def _headless_v1_receipt_blocks_kitchen_sink(
-    args: argparse.Namespace, auth_meta: dict[str, object]
-) -> bool:
-    """A v1 receipt cannot authorize headless Kitchen Sink active execution."""
-    selected_mode = getattr(args, "mode", "reliable")
+def _selected_mode(args: argparse.Namespace) -> str:
+    """The run mode for the active command (from the plan for ``run``)."""
     if args.command == "run":
         try:
-            selected_mode = _load_plan_file(args.plan).mode
+            return _load_plan_file(args.plan).mode
         except (OSError, json.JSONDecodeError, PlanError):
-            return False
-    return (
-        selected_mode == "kitchen-sink"
-        and getattr(args, "non_interactive", False)
-        and auth_meta.get("mode") == "receipt"
+            return getattr(args, "mode", "reliable")
+    return getattr(args, "mode", "reliable")
+
+
+def _selected_budget(args: argparse.Namespace) -> int:
+    """The maximum physical-request budget for the selected mode."""
+    if args.command == "run":
+        try:
+            return _load_plan_file(args.plan).limits.max_physical_requests
+        except (OSError, json.JSONDecodeError, PlanError):
+            pass
+    try:
+        return resolve_policy(_selected_mode(args)).max_physical_requests
+    except Exception:  # PolicyError — unknown mode, fail closed downstream
+        return 0
+
+
+def _receipt_blocks_kitchen_sink(
+    args: argparse.Namespace, auth_meta: dict[str, object]
+) -> bool:
+    """Whether a receipt is insufficient to authorize the selected Kitchen Sink run.
+
+    Receipt presence must never bypass Kitchen Sink's mandatory gates. An
+    origin-only receipt cannot authorize Kitchen Sink. Only a receipt that is
+    *plan-bound* to this exact plan (matching plan digest and exact target) may,
+    and this holds regardless of ``--non-interactive`` (a receipt always runs
+    headless).
+    """
+    if _selected_mode(args) != "kitchen-sink" or auth_meta.get("mode") != "receipt":
+        return False
+    if args.command == "run":
+        try:
+            plan = _load_plan_file(args.plan)
+        except (OSError, PlanError):
+            return True  # cannot verify the binding → fail closed
+        if (
+            auth_meta.get("plan_digest") == plan.digest
+            and auth_meta.get("receipt_target") == plan.target
+        ):
+            return False  # a valid plan-bound receipt authorizes Kitchen Sink
+    return True
+
+
+def _interactive_kitchen_sink_confirmed(
+    args: argparse.Namespace, auth_meta: dict[str, object], ask: Callable[[str], str]
+) -> bool:
+    """Require a second interactive confirmation for Kitchen Sink.
+
+    Returns ``True`` when no extra confirmation is needed (not interactive, or
+    not Kitchen Sink). For an interactive Kitchen Sink run, the operator must
+    type an exact phrase naming ``kitchen-sink`` and the maximum physical
+    request budget, on top of the origin confirmation.
+    """
+    if auth_meta.get("mode") != "interactive" or _selected_mode(args) != "kitchen-sink":
+        return True
+    budget = _selected_budget(args)
+    phrase = f"I confirm kitchen-sink with up to {budget} physical requests"
+    message = (
+        "Kitchen Sink broadens probes and requires a second confirmation.\n"
+        f"Type exactly: {phrase}\n> "
     )
+    try:
+        answer = ask(message)
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return answer.strip() == phrase
 
 
 def _load_json_file(path: str) -> dict[str, object]:
     with open(path, encoding="utf-8") as handle:
-        data = json.load(handle)
+        text = handle.read()
+    # The active run path uses strict parsing: duplicate object keys and
+    # non-finite numbers are rejected (the same posture as validate-config).
+    try:
+        data = load_json_strict(text)
+    except ConfigError as exc:
+        raise PlanError(f"plan file is not valid strict JSON: {scrub_text(str(exc))}") from exc
     if not isinstance(data, dict):
         raise ValueError("JSON document must be an object")
     return data
@@ -614,13 +691,32 @@ def _run_plan_active(
 ) -> int:
     """Execute a compiled plan through the runner after full offline validation."""
     plan = _load_plan_file(args.plan)
-    if plan.origin != target.origin:
-        raise PlanError("plan origin does not match requested target")
+    # Bind the *exact* target (scheme/host/port/path/query), not only the origin:
+    # a plan compiled for one path may not be run against another.
+    if plan.target != target.url:
+        raise PlanError("requested target does not exactly match the authorized plan target")
+    # Plan execution via a receipt REQUIRES a plan-bound exact-target receipt
+    # (tamper-evidence binding, not a signature): an origin-only or mismatched
+    # receipt must not authorize any plan run (reliable or Kitchen Sink). Fails
+    # closed here, before any transport is constructed.
+    if auth_meta.get("mode") == "receipt":
+        if (
+            auth_meta.get("plan_digest") != plan.digest
+            or auth_meta.get("receipt_target") != plan.target
+        ):
+            raise PlanError(
+                "authorization receipt is not bound to this exact plan digest and target"
+            )
+    # Reject a re-digested/tampered plan (widened limits, altered cases, swapped
+    # packs, unknown adapter) before any transport is constructed.
+    verify_plan_integrity(plan)
     body_template = _load_body_template(args)
     adapter = _build_generic_adapter(target, method="POST", body_template=body_template)
     controller = RequestController(
         max_requests=plan.limits.max_physical_requests,
         min_interval=1.0 / plan.limits.requests_per_second,
+        max_duration_seconds=float(plan.limits.max_duration_seconds),
+        max_concurrency=plan.limits.max_concurrency,
     )
     transport = _make_transport(controller)
     evidence: list[dict[str, object]] = []
@@ -643,6 +739,7 @@ def _run_plan_active(
             truncated=resp.truncated,
             transport_ok=True,
             attempts=resp.attempts,
+            known_secrets=resp.known_secrets,
         )
 
     result = run_plan(
@@ -651,6 +748,7 @@ def _run_plan_active(
         canary=canary,
         goal="planned run",
         checkpoint_path=getattr(args, "checkpoint", None),
+        authorized_plan_digest=plan.digest,
     )
     budget = {
         "max_requests": controller.max_requests,
@@ -827,7 +925,7 @@ def _cmd_authorize(args: argparse.Namespace, ask: Callable[[str], str]) -> int:
     try:
         target = normalize_target(args.target)
     except TargetError as exc:
-        print(f"error: {exc}")
+        print(f"error: {scrub_text(str(exc))}")
         return EXIT_RUNTIME_ERROR
 
     from ai_scan.authorization import interactive_authorize
@@ -845,10 +943,10 @@ def _cmd_authorize(args: argparse.Namespace, ask: Callable[[str], str]) -> int:
         )
         write_receipt(receipt, args.out)
     except AuthorizationError as exc:
-        print(f"error: {exc}")
+        print(f"error: {scrub_text(str(exc))}")
         return EXIT_RUNTIME_ERROR
     except OSError as exc:
-        print(f"error: cannot write receipt: {exc.strerror}")
+        print(f"error: cannot write receipt: {scrub_text(str(exc.strerror))}")
         return EXIT_RUNTIME_ERROR
 
     print(f"authorized: receipt for {receipt.origin} written to {args.out}")
@@ -861,14 +959,14 @@ def _cmd_validate_config(args: argparse.Namespace) -> int:
         with open(args.file, encoding="utf-8") as handle:
             text = handle.read()
     except OSError as exc:
-        print(f"error: cannot read {args.file}: {exc.strerror}")
+        print(f"error: cannot read file: {scrub_text(f'{args.file}: {exc.strerror}')}")
         return EXIT_RUNTIME_ERROR
     try:
         load_document(text, args.kind)
     except ConfigError as exc:
-        print(f"invalid: {exc}")
+        print(f"invalid: {scrub_text(str(exc))}")
         return EXIT_RUNTIME_ERROR
-    print(f"valid: {args.file} conforms to {args.kind} schema")
+    print(f"valid: {scrub_text(args.file)} conforms to {args.kind} schema")
     return EXIT_OK
 
 
@@ -885,7 +983,7 @@ def _cmd_packs(args: argparse.Namespace) -> int:
                 else [load_builtin_pack(p) for p in available_packs()]
             )
         except PackResolutionError as exc:
-            print(f"error: {exc}")
+            print(f"error: {scrub_text(str(exc))}")
             return EXIT_RUNTIME_ERROR
         for pack in packs:
             modes = ",".join(sorted(pack.modes))
@@ -914,13 +1012,13 @@ def _cmd_validate_receipt(args: argparse.Namespace) -> int:
     try:
         target = normalize_target(args.target)
     except TargetError as exc:
-        print(f"error: {exc}")
+        print(f"error: {scrub_text(str(exc))}")
         return EXIT_RUNTIME_ERROR
     try:
         receipt = load_receipt(args.auth_receipt)
         validate_receipt(receipt, target)
     except AuthorizationError as exc:
-        print(f"invalid: {exc}")
+        print(f"invalid: {scrub_text(str(exc))}")
         return EXIT_AUTH_DENIED
     print(f"valid: receipt authorizes {receipt.origin} (expires {receipt.expires})")
     return EXIT_OK

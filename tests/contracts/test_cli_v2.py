@@ -21,6 +21,18 @@ def _receipt(tmp_path, url: str) -> str:
     return str(path)
 
 
+def _plan_bound_receipt(tmp_path, url: str, plan_digest: str) -> str:
+    path = tmp_path / "auth.json"
+    write_receipt(
+        Receipt.create(
+            target=normalize_target(url), client="C", engagement="E",
+            expires="2999-01-01", plan_digest=plan_digest,
+        ),
+        str(path),
+    )
+    return str(path)
+
+
 def _legacy_report(path) -> None:
     path.write_text(
         json.dumps(
@@ -96,9 +108,10 @@ def test_plan_and_run_execute_through_authorized_runner(mock_server, tmp_path) -
     url = f"{server.base_url}/chat"
     plan_path = tmp_path / "plan.json"
     report_path = tmp_path / "run-report.json"
-    receipt = _receipt(tmp_path, url)
 
     assert cli.main(["plan", "--target", url, "--out", str(plan_path)]) == cli.EXIT_OK
+    plan_digest = json.loads(plan_path.read_text(encoding="utf-8"))["digest"]
+    receipt = _plan_bound_receipt(tmp_path, url, plan_digest)
     rc = cli.main(
         [
             "run",

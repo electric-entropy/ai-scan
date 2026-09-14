@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -29,6 +30,14 @@ from ai_scan.targets import Target, TargetError, normalize_target
 from ai_scan.transport.redaction import scrub_text
 
 CONFIRM_PREFIX = "I confirm I am authorized to assess"
+
+# Strict RFC 3339: a ``T`` separator and an explicit timezone are required, so a
+# naive or space-separated timestamp is rejected.
+_RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
+_RECEIPT_FIELDS = frozenset(
+    {"version", "origin", "client", "engagement", "created_at", "expires", "digest",
+     "plan_digest", "target"}
+)
 
 
 class AuthorizationError(Exception):
@@ -69,9 +78,14 @@ SUPPORTED_RECEIPT_VERSION = 1
 
 
 def _canonical_payload(
-    version: int, origin: str, client: str, engagement: str, expires: str, created_at: str
+    version: int, origin: str, client: str, engagement: str, expires: str, created_at: str,
+    plan_digest: str | None = None, target: str | None = None,
 ) -> bytes:
-    """Canonical JSON bytes over the integrity-protected fields (digest excluded)."""
+    """Canonical JSON bytes over the integrity-protected fields (digest excluded).
+
+    ``plan_digest``/``target`` are included only when the receipt is plan-bound,
+    so an origin-only receipt's canonical payload (and digest) is unchanged.
+    """
     payload = {
         "client": client,
         "created_at": created_at,
@@ -80,14 +94,21 @@ def _canonical_payload(
         "origin": origin,
         "version": version,
     }
+    if plan_digest is not None:
+        payload["plan_digest"] = plan_digest
+    if target is not None:
+        payload["target"] = target
     return json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
 def _compute_digest(
-    version: int, origin: str, client: str, engagement: str, expires: str, created_at: str
+    version: int, origin: str, client: str, engagement: str, expires: str, created_at: str,
+    plan_digest: str | None = None, target: str | None = None,
 ) -> str:
     return hashlib.sha256(
-        _canonical_payload(version, origin, client, engagement, expires, created_at)
+        _canonical_payload(
+            version, origin, client, engagement, expires, created_at, plan_digest, target
+        )
     ).hexdigest()
 
 
@@ -111,6 +132,10 @@ class Receipt:
     expires: str
     digest: str
     version: int = SUPPORTED_RECEIPT_VERSION
+    # Optional tamper-evident binding to an exact executable plan + target. This
+    # is content-digest binding, NOT a cryptographic signature.
+    plan_digest: str | None = None
+    target: str | None = None
 
     @classmethod
     def create(
@@ -120,14 +145,23 @@ class Receipt:
         engagement: str,
         expires: str,
         created_at: str | None = None,
+        plan_digest: str | None = None,
     ) -> Receipt:
-        """Create a receipt bound to ``target``, computing its digest."""
+        """Create a receipt bound to ``target``, computing its digest.
+
+        When ``plan_digest`` is supplied the receipt is additionally bound to that
+        exact plan digest and the exact target URL (tamper-evidence, not a
+        signature), which is what lets it authorize a Kitchen Sink run.
+        """
         _validate_expiry_format(expires)
         stamp = created_at or datetime.now(UTC).isoformat()
         _validate_created_at(stamp)
         origin = target.origin
+        bound_target = target.url if plan_digest is not None else None
         version = SUPPORTED_RECEIPT_VERSION
-        digest = _compute_digest(version, origin, client, engagement, expires, stamp)
+        digest = _compute_digest(
+            version, origin, client, engagement, expires, stamp, plan_digest, bound_target
+        )
         return cls(
             origin=origin,
             client=client,
@@ -136,11 +170,13 @@ class Receipt:
             expires=expires,
             digest=digest,
             version=version,
+            plan_digest=plan_digest,
+            target=bound_target,
         )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to a plain dict (including the stored digest)."""
-        return {
+        data: dict[str, Any] = {
             "version": self.version,
             "origin": self.origin,
             "client": self.client,
@@ -149,6 +185,12 @@ class Receipt:
             "expires": self.expires,
             "digest": self.digest,
         }
+        # Emit plan binding only when present, so origin-only receipts stay stable.
+        if self.plan_digest is not None:
+            data["plan_digest"] = self.plan_digest
+        if self.target is not None:
+            data["target"] = self.target
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Receipt:
@@ -160,6 +202,13 @@ class Receipt:
         :func:`validate_receipt`. The version must be exactly the supported
         version and ``created_at`` must parse, independently of the digest.
         """
+        unknown = set(data) - _RECEIPT_FIELDS
+        if unknown:
+            # Closed schema: an unknown field (count only, never echoed) is a
+            # tamper/format signal and fails closed.
+            raise AuthorizationError(
+                f"Receipt has unknown field(s) not permitted ({len(unknown)} present)."
+            )
         try:
             version = data["version"]
             origin = str(data["origin"])
@@ -180,7 +229,19 @@ class Receipt:
             )
         _validate_created_at(created_at)
 
-        recomputed = _compute_digest(version, origin, client, engagement, expires, created_at)
+        plan_digest = data.get("plan_digest")
+        bound_target = data.get("target")
+        if plan_digest is not None and not isinstance(plan_digest, str):
+            raise AuthorizationError("Receipt plan_digest must be a string.")
+        if bound_target is not None and not isinstance(bound_target, str):
+            raise AuthorizationError("Receipt target must be a string.")
+        # A bound target is only meaningful alongside a plan_digest (and vice versa).
+        if (plan_digest is None) != (bound_target is None):
+            raise AuthorizationError("Receipt plan_digest and target must be bound together.")
+
+        recomputed = _compute_digest(
+            version, origin, client, engagement, expires, created_at, plan_digest, bound_target
+        )
         if not _constant_time_equal(recomputed, stored_digest):
             raise AuthorizationError("Receipt integrity check failed (digest mismatch).")
 
@@ -192,6 +253,8 @@ class Receipt:
             expires=expires,
             digest=recomputed,
             version=version,
+            plan_digest=plan_digest,
+            target=bound_target,
         )
 
 
@@ -212,13 +275,23 @@ def _validate_expiry_format(expires: str) -> date:
 
 
 def _validate_created_at(created_at: str) -> datetime:
+    # Strict RFC 3339 with an explicit timezone; a naive or space-separated
+    # timestamp is rejected (it would otherwise parse via fromisoformat).
+    if not isinstance(created_at, str) or not _RFC3339.fullmatch(created_at):
+        raise AuthorizationError(
+            f"Receipt created_at {scrub_text(str(created_at))!r} is not a strict, "
+            f"timezone-aware RFC 3339 timestamp."
+        )
     try:
-        return datetime.fromisoformat(created_at)
+        parsed = datetime.fromisoformat(created_at)
     except (ValueError, TypeError) as exc:
         raise AuthorizationError(
             f"Receipt created_at {scrub_text(str(created_at))!r} is not a valid "
             f"ISO-8601 timestamp."
         ) from exc
+    if parsed.tzinfo is None:  # pragma: no cover - regex already requires a tz
+        raise AuthorizationError("Receipt created_at must be timezone-aware.")
+    return parsed
 
 
 def validate_receipt(
@@ -236,6 +309,10 @@ def validate_receipt(
         )
     expiry = _validate_expiry_format(receipt.expires)
     today = now or datetime.now(UTC).date()
+    # Issuance bound: a receipt cannot be created in the future.
+    created = _validate_created_at(receipt.created_at)
+    if created.astimezone(UTC).date() > today:
+        raise AuthorizationError("Receipt is issued in the future.")
     if today > expiry:
         raise AuthorizationError(f"Receipt expired on {receipt.expires}.")
 
@@ -270,7 +347,7 @@ def load_receipt(path: str) -> Receipt:
         raise AuthorizationError(f"Cannot read receipt file: {exc.strerror}.") from exc
 
     try:
-        parsed = json.loads(raw)
+        parsed = json.loads(raw, object_pairs_hook=_reject_duplicate_keys)
     except json.JSONDecodeError as exc:
         raise AuthorizationError("Receipt file is not valid JSON.") from exc
 
@@ -278,6 +355,15 @@ def load_receipt(path: str) -> Receipt:
         raise AuthorizationError("Receipt file must contain a JSON object.")
 
     return Receipt.from_dict(parsed)
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    seen: set[str] = set()
+    for key, _value in pairs:
+        if key in seen:
+            raise AuthorizationError("Receipt file has a duplicate JSON key.")
+        seen.add(key)
+    return dict(pairs)
 
 
 def authorize_for_target(

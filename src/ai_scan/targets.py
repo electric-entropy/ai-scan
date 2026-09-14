@@ -60,13 +60,20 @@ def normalize_target(raw: str) -> Target:
             lacks a host, carries a fragment, or has a malformed/out-of-range
             port.
     """
-    if not isinstance(raw, str) or not raw.strip():
+    if not isinstance(raw, str) or not raw:
         raise TargetError("Target URL must be a non-empty string.")
+    # Do not normalize malformed input into validity: reject leading/trailing
+    # whitespace and any embedded control/whitespace character rather than
+    # silently stripping them (which could mask a smuggled scope escape).
+    if raw != raw.strip():
+        raise TargetError("Target URL must not have leading or trailing whitespace.")
+    if any(ord(ch) < 0x20 or ord(ch) == 0x7F or ch.isspace() for ch in raw):
+        raise TargetError("Target URL must not contain whitespace or control characters.")
 
     # urlsplit validates bracketed IPv6 literals eagerly and raises ValueError
     # for malformed ones (e.g. unclosed brackets); surface as TargetError.
     try:
-        parts = urlsplit(raw.strip())
+        parts = urlsplit(raw)
     except ValueError as exc:
         raise TargetError(f"Malformed target URL: {exc}") from exc
 

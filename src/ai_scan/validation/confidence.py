@@ -38,6 +38,7 @@ class GatingContext:
     """Inputs that gate whether a deterministic execution signal may confirm."""
 
     control_succeeded: bool = False
+    matched_clean_control: bool = True
     attack_trials: int = 1
     successes: int = 1
     min_attack_trials: int = 1
@@ -74,6 +75,10 @@ def _confirmation_ceiling(context: GatingContext) -> tuple[FindingStatus, str]:
     if context.control_succeeded:
         return FindingStatus.SUSPECTED, (
             "matched control also emitted the canary (likely false positive)"
+        )
+    if not context.matched_clean_control:
+        return FindingStatus.LIKELY, (
+            "no usable matched clean control ran (control coverage missing)"
         )
     if context.attack_trials < context.min_attack_trials:
         return FindingStatus.LIKELY, (

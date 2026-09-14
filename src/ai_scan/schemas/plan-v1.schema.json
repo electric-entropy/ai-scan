@@ -1,66 +1,24 @@
 {
   "$id": "https://ai-scan/schemas/plan-v1.schema.json",
   "title": "plan-v1",
+  "description": "The canonical runtime execution plan — the exact artifact the runner runs. Structural shape only; authoritative validation is load_plan + verify_plan_integrity (strict parse, digest verification, and exact policy/registry/target/case/limit/trial-policy match). Plans are policy-derived and re-verifiable, never user-tightened documents.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "kind", "mode", "target_origin", "policy", "packs", "seed"],
+  "required": [
+    "plan_version", "mode", "origin", "target", "adapter", "seed",
+    "packs", "cases", "limits", "trial_policy", "digest"
+  ],
   "properties": {
-    "schema_version": {"const": 1},
-    "kind": {"const": "plan"},
+    "plan_version": {"const": 1},
     "mode": {"type": "string", "enum": ["reliable", "kitchen-sink"]},
-    "target_origin": {
-      "type": "string", "minLength": 1, "maxLength": 2048, "x-origin": true
-    },
-    "policy": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "name", "pack_trust", "include_experimental", "allow_adaptive_generation",
-        "minimum_attack_trials", "minimum_successes", "minimum_control_trials",
-        "promote_statuses", "requests_per_second", "max_physical_requests",
-        "max_duration_seconds", "max_concurrency", "require_deterministic_confirmation"
-      ],
-      "properties": {
-        "name": {"type": "string", "enum": ["reliable", "kitchen-sink"]},
-        "pack_trust": {
-          "type": "array", "minItems": 1, "maxItems": 3,
-          "items": {"type": "string", "enum": ["builtin", "signed", "local_approved"]}
-        },
-        "include_experimental": {"type": "boolean"},
-        "allow_adaptive_generation": {"type": "boolean"},
-        "minimum_attack_trials": {"type": "integer", "minimum": 1, "maximum": 1000},
-        "minimum_successes": {"type": "integer", "minimum": 1, "maximum": 1000},
-        "minimum_control_trials": {"type": "integer", "minimum": 1, "maximum": 1000},
-        "promote_statuses": {
-          "type": "array", "maxItems": 7,
-          "items": {
-            "type": "string",
-            "enum": ["confirmed", "likely", "suspected", "not_observed", "inconclusive", "blocked", "not_tested"]
-          }
-        },
-        "requests_per_second": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000},
-        "max_physical_requests": {"type": "integer", "minimum": 1, "maximum": 1000000},
-        "max_duration_seconds": {"type": "integer", "minimum": 1, "maximum": 86400},
-        "max_concurrency": {"type": "integer", "minimum": 1, "maximum": 256},
-        "require_deterministic_confirmation": {"const": true}
-      }
-    },
-    "packs": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 256,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["id", "version", "digest"],
-        "properties": {
-          "id": {"type": "string", "minLength": 1, "maxLength": 100},
-          "version": {"type": "string", "minLength": 1, "maxLength": 100},
-          "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
-        }
-      }
-    },
+    "origin": {"type": "string", "minLength": 1, "maxLength": 2048, "x-origin": true},
+    "target": {"type": "string", "minLength": 1, "maxLength": 2048, "x-url": true},
+    "adapter": {"type": "string", "minLength": 1, "maxLength": 100},
     "seed": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
-    "created_at": {"type": "string", "minLength": 20, "maxLength": 40, "x-datetime": true}
+    "packs": {"type": "array", "minItems": 1, "maxItems": 256},
+    "cases": {"type": "array", "minItems": 1, "maxItems": 100000},
+    "limits": {"type": "array", "minItems": 4, "maxItems": 4},
+    "trial_policy": {"type": "array", "minItems": 3, "maxItems": 3},
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
   }
 }

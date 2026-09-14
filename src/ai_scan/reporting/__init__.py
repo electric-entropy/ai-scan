@@ -27,6 +27,17 @@ EXIT_OK = 0
 EXIT_CONFIRMED_FINDING = 3
 EXIT_INCONCLUSIVE = 4
 
+# Statuses surfaced in the report's findings list: a confirmed finding plus the
+# speculative tier (never-confirmed but worth showing), 7-state and legacy alike.
+_SURFACED_STATUSES = frozenset(
+    {
+        InjectionStatus.CONFIRMED,
+        InjectionStatus.POTENTIAL,
+        InjectionStatus.LIKELY,
+        InjectionStatus.SUSPECTED,
+    }
+)
+
 
 @dataclass
 class Report:
@@ -70,7 +81,7 @@ class Report:
         return [
             f.to_dict()
             for f in self.injection.findings
-            if f.status in (InjectionStatus.CONFIRMED, InjectionStatus.POTENTIAL)
+            if f.status in _SURFACED_STATUSES
         ]
 
     def to_dict(self) -> dict[str, Any]:
