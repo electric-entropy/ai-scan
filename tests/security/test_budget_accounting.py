@@ -1,7 +1,7 @@
 """Physical-request budgets are acquired before I/O and counted accurately.
 
 Covers all four budgets (count / rate / time / concurrency) and the per-kind
-accounting guarantee: initial, retry, control, confirmation, and authorized
+accounting guarantee: initial, retry, control, confirmation, and redirect
 redirect attempts are counted as separate physical counters that still sum to
 the accurate total.
 """
@@ -21,7 +21,7 @@ TARGET = normalize_target("http://127.0.0.1:8080/chat")
 
 
 class _OkGuard:
-    def authorize(self, url: str) -> ResolvedEndpoint:
+    def check(self, url: str) -> ResolvedEndpoint:
         return ResolvedEndpoint(target=TARGET, ip="127.0.0.1", family=4, host_is_literal=True)
 
 

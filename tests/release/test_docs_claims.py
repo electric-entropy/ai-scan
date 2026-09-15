@@ -104,16 +104,19 @@ def test_readme_states_assess_is_legacy_v1() -> None:
 
 def test_readme_documents_shipped_v020_capabilities() -> None:
     lowered = _text(_README).lower()
-    assert "v0.2.0" in lowered
+    assert "v0.2.1" in lowered
     for token in ("doctor", "kitchen sink", "reliable", "evidence bundle", "replay",
                   "adapter", "pack", "worker"):
         assert token in lowered, token
 
 
-def test_readme_keeps_authorized_use_warning() -> None:
+def test_readme_keeps_responsible_use_warning() -> None:
     lowered = _text(_README).lower()
-    assert "authorized use only" in lowered
-    assert "not touch the network" in lowered or "before any network traffic" in lowered
+    # A responsible/legal-use notice must remain even though there is no
+    # authorization feature.
+    assert "use responsibly" in lowered
+    assert "may be illegal" in lowered
+    assert "permitted to test" in lowered
 
 
 def test_readme_out_of_scope_is_not_stale() -> None:
@@ -125,10 +128,14 @@ def test_readme_out_of_scope_is_not_stale() -> None:
             assert "multimodal" not in line.lower(), line
 
 
-def test_readme_signed_receipts_framed_as_future() -> None:
-    normalized = " ".join(_text(_README).split()).lower()
-    assert "not yet implemented" in normalized or "not authenticated" in normalized
-    assert "tamper-evident" in normalized
+def test_readme_has_no_authorization_or_receipt_concept() -> None:
+    lowered = _text(_README).lower()
+    # The authorization/receipt feature is gone entirely (0.2.1). "Authorization"
+    # may still appear only as an HTTP header name in the redaction note.
+    assert "receipt" not in lowered
+    assert "--auth-receipt" not in lowered
+    assert "ai-scan authorize" not in lowered
+    assert "validate-receipt" not in lowered
 
 
 def test_docs_do_not_reference_missing_paths() -> None:

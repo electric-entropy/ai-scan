@@ -4,7 +4,7 @@ Covers the boundary/malformed cases from the M5 acceptance matrix — conflictin
 authority, Content-Length mismatch, header injection (bare CR/NUL/obs-fold),
 duplicate headers, Transfer-Encoding, absolute-form targets, CRLF vs LF, and the
 explicit marker requirement — plus positive GET/POST replay bound to the
-authorized target.
+in-scope target.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def _raw(lines: list[str], body: str = "", *, eol: str = "\r\n") -> str:
 
 # --- positive replay ------------------------------------------------------------
 
-def test_post_capture_replays_shape_bound_to_authorized_target() -> None:
+def test_post_capture_replays_shape_bound_to_in_scope_target() -> None:
     raw = _raw(
         ["POST /chat HTTP/1.1", "Host: 127.0.0.1:8080", "Content-Type: application/json"],
         '{"input": "*"}',

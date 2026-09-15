@@ -20,8 +20,8 @@ def test_doctor_exits_zero_and_prints_summary(capsys: pytest.CaptureFixture) -> 
     assert "schema" in out and "pack" in out
 
 
-def test_doctor_requires_no_auth_target_or_receipt() -> None:
-    # No --target / --auth-receipt / confirmation is needed.
+def test_doctor_requires_no_target() -> None:
+    # No --target is needed; doctor is fully offline.
     assert cli.main(["doctor"]) == cli.EXIT_OK
 
 

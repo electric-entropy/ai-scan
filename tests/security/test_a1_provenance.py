@@ -78,29 +78,10 @@ def test_plan_binds_exact_target_path(mock_server, tmp_path) -> None:
     origin = server.base_url
     plan_url = f"{origin}/chat"
     plan_path = tmp_path / "plan.json"
-    receipt = _write_receipt(tmp_path, plan_url)
     assert cli.main(["plan", "--target", plan_url, "--out", str(plan_path)]) == cli.EXIT_OK
 
-    rc = cli.main(
-        [
-            "run", "--target", f"{origin}/admin", "--plan", str(plan_path),
-            "--auth-receipt", receipt, "--non-interactive",
-        ]
-    )
+    rc = cli.main(["run", "--target", f"{origin}/admin", "--plan", str(plan_path)])
     assert rc != cli.EXIT_OK  # the /admin target is rejected against a /chat plan
-
-
-def _write_receipt(tmp_path, url: str) -> str:
-    from ai_scan.authorization import Receipt, write_receipt
-
-    path = tmp_path / "auth.json"
-    write_receipt(
-        Receipt.create(
-            target=normalize_target(url), client="C", engagement="E", expires="2999-01-01"
-        ),
-        str(path),
-    )
-    return str(path)
 
 
 def test_ai_scan_plan_output_passes_validate_config(tmp_path) -> None:

@@ -44,7 +44,7 @@ class GenericHttpAdapter:
     """Builds requests for a plain HTTP JSON/text endpoint.
 
     Attributes:
-        target: The authorized target (defines scheme/host/port/path/url).
+        target: The in-scope target (defines scheme/host/port/path/url).
         method: HTTP method (must be in :data:`ACTIVE_METHODS`).
         body_template: Non-GET body template containing the ``*`` marker.
         prompt_encoding: ``json`` | ``url`` | ``raw`` (defaults by method).

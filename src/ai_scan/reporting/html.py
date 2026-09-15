@@ -14,7 +14,7 @@ def render_html(report: Report, *, mode: str = "reliable") -> str:
     confirmed = "".join(_finding_li(f) for f in doc["confirmed_findings"]) or "<li>None</li>"
     leads = "".join(_finding_li(f) for f in doc["analyst_leads"]) or "<li>None</li>"
     gaps = "".join(_gap_li(g) for g in doc["coverage_gaps"]) or "<li>None</li>"
-    target = escape(str(doc["scope_authorization_summary"]["target_origin"]))
+    target = escape(str(doc["scope_summary"]["target_origin"]))
     mode_name = escape(str(doc["resolved_mode_policy"]["name"]))
     redaction = escape(str(doc["redaction_notice"]))
     return f"""<!doctype html>
@@ -29,7 +29,7 @@ code{{background:#eee;padding:.1rem .2rem}}
 </head>
 <body>
 <h1>AI-Scan Report</h1>
-<h2>Scope and Authorization</h2>
+<h2>Scope</h2>
 <p>Target origin: <code>{target}</code><br>Mode: <code>{mode_name}</code></p>
 <h2>Confirmed Findings</h2><ul>{confirmed}</ul>
 <h2>Analyst Leads</h2><ul>{leads}</ul>

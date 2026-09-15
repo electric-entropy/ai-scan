@@ -4,7 +4,7 @@ The :class:`BudgetLedger` is acquired once per physical attempt, *before* any
 socket I/O, and enforces four independent budgets — request count, rate
 (minimum inter-attempt interval), wall-clock duration, and concurrency — while
 counting attempts by :class:`AttemptKind` (initial / retry / control /
-confirmation / authorized redirect). The per-kind counts always sum to the
+confirmation / redirect). The per-kind counts always sum to the
 total, so accounting stays accurate even across retries and redirects.
 
 Time and sleep come from injected ``clock``/``sleeper`` callables so rate and

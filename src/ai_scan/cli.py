@@ -4,7 +4,7 @@ Exit codes are stable and part of the tool's contract:
 
 * ``0`` — completed, no confirmed findings
 * ``1`` — runtime/configuration failure
-* ``2`` — authorization denied or invalid
+* ``2`` — request denied by a safety control (scope/budget)
 * ``3`` — confirmed security finding
 * ``4`` — inconclusive assessment
 """
@@ -18,17 +18,8 @@ from collections.abc import Callable, Sequence
 
 from ai_scan.adapters import Adapter, AdapterError, GenericHttpAdapter
 from ai_scan.adapters.registry import AdapterRegistry, default_registry
-from ai_scan.authorization import (
-    AuthorizationError,
-    Receipt,
-    authorize_for_target,
-    load_receipt,
-    validate_receipt,
-    write_receipt,
-)
 from ai_scan.core.config import SUPPORTED_SCHEMAS, load_document, load_json_strict
 from ai_scan.core.errors import ConfigError
-from ai_scan.core.modes import resolve_policy
 from ai_scan.evidence_graph import BundleError, ReplayError, load_bundle, replay_bundle
 from ai_scan.fingerprint import DEFAULT_PROBES, ProbeExchange, run_fingerprint
 from ai_scan.injection import (
@@ -80,7 +71,7 @@ from ai_scan.transport import (
 
 EXIT_OK = 0
 EXIT_RUNTIME_ERROR = 1
-EXIT_AUTH_DENIED = 2
+EXIT_DENIED = 2  # request blocked by a safety control (scope/budget)
 EXIT_CONFIRMED_FINDING = 3
 EXIT_INCONCLUSIVE = 4
 
@@ -91,7 +82,7 @@ class _ArgumentParser(argparse.ArgumentParser):
     """ArgumentParser that maps usage/config errors to exit code ``1``.
 
     argparse's default is exit code ``2``, which would collide with the tool's
-    documented ``2`` for authorization failures. ``--help`` still exits ``0``.
+    documented ``2`` for safety-control denials. ``--help`` still exits ``0``.
     """
 
     def error(self, message: str) -> None:  # type: ignore[override]
@@ -103,20 +94,10 @@ def build_parser() -> argparse.ArgumentParser:
     """Construct the top-level argument parser with all subcommands."""
     parser = _ArgumentParser(
         prog=PROG,
-        description="Authorized LLM assessment: behavioral fingerprinting and "
+        description="LLM security assessment: behavioral fingerprinting and "
         "safe prompt-injection testing.",
     )
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
-
-    p_authorize = subparsers.add_parser(
-        "authorize",
-        help="Interactively create a target-bound authorization receipt.",
-    )
-    p_authorize.add_argument("--target", required=True, help="Target URL.")
-    p_authorize.add_argument("--client", required=True, help="Client name.")
-    p_authorize.add_argument("--engagement", required=True, help="Engagement ID.")
-    p_authorize.add_argument("--expires", required=True, help="Expiry date, YYYY-MM-DD.")
-    p_authorize.add_argument("--out", required=True, help="Receipt output path.")
 
     p_fingerprint = subparsers.add_parser(
         "fingerprint",
@@ -142,7 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_plan = subparsers.add_parser(
         "plan",
-        help="Compile an offline, digested execution plan without authorization or network.",
+        help="Compile an offline, digested execution plan (no network).",
     )
     p_plan.add_argument("--target", required=True, help="Target URL.")
     p_plan.add_argument(
@@ -154,18 +135,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = subparsers.add_parser(
         "run",
-        help="Execute a compiled plan through the authorized runner.",
+        help="Execute a compiled plan through the runner.",
     )
     _add_active_args(p_run)
     p_run.add_argument("--plan", required=True, help="Plan JSON produced by ai-scan plan.")
     p_run.add_argument("--checkpoint", help="Checkpoint path for resumable execution.")
-
-    p_validate = subparsers.add_parser(
-        "validate-receipt",
-        help="Validate an authorization receipt against a target.",
+    p_run.add_argument(
+        "--model",
+        help="Model id for a provider adapter (required when the plan's adapter is a "
+        "JSON provider such as ollama/openai_compatible/anthropic/gemini).",
     )
-    p_validate.add_argument("--auth-receipt", required=True, help="Receipt file path.")
-    p_validate.add_argument("--target", required=True, help="Target URL.")
 
     p_validate_config = subparsers.add_parser(
         "validate-config",
@@ -262,7 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_doctor = subparsers.add_parser(
         "doctor",
         help="Offline health check: validate packaged schemas, packs, py.typed, and "
-        "metadata (no network, no auth).",
+        "metadata (offline, no network).",
     )
     p_doctor.add_argument(
         "--json", action="store_true", help="Emit the health report as JSON."
@@ -275,25 +254,14 @@ def _add_active_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments shared by active (network-touching) subcommands."""
     parser.add_argument("--target", required=True, help="Target URL.")
     parser.add_argument("--request-template", help="Burp-style request template file.")
-    parser.add_argument("--auth-receipt", help="Authorization receipt file path.")
-    parser.add_argument(
-        "--non-interactive",
-        action="store_true",
-        help="Never prompt; require a valid receipt.",
-    )
     parser.add_argument("--out", help="Report output path.")
 
 
-def main(
-    argv: Sequence[str] | None = None,
-    prompt: Callable[[str], str] | None = None,
-) -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     """Program entry point. Returns a process exit code.
 
     Args:
         argv: Argument vector (defaults to ``sys.argv[1:]``).
-        prompt: Injected confirmation-prompt callable (defaults to
-            :func:`input`); used to keep the interactive gate testable.
     """
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -302,12 +270,6 @@ def main(
         parser.print_usage()
         return EXIT_RUNTIME_ERROR
 
-    ask = prompt if prompt is not None else input
-
-    if args.command == "authorize":
-        return _cmd_authorize(args, ask)
-    if args.command == "validate-receipt":
-        return _cmd_validate_receipt(args)
     if args.command == "validate-config":
         return _cmd_validate_config(args)
     if args.command == "packs":
@@ -327,30 +289,15 @@ def main(
     if args.command == "doctor":
         return _cmd_doctor(args)
 
-    # Active, network-touching commands. Fail closed before any transport.
+    # Active, network-touching commands. Validate the exact target before any
+    # transport is constructed. Requests are confined to this exact target.
     try:
-        target = authorize_for_target(
-            args.target,
-            receipt_path=args.auth_receipt,
-            non_interactive=args.non_interactive,
-            prompt=ask,
-        )
-    except AuthorizationError as exc:
-        print(f"authorization: {scrub_text(str(exc))}")
-        return EXIT_AUTH_DENIED
-
-    auth_meta = _authorization_metadata(args)
-    if _receipt_blocks_kitchen_sink(args, auth_meta):
-        print(
-            "authorization: a v1 receipt cannot authorize Kitchen Sink; an "
-            "interactive confirmation or a plan-bound receipt is required"
-        )
-        return EXIT_AUTH_DENIED
-    if not _interactive_kitchen_sink_confirmed(args, auth_meta, ask):
-        print("authorization: Kitchen Sink second confirmation failed or declined")
-        return EXIT_AUTH_DENIED
+        target = normalize_target(args.target)
+    except TargetError as exc:
+        print(f"error: {scrub_text(str(exc))}")
+        return EXIT_RUNTIME_ERROR
     try:
-        return _run_active(args, target, auth_meta)
+        return _run_active(args, target)
     except (
         AdapterError,
         TransportError,
@@ -368,102 +315,12 @@ def main(
         suffix = f" (physical attempts: {totals})" if totals else ""
         if outcome == "blocked":
             print(f"blocked: {scrub_text(str(exc))}{suffix}")
-            return EXIT_AUTH_DENIED
+            return EXIT_DENIED
         if outcome == "inconclusive":
             print(f"inconclusive: {scrub_text(str(exc))}{suffix}")
             return EXIT_INCONCLUSIVE
         print(f"error: {scrub_text(str(exc))}")
         return EXIT_RUNTIME_ERROR
-
-
-def _authorization_metadata(args: argparse.Namespace) -> dict[str, object]:
-    """Collect secret-free authorization metadata for the report."""
-    if args.auth_receipt:
-        receipt = load_receipt(args.auth_receipt)
-        return {
-            "mode": "receipt",
-            "client": receipt.client,
-            "engagement": receipt.engagement,
-            "receipt_origin": receipt.origin,
-            "expires": receipt.expires,
-            "plan_digest": receipt.plan_digest,
-            "receipt_target": receipt.target,
-        }
-    return {"mode": "interactive"}
-
-
-def _selected_mode(args: argparse.Namespace) -> str:
-    """The run mode for the active command (from the plan for ``run``)."""
-    if args.command == "run":
-        try:
-            return _load_plan_file(args.plan).mode
-        except (OSError, json.JSONDecodeError, PlanError):
-            return getattr(args, "mode", "reliable")
-    return getattr(args, "mode", "reliable")
-
-
-def _selected_budget(args: argparse.Namespace) -> int:
-    """The maximum physical-request budget for the selected mode."""
-    if args.command == "run":
-        try:
-            return _load_plan_file(args.plan).limits.max_physical_requests
-        except (OSError, json.JSONDecodeError, PlanError):
-            pass
-    try:
-        return resolve_policy(_selected_mode(args)).max_physical_requests
-    except Exception:  # PolicyError — unknown mode, fail closed downstream
-        return 0
-
-
-def _receipt_blocks_kitchen_sink(
-    args: argparse.Namespace, auth_meta: dict[str, object]
-) -> bool:
-    """Whether a receipt is insufficient to authorize the selected Kitchen Sink run.
-
-    Receipt presence must never bypass Kitchen Sink's mandatory gates. An
-    origin-only receipt cannot authorize Kitchen Sink. Only a receipt that is
-    *plan-bound* to this exact plan (matching plan digest and exact target) may,
-    and this holds regardless of ``--non-interactive`` (a receipt always runs
-    headless).
-    """
-    if _selected_mode(args) != "kitchen-sink" or auth_meta.get("mode") != "receipt":
-        return False
-    if args.command == "run":
-        try:
-            plan = _load_plan_file(args.plan)
-        except (OSError, PlanError):
-            return True  # cannot verify the binding → fail closed
-        if (
-            auth_meta.get("plan_digest") == plan.digest
-            and auth_meta.get("receipt_target") == plan.target
-        ):
-            return False  # a valid plan-bound receipt authorizes Kitchen Sink
-    return True
-
-
-def _interactive_kitchen_sink_confirmed(
-    args: argparse.Namespace, auth_meta: dict[str, object], ask: Callable[[str], str]
-) -> bool:
-    """Require a second interactive confirmation for Kitchen Sink.
-
-    Returns ``True`` when no extra confirmation is needed (not interactive, or
-    not Kitchen Sink). For an interactive Kitchen Sink run, the operator must
-    type an exact phrase naming ``kitchen-sink`` and the maximum physical
-    request budget, on top of the origin confirmation.
-    """
-    if auth_meta.get("mode") != "interactive" or _selected_mode(args) != "kitchen-sink":
-        return True
-    budget = _selected_budget(args)
-    phrase = f"I confirm kitchen-sink with up to {budget} physical requests"
-    message = (
-        "Kitchen Sink broadens probes and requires a second confirmation.\n"
-        f"Type exactly: {phrase}\n> "
-    )
-    try:
-        answer = ask(message)
-    except (EOFError, KeyboardInterrupt):
-        return False
-    return answer.strip() == phrase
 
 
 def _load_json_file(path: str) -> dict[str, object]:
@@ -501,18 +358,14 @@ def _load_legacy_report_file(path: str) -> Report:
 def _report_from_dict(data: dict[str, object]) -> Report:
     """Rehydrate the stable legacy report shape for offline renderers."""
     target_origin = str(data["target_origin"])
-    authorization = data.get("authorization")
     request_budget = data.get("request_budget")
     evidence = data.get("evidence", [])
-    if not isinstance(authorization, dict):
-        raise ValueError("report authorization must be an object")
     if not isinstance(request_budget, dict):
         raise ValueError("report request_budget must be an object")
     if not isinstance(evidence, list):
         raise ValueError("report evidence must be a list")
     return Report(
         target_origin=target_origin,
-        authorization=authorization,
         fingerprint=None,
         injection=_injection_from_dict(data.get("injection")),
         request_budget=request_budget,
@@ -569,7 +422,7 @@ def _render_report(
 
 
 def _cmd_plan(args: argparse.Namespace) -> int:
-    """Compile an execution plan offline; no auth prompt or transport construction."""
+    """Compile an execution plan offline; no network or transport construction."""
     try:
         target = normalize_target(args.target)
         plan = compile_plan(target, args.mode, adapter=args.adapter, seed=args.seed)
@@ -711,8 +564,8 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     ``py.typed``, every JSON schema, every built-in pack (parsed, validated, and
     digest-verified), the safe payloads, and the report template — through
     ``importlib.resources``. It constructs no transport, sends no network
-    traffic, and requires no authorization, receipt, or target. Exits ``0`` only
-    when every check passes; otherwise ``1`` with a scrubbed summary.
+    traffic, and requires no target. Exits ``0`` only when every check passes;
+    otherwise ``1`` with a scrubbed summary.
     """
     from importlib import metadata, resources
 
@@ -817,34 +670,52 @@ def _build_generic_adapter(target: Target, *, method: str, body_template: str) -
     return GenericHttpAdapter(target=target, method=method, body_template=body_template)
 
 
+# JSON provider adapters that shape an `{model, messages}` request and extract a
+# single assistant-content field (never the whole envelope / `thinking`).
+_JSON_PROVIDER_ADAPTERS = frozenset(
+    {"ollama", "openai_compatible", "anthropic", "gemini"}
+)
+
+
+def _build_plan_adapter(
+    plan: Plan, target: Target, args: argparse.Namespace, *, body_template: str
+) -> Adapter:
+    """Build the adapter the *plan* selected, before any transport is constructed.
+
+    A plan compiled with a JSON provider adapter (e.g. ``ollama``) uses that
+    adapter's assistant-content extraction, so envelope metadata such as Ollama's
+    ``message.thinking`` never enters confirmation. A JSON provider requires an
+    explicit ``--model``. The generic HTTP adapter stays the compatibility default.
+    Anything else fails closed with zero requests.
+    """
+    name = plan.adapter
+    if name == "generic_http":
+        return _build_generic_adapter(target, method="POST", body_template=body_template)
+    if name in _JSON_PROVIDER_ADAPTERS:
+        model = getattr(args, "model", None)
+        if not model or not str(model).strip():
+            raise AdapterError(f"adapter {name!r} requires --model for an active run")
+        return default_registry().create(name, target=target, model=str(model))
+    raise AdapterError(f"adapter {name!r} is not supported for active run")
+
+
 def _run_plan_active(
     args: argparse.Namespace,
     target: Target,
-    auth_meta: dict[str, object],
 ) -> int:
     """Execute a compiled plan through the runner after full offline validation."""
     plan = _load_plan_file(args.plan)
     # Bind the *exact* target (scheme/host/port/path/query), not only the origin:
     # a plan compiled for one path may not be run against another.
     if plan.target != target.url:
-        raise PlanError("requested target does not exactly match the authorized plan target")
-    # Plan execution via a receipt REQUIRES a plan-bound exact-target receipt
-    # (tamper-evidence binding, not a signature): an origin-only or mismatched
-    # receipt must not authorize any plan run (reliable or Kitchen Sink). Fails
-    # closed here, before any transport is constructed.
-    if auth_meta.get("mode") == "receipt":
-        if (
-            auth_meta.get("plan_digest") != plan.digest
-            or auth_meta.get("receipt_target") != plan.target
-        ):
-            raise PlanError(
-                "authorization receipt is not bound to this exact plan digest and target"
-            )
+        raise PlanError("requested target does not exactly match the plan target")
     # Reject a re-digested/tampered plan (widened limits, altered cases, swapped
     # packs, unknown adapter) before any transport is constructed.
     verify_plan_integrity(plan)
     body_template = _load_body_template(args)
-    adapter = _build_generic_adapter(target, method="POST", body_template=body_template)
+    # Build the adapter the plan selected (e.g. ollama) BEFORE transport, so a
+    # provider adapter's assistant-content extraction is what feeds confirmation.
+    adapter = _build_plan_adapter(plan, target, args, body_template=body_template)
     controller = RequestController(
         max_requests=plan.limits.max_physical_requests,
         min_interval=1.0 / plan.limits.requests_per_second,
@@ -881,7 +752,7 @@ def _run_plan_active(
         canary=canary,
         goal="planned run",
         checkpoint_path=getattr(args, "checkpoint", None),
-        authorized_plan_digest=plan.digest,
+        expected_plan_digest=plan.digest,
     )
     budget = {
         "max_requests": controller.max_requests,
@@ -889,11 +760,8 @@ def _run_plan_active(
         "runner_count": result.request_count,
         "plan_digest": plan.digest,
     }
-    auth = dict(auth_meta)
-    auth["run_mode"] = plan.mode
     report = Report.build(
         target=target,
-        authorization=auth,
         fingerprint=None,
         injection=InjectionResult(
             result.status, list(result.findings), result.request_count, canary
@@ -914,10 +782,9 @@ def _run_plan_active(
 def _run_active(
     args: argparse.Namespace,
     target: Target,
-    auth_meta: dict[str, object],
 ) -> int:
     if args.command == "run":
-        return _run_plan_active(args, target, auth_meta)
+        return _run_plan_active(args, target)
 
     raw_method = getattr(args, "method", "POST")
     method = raw_method.upper()
@@ -1038,7 +905,6 @@ def _run_active(
 
     report = Report.build(
         target=target,
-        authorization=auth_meta,
         fingerprint=fingerprint_result,
         injection=injection_result,
         request_budget=budget,
@@ -1052,38 +918,6 @@ def _run_active(
     # Final central scrub at the console boundary.
     print(scrub_text(report.console_summary(), secrets_seen))
     return exit_code_for(report)
-
-
-def _cmd_authorize(args: argparse.Namespace, ask: Callable[[str], str]) -> int:
-    try:
-        target = normalize_target(args.target)
-    except TargetError as exc:
-        print(f"error: {scrub_text(str(exc))}")
-        return EXIT_RUNTIME_ERROR
-
-    from ai_scan.authorization import interactive_authorize
-
-    if not interactive_authorize(target, ask):
-        print("authorization: denied by operator; no receipt written.")
-        return EXIT_AUTH_DENIED
-
-    try:
-        receipt = Receipt.create(
-            target=target,
-            client=args.client,
-            engagement=args.engagement,
-            expires=args.expires,
-        )
-        write_receipt(receipt, args.out)
-    except AuthorizationError as exc:
-        print(f"error: {scrub_text(str(exc))}")
-        return EXIT_RUNTIME_ERROR
-    except OSError as exc:
-        print(f"error: cannot write receipt: {scrub_text(str(exc.strerror))}")
-        return EXIT_RUNTIME_ERROR
-
-    print(f"authorized: receipt for {receipt.origin} written to {args.out}")
-    return EXIT_OK
 
 
 def _cmd_validate_config(args: argparse.Namespace) -> int:
@@ -1139,19 +973,3 @@ def _cmd_packs(args: argparse.Namespace) -> int:
         return EXIT_OK
     print("error: unknown packs subcommand")
     return EXIT_RUNTIME_ERROR
-
-
-def _cmd_validate_receipt(args: argparse.Namespace) -> int:
-    try:
-        target = normalize_target(args.target)
-    except TargetError as exc:
-        print(f"error: {scrub_text(str(exc))}")
-        return EXIT_RUNTIME_ERROR
-    try:
-        receipt = load_receipt(args.auth_receipt)
-        validate_receipt(receipt, target)
-    except AuthorizationError as exc:
-        print(f"invalid: {scrub_text(str(exc))}")
-        return EXIT_AUTH_DENIED
-    print(f"valid: receipt authorizes {receipt.origin} (expires {receipt.expires})")
-    return EXIT_OK

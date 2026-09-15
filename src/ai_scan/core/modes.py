@@ -8,10 +8,9 @@ Kitchen Sink broadens technique *selection*, never confirmation rigor or limits)
 
 Overrides may only **tighten** a policy: lower budgets, higher confirmation
 minimums, a narrower promoted-status set, capabilities turned off. A looser value
-is clamped to the base. There is **no** receipt-grant widening in this milestone —
-authenticated authorization ceilings/expansions are deferred to the authorization
-milestone. ``ModePolicy`` validates its own invariants on construction, so an
-invalid policy can never exist.
+is clamped to the base — there is **no** mechanism to widen a mode's ceilings.
+``ModePolicy`` validates its own invariants on construction, so an invalid policy
+can never exist.
 """
 
 from __future__ import annotations

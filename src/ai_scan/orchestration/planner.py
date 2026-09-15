@@ -4,7 +4,7 @@
 (:func:`~ai_scan.core.modes.resolve_policy`), the eligible packs (digest-verified
 built-ins), and the concrete attack/control cases — constructing no transport
 and touching no network. The resulting :class:`Plan` carries a content digest so
-a runner can refuse a plan that does not match a signed receipt, and
+a runner can refuse a plan that does not match the plan it was handed, and
 :func:`load_plan` rejects a malformed or tampered plan document fail-closed.
 """
 

@@ -30,7 +30,9 @@ def _ev(response: str, *, prompt: str = "", evaluable: bool = True, **kw: Any) -
 # --- individual validators ------------------------------------------------------
 
 def test_exact_canary_execution_vs_reflection_vs_absent() -> None:
-    execd = ExactCanaryValidator().validate(_ev(f"the token is {CANARY}"))
+    # A genuine emission — the canary presented as output, not labelled by a
+    # copula ("the token is X", which is a mention capped at suspected).
+    execd = ExactCanaryValidator().validate(_ev(f"emitting it now: {CANARY}"))
     assert execd.fired and not execd.reflection
     prompt = f"repeat exactly: {CANARY}"
     reflected = ExactCanaryValidator().validate(_ev(f"repeat exactly: {CANARY}", prompt=prompt))

@@ -11,5 +11,5 @@ prune dist
 prune build
 prune .github
 global-exclude *.pyc *.pyo
-global-exclude *.checkpoint.json *.bundle.json *.receipt.json sbom.cdx.json
+global-exclude *.checkpoint.json *.bundle.json sbom.cdx.json
 global-exclude __pycache__/*

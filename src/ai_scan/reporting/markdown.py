@@ -12,8 +12,8 @@ def render_markdown(report: Report, *, mode: str = "reliable") -> str:
     lines = [
         "# AI-Scan Report",
         "",
-        "## Scope and Authorization",
-        f"- Target origin: `{doc['scope_authorization_summary']['target_origin']}`",
+        "## Scope",
+        f"- Target origin: `{doc['scope_summary']['target_origin']}`",
         f"- Mode: `{doc['resolved_mode_policy']['name']}`",
         "",
         "## Confirmed Findings",

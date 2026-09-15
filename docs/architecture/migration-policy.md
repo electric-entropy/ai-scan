@@ -44,10 +44,10 @@ without breaking the shipped MVP.
 3. **Compatibility window.** Compatibility commands and report v1 remain
    available through **at least one minor release** after `run`/schema v2 ship,
    with documented deprecation before removal in a future major version.
-4. **Receipts.** Receipt **v1** continues to authorize existing safe,
-   single-origin commands. **Signed receipt v2** is required for Kitchen Sink
-   headless operation and for every intrusive capability. Receipt v1 is never
-   silently upgraded.
+4. **No pre-run gating step.** As of 0.2.1 the legacy pre-run gating step is
+   gone: active commands run unattended against `--target`. Exact-target scope,
+   egress brokering, budgets, and redaction remain the enforced safety
+   boundaries.
 5. **Facades over moves.** New packages are introduced behind compatibility
    facades (`models.py`, `transport.py`, `fingerprint.py`, `injection.py`,
    `reporting.py`) so imports and behavior stay stable while internals move.
@@ -69,15 +69,13 @@ without breaking the shipped MVP.
    schema v2, while the compatibility surface keeps emitting v1 with unchanged
    flags and exit codes. Until that milestone, `assess` runs legacy v1 semantics
    (single response per case, no Reliable controls/retries).
-5. Keep reading receipt v1 for existing safe single-origin commands.
-6. Keep report schema v1 for compatibility commands; use finding/evidence schema
+5. Keep report schema v1 for compatibility commands; use finding/evidence schema
    v2 only on the new `run` path.
-7. Remove facades only in a future major version after documented deprecation.
+6. Remove facades only in a future major version after documented deprecation.
 
 ## What Milestone 0 changed
 
 - **Added** (no runtime behavior change): this policy, the architecture docs,
   the two ADRs, and the golden compatibility contract with four outcome fixtures.
-- **Did not change:** any CLI behavior, exit code, report field, authorization
-  flow, reflection handling, `safe` profile, IPv6/origin enforcement, or receipt
-  v1 compatibility.
+- **Did not change:** any CLI behavior, exit code, report field, reflection
+  handling, `safe` profile, or IPv6/origin enforcement.

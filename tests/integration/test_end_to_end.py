@@ -1,8 +1,7 @@
 """End-to-end tests against local in-process HTTP targets.
 
 Each server models a distinct application behavior. These exercise the real
-urllib transport, the authorization gate, the engines, and reporting together —
-all on loopback only.
+urllib transport, the engines, and reporting together — all on loopback only.
 """
 
 from __future__ import annotations
@@ -11,7 +10,6 @@ import json
 import re
 
 from ai_scan import cli
-from ai_scan.authorization import Receipt, write_receipt
 from ai_scan.fingerprint import DEFAULT_PROBES, ProbeExchange, run_fingerprint
 from ai_scan.injection import ExchangeOutcome, generate_canary, load_payloads, run_injection
 from ai_scan.targets import normalize_target
@@ -182,8 +180,9 @@ def test_fingerprint_reads_model_header_from_live_target(mock_server) -> None:
     )
 
 
-def test_cli_non_interactive_requires_receipt_before_network(mock_server) -> None:
-    # No receipt + --non-interactive must exit 2 without touching the server.
+def test_cli_runs_unattended(mock_server) -> None:
+    # Active commands run with just --target: no pre-run gate, reaching the
+    # (loopback) target and never gate-denied (there is no such state).
     hits = {"n": 0}
 
     def counting_app(req: MockRequest) -> MockResponse:
@@ -191,84 +190,36 @@ def test_cli_non_interactive_requires_receipt_before_network(mock_server) -> Non
         return _resistant_app(req)
 
     server = mock_server(counting_app)
-    rc = cli.main(
-        ["inject", "--target", f"{server.base_url}/chat", "--goal", "g", "--non-interactive"],
-        prompt=lambda _m: (_ for _ in ()).throw(AssertionError("must not prompt")),
-    )
-    assert rc == cli.EXIT_AUTH_DENIED
-    assert hits["n"] == 0
+    rc = cli.main(["inject", "--target", f"{server.base_url}/chat", "--goal", "g"])
+    assert rc != cli.EXIT_DENIED
+    assert hits["n"] > 0
 
 
-def test_cli_assess_with_receipt_runs_headless_and_reports(mock_server, tmp_path) -> None:
+def test_cli_assess_runs_headless_and_reports(mock_server, tmp_path) -> None:
     server = mock_server(_vulnerable_app)
     target_url = f"{server.base_url}/chat"
     target = normalize_target(target_url)
 
-    receipt_path = tmp_path / "auth.json"
-    receipt = Receipt.create(
-        target=target, client="Acme", engagement="ENG-42", expires="2999-01-01"
-    )
-    write_receipt(receipt, str(receipt_path))
-
     out = tmp_path / "report.json"
-    rc = cli.main(
-        [
-            "assess",
-            "--target",
-            target_url,
-            "--auth-receipt",
-            str(receipt_path),
-            "--non-interactive",
-            "--out",
-            str(out),
-        ],
-    )
+    rc = cli.main(["assess", "--target", target_url, "--out", str(out)])
     # Vulnerable app reflects the canary → confirmed → exit 3.
     assert rc == cli.EXIT_CONFIRMED_FINDING
     report = json.loads(out.read_text(encoding="utf-8"))
     assert report["target_origin"] == target.origin
-    assert report["authorization"]["mode"] == "receipt"
+    assert "authorization" not in report
     assert report["injection"]["status"] == "confirmed"
-    # No confirmation phrase or secrets leaked into the report.
-    assert "I confirm I am authorized" not in json.dumps(report)
     # Finding 7: budget is reported from the enforced physical counter.
     budget = report["request_budget"]
     assert budget["used"] >= 1
     assert budget["used"] <= budget["max_requests"]
 
 
-def _write_receipt(tmp_path, target):
-    from ai_scan.authorization import Receipt, write_receipt
-
-    receipt_path = tmp_path / "auth.json"
-    write_receipt(
-        Receipt.create(
-            target=target, client="Acme", engagement="ENG-1", expires="2999-01-01"
-        ),
-        str(receipt_path),
-    )
-    return receipt_path
-
-
 def test_cli_inject_sends_only_parseable_json_to_strict_target(mock_server, tmp_path) -> None:
     bad = {"bad": 0}
     server = mock_server(_strict_json_app_factory(bad))
     target_url = f"{server.base_url}/chat"
-    target = normalize_target(target_url)
-    receipt_path = _write_receipt(tmp_path, target)
 
-    rc = cli.main(
-        [
-            "inject",
-            "--target",
-            target_url,
-            "--goal",
-            "canary",
-            "--auth-receipt",
-            str(receipt_path),
-            "--non-interactive",
-        ],
-    )
+    rc = cli.main(["inject", "--target", target_url, "--goal", "canary"])
     # Every default payload must have been accepted as valid JSON.
     assert bad["bad"] == 0
     assert rc in (cli.EXIT_OK, cli.EXIT_CONFIRMED_FINDING, cli.EXIT_INCONCLUSIVE)
@@ -278,19 +229,8 @@ def test_cli_assess_sends_only_parseable_json_to_strict_target(mock_server, tmp_
     bad = {"bad": 0}
     server = mock_server(_strict_json_app_factory(bad))
     target_url = f"{server.base_url}/chat"
-    target = normalize_target(target_url)
-    receipt_path = _write_receipt(tmp_path, target)
 
-    rc = cli.main(
-        [
-            "assess",
-            "--target",
-            target_url,
-            "--auth-receipt",
-            str(receipt_path),
-            "--non-interactive",
-        ],
-    )
+    rc = cli.main(["assess", "--target", target_url])
     assert bad["bad"] == 0
     assert rc in (cli.EXIT_OK, cli.EXIT_CONFIRMED_FINDING, cli.EXIT_INCONCLUSIVE)
 

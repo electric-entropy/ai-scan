@@ -40,7 +40,7 @@ _ALLOWED_FIELDS = frozenset(
 _VALID_STATES = frozenset(
     {
         "planned",
-        "authorized",
+        "validated",
         "running",
         "confirming",
         "cleaning_up",

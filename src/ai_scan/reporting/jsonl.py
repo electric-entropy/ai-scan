@@ -13,7 +13,7 @@ def render_jsonl(report: Report, *, mode: str = "reliable") -> str:
     """Render material report objects as newline-delimited JSON records."""
     doc = report_document(report, mode=mode)
     rows: list[dict[str, Any]] = [
-        {"type": "summary", "data": doc["scope_authorization_summary"]},
+        {"type": "summary", "data": doc["scope_summary"]},
         {"type": "coverage_matrix", "data": doc["coverage_matrix"]},
         {"type": "budgets", "data": doc["budgets"]},
     ]

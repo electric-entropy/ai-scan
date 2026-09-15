@@ -24,7 +24,6 @@ def _report(body: str) -> Report:
     injection = run_injection(load_payloads("safe"), respond, canary=canary, goal="g")
     return Report.build(
         target=normalize_target("https://api.example.test/chat"),
-        authorization={"client": "Acme", "engagement": "ENG", "mode": "receipt"},
         fingerprint=None,
         injection=injection,
         request_budget={"max_requests": 16, "used": injection.request_count},

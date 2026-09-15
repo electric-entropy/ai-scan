@@ -3,12 +3,10 @@
 These tests freeze the current, public MVP behavior *before* any platform
 refactor moves the internals. They characterize:
 
-* the five subcommands, their flag defaults/help, and stable exit codes,
+* the active subcommands, their flag defaults/help, and stable exit codes,
 * report schema v1 (the *complete* structure, including full ``evidence`` and
   ``request_budget``) via a golden fixture,
 * the packaged ``safe`` profile allowlist,
-* v1 authorization receipts, including malformed/expired/wrong-target rejection,
-* no network before authorization,
 * reflection-is-not-confirmation handling,
 * representative ``confirmed`` / clean / reflection / ``inconclusive`` reports
   and an actual exit-4 path.
@@ -36,7 +34,6 @@ from typing import Any
 import pytest
 
 from ai_scan import cli
-from ai_scan.authorization import SUPPORTED_RECEIPT_VERSION, Receipt, write_receipt
 from ai_scan.injection import ALLOWED_PROFILES, InjectionError, load_payloads
 from ai_scan.targets import normalize_target
 from tests.conftest import MockRequest, MockResponse
@@ -89,33 +86,11 @@ def _redirect_app(req: MockRequest) -> MockResponse:
 # --- helpers -----------------------------------------------------------------
 
 
-def _receipt_for(tmp_path, target_url: str, expires: str = "2999-01-01") -> str:
-    target = normalize_target(target_url)
-    path = tmp_path / "auth.json"
-    write_receipt(
-        Receipt.create(target=target, client="C", engagement="E", expires=expires),
-        str(path),
-    )
-    return str(path)
-
-
 def _assess(app, mock_server, tmp_path) -> tuple[int, dict, str]:
     server = mock_server(app)
     url = f"{server.base_url}/chat"
-    receipt = _receipt_for(tmp_path, url)
     out = tmp_path / "report.json"
-    code = cli.main(
-        [
-            "assess",
-            "--target",
-            url,
-            "--auth-receipt",
-            receipt,
-            "--non-interactive",
-            "--out",
-            str(out),
-        ]
-    )
+    code = cli.main(["assess", "--target", url, "--out", str(out)])
     report = json.loads(out.read_text(encoding="utf-8"))
     return code, report, normalize_target(url).origin
 
@@ -170,17 +145,19 @@ OUTCOMES: dict[str, tuple[Any, int, str]] = {
 # --- subcommands, flags, exit codes ------------------------------------------
 
 
-MVP_COMMANDS = {"authorize", "fingerprint", "inject", "assess", "validate-receipt"}
+MVP_COMMANDS = {"fingerprint", "inject", "assess"}
 
 
 def test_mvp_subcommands_remain_present() -> None:
-    # The five MVP commands must remain a subset; future additive commands are
-    # allowed, so this is a subset (not equality) assertion.
+    # The active MVP commands must remain a subset; future additive commands are
+    # allowed, so this is a subset (not equality) assertion. The authorization
+    # commands (authorize/validate-receipt) were removed in 0.2.1.
     parser = cli.build_parser()
     command_actions = [a for a in parser._actions if a.dest == "command"]  # noqa: SLF001
     assert command_actions
     choices = set(command_actions[0].choices)
     assert MVP_COMMANDS <= choices, f"missing MVP commands: {MVP_COMMANDS - choices}"
+    assert "authorize" not in choices and "validate-receipt" not in choices
 
 
 # Complete parser contract: every public option per command, with its dest,
@@ -190,29 +167,11 @@ _MISSING = object()
 
 # option flag -> (dest, required, default)
 PARSER_MATRIX: dict[str, dict[str, Any]] = {
-    "authorize": {
-        "minimal": {
-            "--target": "http://x.example.com/",
-            "--client": "C",
-            "--engagement": "E",
-            "--expires": "2999-01-01",
-            "--out": "o.json",
-        },
-        "options": {
-            "--target": ("target", True, _MISSING),
-            "--client": ("client", True, _MISSING),
-            "--engagement": ("engagement", True, _MISSING),
-            "--expires": ("expires", True, _MISSING),
-            "--out": ("out", True, _MISSING),
-        },
-    },
     "fingerprint": {
         "minimal": {"--target": "http://x.example.com/"},
         "options": {
             "--target": ("target", True, _MISSING),
             "--request-template": ("request_template", False, None),
-            "--auth-receipt": ("auth_receipt", False, None),
-            "--non-interactive": ("non_interactive", False, False),
             "--out": ("out", False, None),
             "--method": ("method", False, "POST"),
         },
@@ -223,8 +182,6 @@ PARSER_MATRIX: dict[str, dict[str, Any]] = {
             "--target": ("target", True, _MISSING),
             "--goal": ("goal", True, _MISSING),
             "--request-template": ("request_template", False, None),
-            "--auth-receipt": ("auth_receipt", False, None),
-            "--non-interactive": ("non_interactive", False, False),
             "--out": ("out", False, None),
             "--profile": ("profile", False, "safe"),
         },
@@ -234,17 +191,8 @@ PARSER_MATRIX: dict[str, dict[str, Any]] = {
         "options": {
             "--target": ("target", True, _MISSING),
             "--request-template": ("request_template", False, None),
-            "--auth-receipt": ("auth_receipt", False, None),
-            "--non-interactive": ("non_interactive", False, False),
             "--out": ("out", False, None),
             "--profile": ("profile", False, "safe"),
-        },
-    },
-    "validate-receipt": {
-        "minimal": {"--auth-receipt": "a.json", "--target": "http://x.example.com/"},
-        "options": {
-            "--auth-receipt": ("auth_receipt", True, _MISSING),
-            "--target": ("target", True, _MISSING),
         },
     },
 }
@@ -309,7 +257,7 @@ def test_help_lists_every_public_option(command: str, capsys) -> None:
 
 
 def test_exit_code_constants_stable() -> None:
-    assert (cli.EXIT_OK, cli.EXIT_RUNTIME_ERROR, cli.EXIT_AUTH_DENIED) == (0, 1, 2)
+    assert (cli.EXIT_OK, cli.EXIT_RUNTIME_ERROR, cli.EXIT_DENIED) == (0, 1, 2)
     assert (cli.EXIT_CONFIRMED_FINDING, cli.EXIT_INCONCLUSIVE) == (3, 4)
 
 
@@ -335,7 +283,6 @@ def _assert_v1_report_shape(report: dict, origin: str, *, expected_used: int = 1
         "tool",
         "schema_version",
         "target_origin",
-        "authorization",
         "created_at",
         "request_budget",
         "fingerprint",
@@ -347,14 +294,7 @@ def _assert_v1_report_shape(report: dict, origin: str, *, expected_used: int = 1
     assert report["schema_version"] == "1.0"
     assert report["target_origin"] == origin
     assert isinstance(report["created_at"], str) and report["created_at"]
-
-    assert report["authorization"] == {
-        "mode": "receipt",
-        "client": "C",
-        "engagement": "E",
-        "receipt_origin": origin,
-        "expires": "2999-01-01",
-    }
+    assert "authorization" not in report
 
     budget = report["request_budget"]
     assert set(budget) == {"max_requests", "used"}
@@ -499,7 +439,6 @@ def test_additive_optional_field_is_tolerated(mock_server, tmp_path) -> None:
         pytest.param(
             lambda r: r["injection"]["findings"][0].update(proof=None), id="drop-proof-value"
         ),
-        pytest.param(lambda r: r["authorization"].update(client="X"), id="change-authorization"),
         pytest.param(lambda r: r["fingerprint"].update(is_unknown=False), id="change-fingerprint"),
     ],
 )
@@ -577,7 +516,7 @@ def test_invalid_profile_rejected_before_any_request(
     command: str, extra: list[str], mock_server, tmp_path
 ) -> None:
     # Milestone 2 closed the ordering gap: the payload pack (`--profile`) is
-    # validated BEFORE any transport is constructed, so an authorized run with an
+    # validated BEFORE any transport is constructed, so a valid run with an
     # invalid profile sends ZERO requests for both `inject` and `assess`, exit 1.
     expected_requests = 0
     hits = {"n": 0}
@@ -592,51 +531,12 @@ def test_invalid_profile_rejected_before_any_request(
 
     server = mock_server(app)
     url = f"{server.base_url}/chat"
-    receipt = _receipt_for(tmp_path, url)
-    code = cli.main(
-        [command, "--target", url, *extra, "--auth-receipt", receipt,
-         "--non-interactive", "--profile", "bogus"]
-    )
+    code = cli.main([command, "--target", url, *extra, "--profile", "bogus"])
     assert code == cli.EXIT_RUNTIME_ERROR
     assert hits["n"] == expected_requests
 
 
-# --- v1 receipts -------------------------------------------------------------
-
-
-def test_receipt_v1_roundtrip(tmp_path) -> None:
-    assert SUPPORTED_RECEIPT_VERSION == 1
-    target = "https://api.example.com:8443/chat"
-    receipt = _receipt_for(tmp_path, target)
-    code = cli.main(["validate-receipt", "--auth-receipt", receipt, "--target", target])
-    assert code == cli.EXIT_OK
-
-
-def test_expired_receipt_rejected(tmp_path) -> None:
-    target = "https://api.example.com/chat"
-    receipt = _receipt_for(tmp_path, target, expires="2000-01-01")
-    code = cli.main(["validate-receipt", "--auth-receipt", receipt, "--target", target])
-    assert code == cli.EXIT_AUTH_DENIED
-
-
-def test_wrong_target_receipt_rejected(tmp_path) -> None:
-    receipt = _receipt_for(tmp_path, "https://api.example.com/chat")
-    code = cli.main(
-        ["validate-receipt", "--auth-receipt", receipt, "--target", "https://evil.example.com/chat"]
-    )
-    assert code == cli.EXIT_AUTH_DENIED
-
-
-def test_malformed_receipt_rejected(tmp_path) -> None:
-    bad = tmp_path / "bad.json"
-    bad.write_text("{ not valid json", encoding="utf-8")
-    code = cli.main(
-        ["validate-receipt", "--auth-receipt", str(bad), "--target", "https://api.example.com/chat"]
-    )
-    assert code == cli.EXIT_AUTH_DENIED
-
-
-# --- no network before authorization -----------------------------------------
+# --- unattended: active commands reach the target with just --target ---------
 
 
 @pytest.mark.parametrize(
@@ -647,7 +547,11 @@ def test_malformed_receipt_rejected(tmp_path) -> None:
         ("assess", []),
     ],
 )
-def test_no_network_before_authorization(command: str, extra: list[str], mock_server) -> None:
+def test_active_commands_run_unattended(
+    command: str, extra: list[str], mock_server, tmp_path
+) -> None:
+    """No pre-run gate: an active command reaches the loopback
+    target and is never denied by an (absent) gating step."""
     hits = {"n": 0}
 
     def counting(req: MockRequest) -> MockResponse:
@@ -655,9 +559,7 @@ def test_no_network_before_authorization(command: str, extra: list[str], mock_se
         return MockResponse(status=200, body=b"{}")
 
     server = mock_server(counting)
-    code = cli.main(
-        [command, "--target", f"{server.base_url}/chat", *extra, "--non-interactive"],
-        prompt=lambda _m: (_ for _ in ()).throw(AssertionError("must not prompt")),
-    )
-    assert code == cli.EXIT_AUTH_DENIED
-    assert hits["n"] == 0
+    url = f"{server.base_url}/chat"
+    code = cli.main([command, "--target", url, *extra])
+    assert code != cli.EXIT_DENIED
+    assert hits["n"] > 0

@@ -1,6 +1,6 @@
 """Adversarial egress-scope enforcement (per-connection, fail-closed).
 
-Every physical attempt re-checks the authorized origin, path, IP family, and
+Every physical attempt re-checks the in-scope origin, path, IP family, and
 the host's *resolved* IPs. DNS rebinding, mixed public/private answers, and
 SSRF-style name→private resolutions are rejected as ``blocked`` scope errors,
 and a rejected attempt performs no socket I/O.
@@ -40,12 +40,12 @@ def _guard(target, resolver, **kw) -> ScopeGuard:
 def test_off_origin_or_off_path_is_blocked(url) -> None:
     guard = _guard(NAMED, lambda h: [PUBLIC_IP])
     with pytest.raises(ScopeError):
-        guard.authorize(url)
+        guard.check(url)
 
 
-def test_in_scope_public_name_is_authorized() -> None:
+def test_in_scope_public_name_is_allowed() -> None:
     guard = _guard(NAMED, lambda h: [PUBLIC_IP])
-    endpoint = guard.authorize(NAMED.url)
+    endpoint = guard.check(NAMED.url)
     assert endpoint.ip == PUBLIC_IP
     assert endpoint.family == 4
 
@@ -55,26 +55,26 @@ def test_in_scope_public_name_is_authorized() -> None:
 def test_dns_rebinding_between_attempts_is_blocked() -> None:
     answers = iter([[PUBLIC_IP], ["10.0.0.5"]])
     guard = _guard(NAMED, lambda h: next(answers), allow_private=True)
-    guard.authorize(NAMED.url)  # pins PUBLIC_IP
+    guard.check(NAMED.url)  # pins PUBLIC_IP
     with pytest.raises(ScopeError, match="rebinding"):
-        guard.authorize(NAMED.url)  # answer changed → rebinding
+        guard.check(NAMED.url)  # answer changed → rebinding
 
 
 def test_mixed_public_and_private_answer_is_blocked() -> None:
     guard = _guard(NAMED, lambda h: [PUBLIC_IP, "10.0.0.5"], allow_private=True)
     with pytest.raises(ScopeError, match="mix of public and private"):
-        guard.authorize(NAMED.url)
+        guard.check(NAMED.url)
 
 
 def test_named_host_resolving_to_private_is_ssrf_blocked_by_default() -> None:
     guard = _guard(NAMED, lambda h: ["169.254.169.254"])  # cloud metadata
     with pytest.raises(ScopeError, match="private address"):
-        guard.authorize(NAMED.url)
+        guard.check(NAMED.url)
 
 
 def test_named_host_to_private_allowed_only_with_explicit_grant() -> None:
     guard = _guard(NAMED, lambda h: ["10.0.0.5"], allow_private=True)
-    endpoint = guard.authorize(NAMED.url)
+    endpoint = guard.check(NAMED.url)
     assert endpoint.ip == "10.0.0.5"
 
 
@@ -84,19 +84,19 @@ def test_disallowed_ip_family_is_blocked() -> None:
     guard = _guard(NAMED, lambda h: ["2606:2800:220:1:248:1893:25c8:1946"],
                    allowed_families=frozenset({4}))
     with pytest.raises(ScopeError, match="family IPv6"):
-        guard.authorize(NAMED.url)
+        guard.check(NAMED.url)
 
 
 def test_non_ip_resolution_is_blocked() -> None:
     guard = _guard(NAMED, lambda h: ["not-an-ip"])
     with pytest.raises(ScopeError):
-        guard.authorize(NAMED.url)
+        guard.check(NAMED.url)
 
 
 def test_empty_resolution_is_blocked() -> None:
     guard = _guard(NAMED, lambda h: [])
     with pytest.raises(ScopeError):
-        guard.authorize(NAMED.url)
+        guard.check(NAMED.url)
 
 
 # --- HTTPS IP-pinning: named-host fails closed, IP literal is allowed -----------

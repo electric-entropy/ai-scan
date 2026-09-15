@@ -4,31 +4,29 @@ AI-Scan v0.2 keeps the v0.1 active commands and report schema v1 compatible whil
 
 ## Compatible by default
 
-The existing commands remain available:
+The existing active commands remain available:
 
-- `ai-scan authorize`
 - `ai-scan fingerprint`
 - `ai-scan inject`
 - `ai-scan assess`
-- `ai-scan validate-receipt`
 
-Existing `assess --target ... --auth-receipt ... --non-interactive --out report.json` automation continues to emit the legacy report v1 document and uses the same exit codes: `0`, `1`, `2`, `3`, and `4`.
+Existing `assess --target ... --out report.json` automation continues to emit the legacy report v1 document and uses the same exit codes: `0`, `1`, `2`, `3`, and `4`. (As of 0.2.1 there is no pre-run gating step at all — active scans run unattended against `--target`, like nmap or sqlmap.)
 
 ## New v0.2 commands
 
 - `ai-scan packs list|validate` lists and validates declarative packs offline.
 - `ai-scan adapters list|show NAME` inspects adapter capabilities offline.
-- `ai-scan plan --target URL --out plan.json` compiles a digested execution plan without authorization or network traffic.
-- `ai-scan run --target URL --plan plan.json --auth-receipt auth.json --non-interactive` executes a compiled plan through the runner after receipt validation.
+- `ai-scan plan --target URL --out plan.json` compiles a digested execution plan without network traffic.
+- `ai-scan run --target URL --plan plan.json` executes a compiled plan through the runner (verifying exact target + plan integrity).
 - `ai-scan report --file report.json --format json|jsonl|markdown|html|sarif` renders an existing report offline.
 - `ai-scan baseline create|diff` creates stable CI baselines and diffs them by finding identity.
 - `ai-scan bundle validate|replay` validates and replays evidence bundles offline.
 
 ## Mode behavior
 
-`assess` remains **legacy v1 compatibility semantics** (a single response per attack case, no repeated-trial confirmation, controls, or evidence graph) — it is *not* Reliable (v2) mode. Reliable v2 is the `plan --mode reliable` + `run` path. `assess` intentionally does not expose a Kitchen Sink selector; use `plan --mode kitchen-sink` plus `run` for broader authorized coverage.
+`assess` remains **legacy v1 compatibility semantics** (a single response per attack case, no repeated-trial confirmation, controls, or evidence graph) — it is *not* Reliable (v2) mode. Reliable v2 is the `plan --mode reliable` + `run` path. `assess` intentionally does not expose a Kitchen Sink selector; use `plan --mode kitchen-sink` plus `run` for broader coverage.
 
-`kitchen-sink` is broader but does not weaken authorization, scope, budgets, redaction, cleanup, or confirmation rules. A v1 receipt cannot authorize headless Kitchen Sink execution. If `--mode kitchen-sink` or a Kitchen Sink plan is supplied with `--auth-receipt ... --non-interactive`, the CLI exits `2` before constructing transport or sending requests. Use an interactive authorization path until signed v2 receipts are introduced.
+`kitchen-sink` is broader but does not weaken scope, budgets, redaction, cleanup, or confirmation rules; like every other mode it runs unattended.
 
 ## Recommended migration path
 
@@ -39,7 +37,7 @@ Existing `assess --target ... --auth-receipt ... --non-interactive --out report.
 
 ## Safety guarantees preserved
 
-- No active command touches the network before target authorization and offline input validation.
+- No active command touches the network before exact-target scope and offline input validation.
 - Offline commands never construct transport.
 - v0.1 reports remain readable and renderable through v0.2 report commands.
 - Confirmed findings still require deterministic, controlled evidence; analyst leads are separated from confirmed findings in v2 renderers.

@@ -6,7 +6,7 @@ are always secret-free (callers scrub untrusted values before constructing
 these).
 
 Terminal denials carry a structured :attr:`TransportError.outcome`
-(``"blocked"`` for a scope/authorization denial, ``"inconclusive"`` for budget
+(``"blocked"`` for a scope denial, ``"inconclusive"`` for budget
 exhaustion) and the physical-attempt ``totals`` observed at denial time, so the
 CLI/report boundary can emit an accurate outcome without re-deriving counts.
 """
@@ -19,7 +19,7 @@ class TransportError(Exception):
 
     Attributes:
         outcome: Structured classification for terminal denials — ``"blocked"``
-            (scope/authorization boundary) or ``"inconclusive"`` (budget
+            (scope boundary) or ``"inconclusive"`` (budget
             exhaustion). ``None`` for ordinary (e.g. connection) failures.
         totals: Per-kind physical-attempt counts at the time of the failure, if
             a budget ledger was in play.
@@ -39,7 +39,7 @@ class BudgetExceededError(TransportError):
 
 
 class ScopeError(TransportError):
-    """Raised when an attempt would leave the authorized scope.
+    """Raised when an attempt would leave the target scope.
 
     Covers a non-canonical scheme/host/port/path, a disallowed IP family, a
     resolved IP outside scope, a mixed public/private answer, or DNS rebinding.

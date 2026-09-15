@@ -2,12 +2,12 @@
 
 ## Intended use
 
-ai-scan is a tool for **explicitly authorized** security assessment of LLM
-endpoints. It must only be pointed at systems you own or have written permission
-to test. The tool enforces an authorization gate, but that gate is an
-operational safeguard for well-intentioned operators — it is **not** a barrier
-against a malicious operator, who by definition controls the machine running the
-tool.
+ai-scan is a tool for security assessment of LLM endpoints. It must only be
+pointed at systems you own or have written permission to test. Like nmap or
+sqlmap, it runs unattended against the exact `--target` you name — using it
+responsibly and legally is the operator's responsibility. The safety boundaries
+below confine *where* and *how* it sends requests; they are not a barrier against
+a malicious operator, who by definition controls the machine running the tool.
 
 > The platform-wide, non-negotiable safety invariants that every future
 > milestone must preserve are documented in
@@ -16,14 +16,11 @@ tool.
 
 ## Safety boundaries enforced by the tool
 
-- **Fail-closed authorization.** Active commands require either an interactive
-  confirmation of the exact normalized target origin, or a valid target-bound
-  receipt. `--non-interactive` without a valid receipt exits `2` before any
-  transport is constructed — no packets are sent.
-- **Exact origin scoping.** Targets are normalized and compared by
-  scheme + host + effective port (IPv6 literals canonicalized). Subdomains,
-  scheme changes, and port changes are distinct origins. A receipt is valid
-  only for its exact origin.
+- **Exact target scoping.** Every request is confined to the exact `--target`
+  you name; targets are normalized and compared by scheme + host + effective
+  port (IPv6 literals canonicalized) and path. Subdomains, scheme changes, and
+  port changes are distinct origins. An out-of-scope request is blocked before
+  transport (exit `2`).
 - **Non-destructive method allowlist.** Active requests use only `GET` or
   `POST`; `DELETE`/`PUT`/`PATCH`/arbitrary methods are rejected before any
   transport is created.
@@ -48,23 +45,7 @@ tool.
   set and by token-bearing name patterns), secret-like query parameters in
   request URLs and redirect `Location` values, and known secret values
   reflected in response bodies are all redacted from stored evidence. Secrets
-  never appear in exception strings, reports, or the console summary. The
-  operator's confirmation input is never stored.
-
-## Receipt threat model — tamper-evident, not authenticated
-
-Authorization receipts are integrity-protected with **canonical JSON + SHA-256**.
-
-- **What this provides:** detection of accidental edits, truncation, or
-  corruption. A modified receipt whose digest was not recomputed fails
-  validation.
-- **What this does NOT provide:** authentication. Anyone who can run ai-scan can
-  recompute a valid digest and forge a receipt for any origin. Receipts are a
-  convenience for keeping authorized engagements in scope and auditable — they
-  are not an access-control or anti-forgery mechanism.
-
-Authenticated (signed) receipts and a centralized authorization service are
-deferred beyond the MVP.
+  never appear in exception strings, reports, or the console summary.
 
 ## Reporting a vulnerability
 

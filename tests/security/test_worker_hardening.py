@@ -255,7 +255,7 @@ def test_dockerignore_excludes_sensitive_paths() -> None:
         for line in text.splitlines()
         if line.strip() and not line.startswith("#")
     }
-    for needed in (".git", ".hermes", "dist", "build", "tests", "*.receipt.json"):
+    for needed in (".git", ".hermes", "dist", "build", "tests", "*.checkpoint.json"):
         assert any(needed in p for p in patterns), needed
-    for keyword in ("receipt", "report", "bundle", "checkpoint", "secret"):
+    for keyword in ("report", "bundle", "checkpoint", "secret"):
         assert any(keyword in p.lower() for p in patterns), keyword

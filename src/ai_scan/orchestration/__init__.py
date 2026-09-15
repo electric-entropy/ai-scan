@@ -7,7 +7,7 @@ deterministically (serial for Reliable, seeded/bounded for Kitchen Sink). The
 runner executes the plan as a resumable state machine, checkpointing atomically
 (secret-free, tamper-rejecting) so a killed run resumes without repeating a
 completed physical attempt, records budget exhaustion as structured coverage
-gaps, and runs authorized cleanup on cancellation.
+gaps, and runs cleanup on cancellation.
 """
 
 from __future__ import annotations

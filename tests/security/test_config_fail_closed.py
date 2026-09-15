@@ -110,7 +110,13 @@ def test_unknown_top_level_field_rejected() -> None:
 
 
 def test_unknown_nested_field_rejected() -> None:
-    doc = _target(auth_refs=[{"header": "Authorization", "env": "T", "extra": 1}])
+    doc = _target(
+        request={
+            "method": "POST",
+            "prompt_marker": "*",
+            "header_refs": [{"header": "Authorization", "env": "T", "extra": 1}],
+        }
+    )
     with pytest.raises(ConfigError):
         load_document(json.dumps(doc), "target")
 
@@ -188,7 +194,13 @@ def test_path_traversal_rejected(value: str) -> None:
 def test_secret_literals_rejected(secret: str) -> None:
     # Field-aware: a literal secret in a secret-bearing reference field (env)
     # is rejected.
-    doc = _target(auth_refs=[{"header": "Authorization", "env": secret}])
+    doc = _target(
+        request={
+            "method": "POST",
+            "prompt_marker": "*",
+            "header_refs": [{"header": "Authorization", "env": secret}],
+        }
+    )
     with pytest.raises(ConfigError):
         load_document(json.dumps(doc), "target")
 
@@ -219,8 +231,15 @@ def test_sha256_digest_is_not_a_false_positive_secret() -> None:
 
 def test_env_reference_for_secret_is_accepted() -> None:
     # Secrets supplied by reference (env var name) are fine.
-    doc = _target(auth_refs=[{"header": "Authorization", "env": "API_TOKEN"}])
-    assert load_document(json.dumps(doc), "target")["auth_refs"][0]["env"] == "API_TOKEN"
+    doc = _target(
+        request={
+            "method": "POST",
+            "prompt_marker": "*",
+            "header_refs": [{"header": "Authorization", "env": "API_TOKEN"}],
+        }
+    )
+    loaded = load_document(json.dumps(doc), "target")
+    assert loaded["request"]["header_refs"][0]["env"] == "API_TOKEN"
 
 
 # --- type-aware const/enum (integer 1 is not boolean true) -------------------
@@ -404,18 +423,23 @@ def test_body_template_must_contain_declared_marker() -> None:
         load_document(json.dumps(_target(request=request)), "target")
 
 
+def _target_with_header_refs(refs: list[dict]) -> dict:
+    return _target(request={"method": "POST", "prompt_marker": "*", "header_refs": refs})
+
+
 def test_secret_reference_must_be_exactly_one_of_env_or_fd() -> None:
-    both = _target(auth_refs=[{"header": "Authorization", "env": "T", "fd": 3}])
+    both = _target_with_header_refs([{"header": "Authorization", "env": "T", "fd": 3}])
     with pytest.raises(ConfigError):
         load_document(json.dumps(both), "target")
-    neither = _target(auth_refs=[{"header": "Authorization"}])
+    neither = _target_with_header_refs([{"header": "Authorization"}])
     with pytest.raises(ConfigError):
         load_document(json.dumps(neither), "target")
 
 
 def test_fd_secret_reference_is_accepted() -> None:
-    doc = _target(auth_refs=[{"header": "Authorization", "fd": 3}])
-    assert load_document(json.dumps(doc), "target")["auth_refs"][0]["fd"] == 3
+    doc = _target_with_header_refs([{"header": "Authorization", "fd": 3}])
+    loaded = load_document(json.dumps(doc), "target")
+    assert loaded["request"]["header_refs"][0]["fd"] == 3
 
 
 # --- blocker 2b: mutually exclusive target branches --------------------------

@@ -1,10 +1,8 @@
 """Report assembly, atomic persistence, and exit-code mapping.
 
-A :class:`Report` correlates fingerprint and injection results with target and
-authorization metadata into a stable, machine-readable JSON document. The
-report records *authorization metadata* (client, engagement, mode) but never
-the operator's confirmation input. Reports are written atomically so a crash
-never leaves a partial file, and the console summary contains no secrets.
+A :class:`Report` correlates fingerprint and injection results with the target
+into a stable, machine-readable JSON document. Reports are written atomically so
+a crash never leaves a partial file, and the console summary contains no secrets.
 """
 
 from __future__ import annotations
@@ -44,7 +42,6 @@ class Report:
     """A complete, serializable assessment report."""
 
     target_origin: str
-    authorization: dict[str, Any]
     fingerprint: FingerprintResult | None
     injection: InjectionResult | None
     request_budget: dict[str, Any]
@@ -56,17 +53,15 @@ class Report:
         cls,
         *,
         target: Target,
-        authorization: dict[str, Any],
         fingerprint: FingerprintResult | None,
         injection: InjectionResult | None,
         request_budget: dict[str, Any],
         evidence: list[dict[str, Any]] | None = None,
         created_at: str | None = None,
     ) -> Report:
-        """Assemble a report, sanitizing authorization metadata."""
+        """Assemble a report."""
         return cls(
             target_origin=target.origin,
-            authorization=_safe_authorization(authorization),
             fingerprint=fingerprint,
             injection=injection,
             request_budget=request_budget,
@@ -90,7 +85,6 @@ class Report:
             "tool": TOOL_NAME,
             "schema_version": SCHEMA_VERSION,
             "target_origin": self.target_origin,
-            "authorization": self.authorization,
             "created_at": self.created_at,
             "request_budget": self.request_budget,
             "fingerprint": self.fingerprint.to_dict() if self.fingerprint else None,
@@ -103,9 +97,6 @@ class Report:
         """A short, secret-free human summary for the terminal."""
         lines = [
             f"target: {self.target_origin}",
-            f"authorization: client={self.authorization.get('client', '?')} "
-            f"engagement={self.authorization.get('engagement', '?')} "
-            f"mode={self.authorization.get('mode', '?')}",
         ]
         if self.fingerprint is not None:
             if self.fingerprint.top is not None:
@@ -126,12 +117,6 @@ class Report:
                 f"confirmed={confirmed} requests={self.injection.request_count}"
             )
         return "\n".join(lines)
-
-
-def _safe_authorization(auth: dict[str, Any]) -> dict[str, Any]:
-    """Keep only non-sensitive authorization metadata; never the confirmation."""
-    allowed = ("client", "engagement", "mode", "receipt_origin", "expires", "created_at")
-    return {k: auth[k] for k in allowed if k in auth}
 
 
 def exit_code_for(report: Report) -> int:
@@ -169,8 +154,8 @@ def write_report_atomic(
     directory = os.path.dirname(os.path.abspath(path))
     os.makedirs(directory, exist_ok=True)
     # Value-only scrub (not key-name redaction, which would destroy benign tool
-    # metadata like the "authorization" block): credential literals, reflected
-    # known secrets, and URL-field query secrets are removed.
+    # metadata): credential literals, reflected known secrets, and URL-field
+    # query secrets are removed.
     safe = scrub_structure(report.to_dict(), known_secrets)
     payload = json.dumps(safe, indent=2, sort_keys=True)
 

@@ -1,8 +1,7 @@
 """Milestone 1: immutable ModePolicy resolution with tightening-only overrides.
 
-Overrides may only tighten; there is no receipt-grant widening in this milestone
-(deferred to the authorization milestone). ModePolicy validates all structural
-invariants on construction.
+Overrides may only tighten; there is no grant-based widening. ModePolicy
+validates all structural invariants on construction.
 """
 
 from __future__ import annotations

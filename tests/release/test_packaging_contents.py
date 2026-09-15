@@ -67,7 +67,7 @@ def test_sdist_does_not_ship_tests(artifacts: dict[str, list[str]]) -> None:
 
 def test_artifacts_exclude_local_and_generated(artifacts: dict[str, list[str]]) -> None:
     forbidden = (".hermes", ".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache")
-    forbidden_suffix = (".checkpoint.json", ".bundle.json", "sbom.cdx.json", ".receipt.json")
+    forbidden_suffix = (".checkpoint.json", ".bundle.json", "sbom.cdx.json")
     for group in ("wheel", "sdist"):
         for name in artifacts[group]:
             assert not any(part in name for part in forbidden), (group, name)

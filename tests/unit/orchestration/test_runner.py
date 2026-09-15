@@ -49,8 +49,8 @@ def test_runner_rejects_plan_digest_mismatch_before_requests() -> None:
         calls += 1
         return ExchangeOutcome("ok")
 
-    with pytest.raises(PlanError, match="authorization receipt"):
-        run_plan(plan, responder, canary="AISCAN-X", goal="", authorized_plan_digest="0" * 64)
+    with pytest.raises(PlanError, match="expected plan"):
+        run_plan(plan, responder, canary="AISCAN-X", goal="", expected_plan_digest="0" * 64)
 
     assert calls == 0
 

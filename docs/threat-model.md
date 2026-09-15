@@ -2,7 +2,6 @@
 
 ## Assets
 
-- Operator authorization receipts and engagement configuration.
 - Target-scoped request plans, budgets, and evidence bundles.
 - Redacted reports and immutable evidence graph records.
 - Built-in packs, schemas, templates, package metadata, and release artifacts.
@@ -18,7 +17,7 @@
 
 | Threat | Control |
 |---|---|
-| Network traffic before authorization | Validate target, mode, packs, receipt, adapter config, and plan before transport construction. |
+| Network traffic before validation | Validate target scope, mode, packs, adapter config, and plan before transport construction. Scans run unattended — an out-of-scope or invalid-config request sends zero packets and exits before transport. |
 | Scope escape, redirects, rebinding | Exact normalized origin/path checks per physical attempt; redirects not followed by default; vetted IP handling for supported schemes. |
 | Budget evasion | One broker-owned physical request ledger counts attempts, retries, controls, confirmations, discovery, cleanup, and redirects. |
 | Evidence leakage | Recursive redaction before persistence and output; transport-known secrets threaded to evidence exporters. |
@@ -31,6 +30,6 @@
 
 ## Assumptions
 
-- The operator is authorized and controls the machine running AI-Scan.
-- Receipts are an operational scope guard unless signed receipt verification is explicitly used; legacy hash receipts are tamper-evident, not authentication.
+- The operator uses the tool responsibly and controls the machine running AI-Scan; like nmap/sqlmap, it runs unattended against the named `--target`.
+- Exact-target scope confinement is the boundary that keeps requests on the named target; it is not an access-control mechanism against the operator.
 - Local Docker worker isolation reduces accidental exposure but is not a multi-tenant sandbox boundary.

@@ -14,7 +14,7 @@ def create_baseline(report: Report, *, mode: str = "reliable") -> dict[str, Any]
     doc = report_document(report, mode=mode)
     return {
         "schema_version": "1.0-baseline",
-        "target_origin": doc["scope_authorization_summary"]["target_origin"],
+        "target_origin": doc["scope_summary"]["target_origin"],
         "confirmed_findings": {f["id"]: _baseline_item(f) for f in doc["confirmed_findings"]},
         "analyst_leads": {f["id"]: _baseline_item(f) for f in doc["analyst_leads"]},
     }

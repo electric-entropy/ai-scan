@@ -47,8 +47,9 @@ engine must stabilize first.**
 The current shipped tool (commit `945c344`, report schema v1) is preserved as a
 compatibility surface:
 
-- The five subcommands (`authorize`, `fingerprint`, `inject`, `assess`,
-  `validate-receipt`) and their exit codes remain stable.
+- The active subcommands (`fingerprint`, `inject`, `assess`) and their exit
+  codes remain stable; see [migration-policy.md](migration-policy.md) for the
+  0.2.1 removal history.
 - Report schema v1 is frozen; see [migration-policy.md](migration-policy.md).
 - The golden compatibility contract in `tests/contracts/` characterizes this
   behavior and must keep passing through the refactor.

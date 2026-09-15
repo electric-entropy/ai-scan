@@ -1,19 +1,19 @@
 """Per-connection egress scope enforcement.
 
-A :class:`ScopeGuard` is bound to the single authorized :class:`Target` for a
+A :class:`ScopeGuard` is bound to the single in-scope :class:`Target` for a
 run and is consulted by the broker *on every physical attempt*, before any
 socket I/O. It enforces, per attempt:
 
 * canonical scheme, host, and effective port (exact same-origin);
-* the authorized request path (a redirect or rewritten path is out of scope);
+* the target's request path (a redirect or rewritten path is out of scope);
 * that the host's *resolved* IPs stay in scope — every resolution is re-checked,
   so DNS rebinding (a changed answer between attempts) is rejected;
 * IPv4/IPv6 family constraints;
 * no mixed public/private answer set;
 * no resolution to a private/internal address for a *named* host unless
-  explicitly granted (an IP-literal target authorizes exactly its own address).
+  explicitly granted (an IP-literal target permits exactly its own address).
 
-The authorized Target defines the allowed zone: an operator who authorizes a
+The Target defines the allowed zone: an operator who names a
 loopback literal may reach loopback; a public hostname that resolves to a
 private address is treated as SSRF and blocked. Name resolution uses an injected
 ``resolver`` so rebinding and mixed-zone answers are testable without real DNS.
@@ -70,10 +70,10 @@ def default_resolver(host: str) -> list[str]:
 
 @dataclass
 class ScopeGuard:
-    """Re-checks every attempt against the authorized target and its scope.
+    """Re-checks every attempt against the in-scope target.
 
     Attributes:
-        target: The single authorized, normalized target for the run.
+        target: The single in-scope, normalized target for the run.
         resolver: Hostname → IP strings (injected for testability).
         allow_private: Permit a *named* host to resolve to internal IPs.
         allowed_families: Permitted IP families (4 and/or 6).
@@ -85,7 +85,7 @@ class ScopeGuard:
     allowed_families: frozenset[int] = frozenset({4, 6})
     _pinned: dict[str, tuple[str, ...]] = field(default_factory=dict, repr=False)
 
-    def authorize(self, url: str) -> ResolvedEndpoint:
+    def check(self, url: str) -> ResolvedEndpoint:
         """Validate ``url`` and its resolved IPs; return the pinned endpoint.
 
         Raises:
@@ -121,14 +121,14 @@ class ScopeGuard:
         except TargetError as exc:
             raise ScopeError("request URL is not a canonical in-scope target") from exc
         if not same_origin(candidate, self.target):
-            raise ScopeError("request origin is outside the authorized scope")
+            raise ScopeError("request origin is outside the target scope")
         if candidate.path != self.target.path:
-            raise ScopeError("request path is outside the authorized scope")
+            raise ScopeError("request path is outside the target scope")
 
     def _resolve(self, host: str) -> list[_IpAddress]:
         answers = list(self.resolver(host))
         if not answers:
-            raise ScopeError("authorized host did not resolve to any address")
+            raise ScopeError("target host did not resolve to any address")
         resolved: list[_IpAddress] = []
         for answer in answers:
             ip = _as_ip(answer)
@@ -148,10 +148,10 @@ class ScopeGuard:
             raise ScopeError("host resolves to a mix of public and private addresses")
         is_internal = privacy == {True}
         # A named host resolving to an internal address is SSRF unless granted.
-        # An IP-literal target authorizes exactly its own (possibly internal)
+        # An IP-literal target permits exactly its own (possibly internal)
         # address, so the operator's explicit choice stands.
         if is_internal and not host_is_literal and not self.allow_private:
-            raise ScopeError("authorized host resolves to a private address; not granted")
+            raise ScopeError("target host resolves to a private address; not granted")
 
     def _check_rebinding(self, host: str, resolved: list[_IpAddress]) -> None:
         answer_key = tuple(sorted(ip.compressed for ip in resolved))

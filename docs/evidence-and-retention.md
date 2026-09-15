@@ -6,7 +6,7 @@ AI-Scan evidence is designed for reproducibility while minimizing retained sensi
 
 Evidence and bundles may include:
 
-- resolved mode policy, seed, tool version, target origin, authorization metadata, and pack/adapter/config digests;
+- resolved mode policy, seed, tool version, target origin, and pack/adapter/config digests;
 - redacted canonical request and response records;
 - budget ledger totals for physical requests, retries, controls, confirmations, redirects, cleanup, and discovery;
 - evidence graph nodes linking attacks, controls, confirmations, findings, and coverage gaps;
@@ -14,12 +14,11 @@ Evidence and bundles may include:
 
 ## Integrity model — tamper-evidence, not signatures
 
-Receipts, checkpoints, and evidence bundles are protected by **content digests**,
-which are **tamper-evidence, not a signature**. A digest proves the content has
-not changed since it was sealed; it does **not** cryptographically authenticate
-*who* produced it. AI-Scan does not currently sign artifacts, and the docs make
-no signing/attestation/provenance claims. Authenticated (signed) receipt v2 is a
-planned future capability and is described as future wherever it appears.
+Checkpoints and evidence bundles are protected by **content digests**, which are
+**tamper-evidence, not a signature**. A digest proves the content has not changed
+since it was sealed; it does **not** cryptographically authenticate *who* produced
+it. AI-Scan does not sign artifacts, and the docs make no
+signing/attestation/provenance claims.
 
 Replay is **offline**: it verifies every digest and graph invariant and
 reproduces the classification from the stored redacted evidence, and it
@@ -44,7 +43,7 @@ Canaries and analyst labels are preserved only when they are not credential-bear
 
 - Evidence nodes are immutable and content-addressed.
 - Persistent evidence files should be written atomically with owner-only permissions where supported.
-- Replay defaults to offline validation/report generation and must not resend active traffic without a separate authorization path.
+- Replay defaults to offline validation/report generation and never resends active traffic.
 - Archives and bundles must reject traversal, unsupported schemas, duplicate keys, non-finite numbers, digest mismatches, and semantic tampering.
 
 ## Retention guidance

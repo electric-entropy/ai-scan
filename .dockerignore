@@ -1,7 +1,7 @@
 # Keep the worker image minimal and free of local/sensitive artifacts.
 # Only pyproject.toml, README.md, LICENSE, src/, and docker/entrypoint.py are
 # COPYied by Dockerfile.worker; everything below is excluded defensively so a
-# broad COPY can never pull in receipts, evidence, secrets, or local state.
+# broad COPY can never pull in evidence, secrets, or local run state.
 
 # VCS and tooling
 .git
@@ -26,9 +26,7 @@ sbom.cdx.json
 tests
 scripts
 
-# Authorization / evidence / run state — never ship into an image
-*.receipt.json
-*receipt*
+# Evidence / run state — never ship into an image
 *report*
 *.report.json
 *bundle*
@@ -37,7 +35,6 @@ scripts
 *.checkpoint.json
 evidence
 reports
-receipts
 artifacts
 
 # Secrets and local config

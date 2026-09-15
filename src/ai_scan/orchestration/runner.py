@@ -1,6 +1,6 @@
 """Execute a plan as a resumable, checkpointed state machine.
 
-State machine: ``planned → authorized → running → confirming → cleaning_up →
+State machine: ``planned → validated → running → confirming → cleaning_up →
 completed | completed_with_gaps | cancelled | failed``.
 
 Classification goes through the M7 confidence path (``_select_validators`` +
@@ -46,7 +46,7 @@ class RunState(enum.StrEnum):
     """Plan runner states, matching the Milestone 8 state-machine contract."""
 
     PLANNED = "planned"
-    AUTHORIZED = "authorized"
+    VALIDATED = "validated"
     RUNNING = "running"
     CONFIRMING = "confirming"
     CLEANING_UP = "cleaning_up"
@@ -97,18 +97,18 @@ def run_plan(
     canary: str,
     goal: str = "",
     checkpoint_path: str | None = None,
-    authorized_plan_digest: str | None = None,
+    expected_plan_digest: str | None = None,
     observer: Observer | None = None,
 ) -> RunResult:
     """Run ``plan`` as a resumable state machine through the M7 confidence path.
 
-    ``authorized_plan_digest`` is the receipt-bound digest: when supplied it must
+    ``expected_plan_digest`` is a plan-integrity guard: when supplied it must
     exactly match ``plan.digest`` before any responder call. Checkpoints are
     secret-free and keyed by deterministic case ids; completed ids are never
     re-run after resume.
     """
-    if authorized_plan_digest is not None and authorized_plan_digest != plan.digest:
-        raise PlanError("plan digest does not match authorization receipt")
+    if expected_plan_digest is not None and expected_plan_digest != plan.digest:
+        raise PlanError("plan digest does not match the expected plan")
 
     packs = _resolve_plan_packs(plan)
     checkpoint = _initial_checkpoint(plan, checkpoint_path)
@@ -119,7 +119,7 @@ def run_plan(
     # Reflected/known secrets observed across the run, threaded into every
     # checkpoint write so persisted proof/prompt state is redacted on disk.
     run_secrets: set[str] = set()
-    checkpoint.state = RunState.AUTHORIZED.value
+    checkpoint.state = RunState.VALIDATED.value
     _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
 
     findings: list[InjectionFinding] = [

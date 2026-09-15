@@ -1,8 +1,8 @@
-"""ai-scan: CLI-only authorized LLM assessment tool.
+"""ai-scan: CLI-only LLM security-assessment tool.
 
-Behavioral model fingerprinting and safe, canary-based prompt-injection testing
-for explicitly authorized security assessment. CLI only; fails closed unless
-authorization is confirmed interactively or supplied via a target-bound receipt.
+Behavioral model fingerprinting and safe, canary-based prompt-injection testing.
+CLI only; unattended by design. Every request is confined to the exact target you
+specify, and all evidence is redacted fail-closed.
 """
 
 from __future__ import annotations

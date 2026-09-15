@@ -23,7 +23,11 @@ from ai_scan.validation.confidence import (
 from ai_scan.validation.controls import ControlValidator, control_blocks_confirmation
 from ai_scan.validation.deterministic import ExactCanaryValidator
 from ai_scan.validation.judge import JudgeValidator
-from ai_scan.validation.reflection import ComplianceHeuristicValidator, is_reflection
+from ai_scan.validation.reflection import (
+    ComplianceHeuristicValidator,
+    is_explanatory_mention,
+    is_reflection,
+)
 from ai_scan.validation.state_change import StateChangeValidator
 from ai_scan.validation.statistical import RepeatabilityCalculator, SimilarityValidator
 
@@ -42,6 +46,7 @@ __all__ = [
     "Validator",
     "classify",
     "control_blocks_confirmation",
+    "is_explanatory_mention",
     "is_reflection",
     "status_rank",
 ]

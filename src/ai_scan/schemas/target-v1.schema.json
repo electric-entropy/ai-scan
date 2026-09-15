@@ -51,20 +51,6 @@
         "success_status": {"type": "integer", "minimum": 100, "maximum": 599}
       }
     },
-    "auth_refs": {
-      "type": "array",
-      "maxItems": 32,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["header"],
-        "properties": {
-          "header": {"type": "string", "minLength": 1, "maxLength": 200},
-          "env": {"type": "string", "minLength": 1, "maxLength": 200, "x-secret-scan": true},
-          "fd": {"type": "integer", "minimum": 0, "maximum": 65535}
-        }
-      }
-    },
     "session": {
       "type": "object",
       "additionalProperties": false,

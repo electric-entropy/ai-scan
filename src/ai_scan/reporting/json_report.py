@@ -48,9 +48,8 @@ def report_document(report: Report, *, mode: str = "reliable") -> dict[str, Any]
         "tool": raw["tool"],
         "schema_version": "2.0-report",
         "generated_at": raw["created_at"],
-        "scope_authorization_summary": {
+        "scope_summary": {
             "target_origin": raw["target_origin"],
-            "authorization": raw["authorization"],
         },
         "resolved_mode_policy": policy,
         "coverage_matrix": _coverage_matrix(raw, findings),
@@ -61,10 +60,7 @@ def report_document(report: Report, *, mode: str = "reliable") -> dict[str, Any]
         "budgets": {"request": raw.get("request_budget", {})},
         "evidence_graph_refs": _evidence_refs(raw.get("evidence", [])),
         "reproduction": {
-            "retest_command": (
-                "ai-scan run --plan <plan.json> --auth-receipt <receipt.json> "
-                "--out-dir <dir>"
-            ),
+            "retest_command": "ai-scan run --target <URL> --plan <plan.json> --out <report.json>",
             "replay_command": "ai-scan bundle replay --file <bundle.json>",
         },
         "remediation": [],

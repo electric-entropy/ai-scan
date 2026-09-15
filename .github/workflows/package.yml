@@ -87,7 +87,6 @@ jobs:
               'schemas/pack-v1.schema.json',
               'schemas/evidence-v2.schema.json',
               'schemas/finding-v2.schema.json',
-              'schemas/receipt-v2.schema.json',
               'payloads/safe.json',
               'packs/builtin/direct-injection-reliable-v1.json',
               'reporting/templates/report.html',

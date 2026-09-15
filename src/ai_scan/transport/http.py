@@ -8,7 +8,7 @@ Design constraints (all enforced here or in the broker, never left to callers):
   *before any socket I/O*. Adapters are handed a :class:`Transport`, never a
   raw network client.
 * Redirects are **never followed** — any 3xx is captured as evidence so scope
-  escape (e.g. a redirect to an unauthorized host) fails closed.
+  escape (e.g. a redirect to an out-of-scope host) fails closed.
 * Secrets are redacted from all stored evidence: sensitive request/response
   headers (matched by an explicit set *and* by token-bearing name patterns),
   secret-like query parameters in request URLs and redirect ``Location``
@@ -173,7 +173,7 @@ class TransportConfig:
 
     timeout: float = 15.0
     max_response_bytes: int = 262_144
-    user_agent: str = "ai-scan/0.1 (authorized-assessment)"
+    user_agent: str = "ai-scan/0.2"
     max_retries: int = 2
     max_requests: int = 64
     min_interval_seconds: float = 0.0

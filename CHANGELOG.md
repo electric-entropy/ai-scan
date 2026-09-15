@@ -2,12 +2,39 @@
 
 All notable changes to AI-Scan are documented here. The project uses a conservative release process: local gates pass before a push, GitHub CI verifies the pushed SHA, and external scan targets are never used for release validation.
 
+## 0.2.1 - 2026-09-14
+
+### Removed
+
+- **The legacy pre-run gating step was removed entirely (owner product
+  decision).** Its commands, flag, schema, validation, and the corresponding
+  report field are all gone. Active commands (`fingerprint`, `inject`, `assess`,
+  `plan`+`run`) run unattended — you point them at a `--target` and they run,
+  comparable to nmap/sqlmap where using the tool responsibly and legally is the
+  operator's own responsibility.
+
+### Changed
+
+- Exit code `2` now means "request blocked by a safety control (scope/budget)".
+- Bumped GitHub `actions/upload-artifact` pin to v7.0.1; comprehensive README
+  refresh; added the offline `ai-scan doctor` health check to the fresh-wheel smoke.
+- The `reflection-is-not-execution` rule was hardened: a canary reflected or
+  merely mentioned in a refusal or in envelope metadata (e.g. Ollama
+  `message.thinking`) cannot confirm.
+
+### Security
+
+- Every other safety boundary is unchanged and still fail-closed:
+  exact-target scope confinement, broker-only egress, no-redirect-follow, per-run
+  budgets/rate/concurrency/duration limits, redaction, the confirmation/confidence
+  taxonomy, and checkpoint/evidence-bundle/replay integrity.
+
 ## 0.2.0 - 2026-09-13
 
 ### Added
 
-- Reliable and Kitchen Sink mode contracts with shared authorization, scope, budget, redaction, and confirmation invariants.
-- Strict JSON/schema loaders for targets, engagements, plans, packs, receipts, evidence, and findings.
+- Reliable and Kitchen Sink mode contracts with shared scope, budget, redaction, and confirmation invariants.
+- Strict JSON/schema loaders for targets, engagements, plans, packs, evidence, and findings.
 - Central redaction, canonical exchange records, request broker, budgets, and exact-origin scope guards.
 - Adapter protocol with generic HTTP, captured-request, provider, streaming, MCP, and multimodal request shaping.
 - Declarative built-in attack packs, deterministic validators, controls, confidence rules, planner, runner, checkpoints, evidence bundles, replay, reports, SARIF, and baselines.
@@ -17,7 +44,7 @@ All notable changes to AI-Scan are documented here. The project uses a conservat
 
 ### Security
 
-- Active commands fail closed before constructing transport when authorization, profile, adapter, plan, or receipt validation fails.
+- Active commands fail closed before constructing transport when scope, profile, adapter, or plan validation fails.
 - Reflection, heuristic fingerprinting, and judge-style evidence cannot independently produce confirmed findings.
 - Known transport secrets and sensitive fields are scrubbed recursively before persistence and reporting.
 - Redirects, truncation, errors, budget/scope denials, and unsupported streaming states become blocked or inconclusive rather than clean negatives.
@@ -29,4 +56,4 @@ All notable changes to AI-Scan are documented here. The project uses a conservat
 
 ## 0.1.0 - 2026-09-11
 
-- Initial CLI-only authorized LLM assessment MVP with behavioral fingerprinting and safe canary-based prompt-injection checks.
+- Initial CLI-only LLM assessment MVP with behavioral fingerprinting and safe canary-based prompt-injection checks.

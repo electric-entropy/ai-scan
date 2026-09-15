@@ -1,21 +1,20 @@
 # Operator Guide
 
-AI-Scan is a local, CLI-first tool for explicitly authorized AI-system assessment. It sends active requests only after authorization and keeps external-network release validation out of scope.
+AI-Scan is a local, CLI-first tool for LLM security assessment. Active scans run **unattended** — like nmap or sqlmap, you point the tool at a target and it runs; using it responsibly and legally against systems you own or are permitted to test is your responsibility. It keeps external-network release validation out of scope, and every request is confined to the exact target you specify.
 
 ## Safe operating model
 
-1. Define the exact target origin and engagement scope before running active commands.
-2. Prefer `reliable` mode for consulting findings and CI gates. Use `kitchen-sink` only for separately labeled analyst leads and only with the same authorization and budget controls.
-3. Use receipts for repeatable non-interactive runs. A receipt must match the normalized target origin and must not be expired.
+1. Only run active commands against targets you own or are permitted to test.
+2. Define the exact target (scheme/host/port/path) before running — scope is enforced to that exact target and redirects off it are never followed.
+3. Prefer `reliable` mode for consulting findings and CI gates. Use `kitchen-sink` only for separately labeled analyst leads and only with the same scope and budget controls.
 4. Keep intrusive capabilities separate from mode selection. Uploads, writes, tool actions, cross-identity tests, persistence, and resource-stress checks require explicit capability grants.
 5. Treat every request, retry, redirect attempt, control, confirmation, cleanup probe, discovery probe, upload, and read-back as a physical request for budget purposes.
 
 ## Common commands
 
 ```bash
-ai-scan authorize --target https://example.test/chat --client Client --engagement ENG-1 --expires 2026-12-31 --out auth.json
 ai-scan plan --target https://example.test/chat --mode reliable --out plan.json
-ai-scan run --target https://example.test/chat --plan plan.json --auth-receipt auth.json --non-interactive --out report.json
+ai-scan run --target https://example.test/chat --plan plan.json --out report.json
 ai-scan report --file report.json --format markdown
 ai-scan bundle validate --file evidence-bundle.json
 ai-scan bundle replay --file evidence-bundle.json
@@ -25,7 +24,7 @@ ai-scan doctor
 
 `ai-scan doctor` is an **offline** health check: it validates the packaged
 schemas, builtin packs, `py.typed`, and version/license metadata via
-`importlib.resources`, constructs no transport, needs no authorization/target,
+`importlib.resources`, constructs no transport, needs no target,
 and exits `0` with a concise summary (add `--json` for machine-readable output).
 
 `bundle validate`/`bundle replay` and the top-level `replay --bundle ... --validate-only`
@@ -38,7 +37,7 @@ non-zero with a scrubbed error.
 - `confirmed` requires deterministic, controlled, reproducible evidence. Reflection, self-identification, heuristic similarity, and LLM judges cannot confirm by themselves.
 - `likely` and `suspected` are analyst leads, not vulnerabilities.
 - `blocked`, `inconclusive`, and `not_tested` are coverage gaps that must be retained in reports.
-- Exit code `3` is reserved for policy-triggering confirmed findings; runtime/configuration and authorization failures remain separate.
+- Exit code `3` is reserved for policy-triggering confirmed findings; runtime/configuration failures and safety-control denials (exit `2`) remain separate.
 
 ## Release/local validation
 

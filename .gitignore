@@ -26,10 +26,9 @@ coverage.xml
 # Planning artifacts (implementation plan is not part of the deliverable)
 .hermes/
 
-# Local assessment output (never commit reports or receipts)
+# Local assessment output (never commit reports)
 *.report.json
 report.json
-auth.json
 
 # Editor / OS
 .DS_Store

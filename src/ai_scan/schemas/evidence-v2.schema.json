@@ -11,7 +11,7 @@
     "node_type": {
       "type": "string",
       "enum": [
-        "plan", "authorization", "request", "response", "control",
+        "plan", "request", "response", "control",
         "validator_signal", "finding", "cleanup", "artifact"
       ]
     },

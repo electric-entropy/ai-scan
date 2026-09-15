@@ -16,13 +16,12 @@ SCHEMA_FILES = {
     ("pack", 1): "pack-v1.schema.json",
     ("evidence", 2): "evidence-v2.schema.json",
     ("finding", 2): "finding-v2.schema.json",
-    ("receipt", 2): "receipt-v2.schema.json",
 }
 
 
 def test_supported_schemas_cover_all_kinds() -> None:
     assert set(SUPPORTED_SCHEMAS) == {
-        "target", "engagement", "plan", "pack", "evidence", "finding", "receipt"
+        "target", "engagement", "plan", "pack", "evidence", "finding"
     }
 
 
@@ -42,10 +41,12 @@ VALID_DOCS = {
     "target": {
         "schema_version": 1, "kind": "target", "name": "app", "adapter": "generic_http",
         "endpoints": ["https://api.example.com/chat"],
-        "request": {"method": "POST", "prompt_marker": "*", "body_template": "{\"input\": \"*\"}"},
+        "request": {
+            "method": "POST", "prompt_marker": "*", "body_template": "{\"input\": \"*\"}",
+            "header_refs": [{"header": "Authorization", "env": "API_TOKEN"}],
+        },
         "response": {"extract": "json_path", "json_path": "reply"},
         "session": {"mode": "stateless"},
-        "auth_refs": [{"header": "Authorization", "env": "API_TOKEN"}],
     },
     "engagement": {
         "schema_version": 1, "kind": "engagement", "engagement_id": "ENG-1", "client": "Acme",
@@ -68,16 +69,6 @@ VALID_DOCS = {
     "finding": {
         "schema_version": 2, "kind": "finding", "id": "f-1", "attack_id": "a",
         "title": "t", "status": "confirmed", "severity": "high", "evidence_ids": ["e-1"],
-    },
-    "receipt": {
-        "schema_version": 2, "kind": "receipt", "receipt_id": "rcpt-0001",
-        "engagement_digest": _DIGEST, "target_scopes": ["https://api.example.com"],
-        "capabilities": ["read"],
-        "budgets": {
-            "max_physical_requests": 256, "max_duration_seconds": 1800,
-            "requests_per_second": 2.0, "max_concurrency": 1,
-        },
-        "valid_from": _TS, "valid_until": _TS, "key_id": "key-1", "signature": "sig",
     },
 }
 

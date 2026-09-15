@@ -1,7 +1,7 @@
 """Phase A3 — broker/target/budget trust boundary.
 
 Covers: caller-supplied authority (`Host`) header rejection + pinning from the
-authorized target; raw-URL whitespace/control-char rejection (no normalize-into-
+in-scope target; raw-URL whitespace/control-char rejection (no normalize-into-
 validity); synchronized budget check-and-reserve (deterministic two-thread
 barrier); duration re-checked after a rate-limit sleep; finite/non-boolean
 constructor validation; and physical attempts cannot overrun the request budget.
@@ -24,7 +24,7 @@ TARGET = normalize_target("http://127.0.0.1:8080/chat")
 
 
 class _OkGuard:
-    def authorize(self, url: str) -> ResolvedEndpoint:
+    def check(self, url: str) -> ResolvedEndpoint:
         return ResolvedEndpoint(target=TARGET, ip="127.0.0.1", family=4, host_is_literal=True)
 
 
@@ -49,7 +49,7 @@ def test_caller_supplied_host_header_is_rejected() -> None:
     assert opener.calls == []
 
 
-def test_host_header_is_pinned_from_authorized_target() -> None:
+def test_host_header_is_pinned_from_in_scope_target() -> None:
     ledger = BudgetLedger(max_requests=4)
     opener = RecordingOpener(FakeResponse())
     broker = _broker(ledger, opener)

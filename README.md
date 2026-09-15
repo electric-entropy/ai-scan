@@ -1,16 +1,17 @@
 # ai-scan
 
-**CLI-only, authorized LLM security-assessment platform** (v0.2.0) — behavioral
-model fingerprinting and safe, canary-based prompt-injection testing for HTTP(S)
-LLM endpoints, with a repeatable **Reliable** confirmation engine, tamper-evident
+**CLI-only LLM security-assessment platform** (v0.2.1) — behavioral model
+fingerprinting and safe, canary-based prompt-injection testing for HTTP(S) LLM
+endpoints, with a repeatable **Reliable** confirmation engine, tamper-evident
 evidence bundles, and fully offline replay. Python 3.11+, standard library only,
 zero runtime dependencies.
 
-> ⚠️ **Authorized use only.** ai-scan sends active requests to a target. It will
-> not touch the network until you have either confirmed authorization
-> interactively for the current run, or supplied a valid, target-bound
-> authorization receipt. Using it against systems you are not explicitly
-> authorized to assess may be illegal. You are responsible for staying in scope.
+> ⚠️ **Use responsibly.** ai-scan sends active requests to the target you
+> specify. Like nmap or sqlmap, it runs unattended — you point it at a target and
+> it runs. Only use it against systems you own or are permitted to test; testing
+> systems without permission may be illegal, and staying in scope is your
+> responsibility. The tool confines every request to the exact target you name
+> (scheme/host/port/path) and never follows redirects off it.
 
 ## Install
 
@@ -39,42 +40,37 @@ The wheel and sdist ship the runtime package, JSON schemas, builtin packs,
 ## Commands
 
 ```text
-ai-scan authorize        --target URL --client NAME --engagement ID --expires YYYY-MM-DD --out auth.json
-ai-scan fingerprint      --target URL [--method POST] [--request-template FILE] [--auth-receipt FILE]
-ai-scan inject           --target URL --goal GOAL [--request-template FILE] [--profile safe] [--auth-receipt FILE]
-ai-scan assess           --target URL [--request-template FILE] [--profile safe] [--auth-receipt FILE]
+ai-scan fingerprint      --target URL [--method POST] [--request-template FILE]
+ai-scan inject           --target URL --goal GOAL [--request-template FILE] [--profile safe]
+ai-scan assess           --target URL [--request-template FILE] [--profile safe]
 ai-scan plan             --target URL [--mode reliable|kitchen-sink] [--out plan.json]
-ai-scan run              --target URL --plan plan.json --auth-receipt FILE --non-interactive [--out report.json]
+ai-scan run              --target URL --plan plan.json [--out report.json]
 ai-scan packs            list|validate PACK
 ai-scan adapters         list|show NAME
 ai-scan report           --file report.json --format json|jsonl|markdown|html|sarif
 ai-scan baseline         create|diff
 ai-scan bundle           validate|replay --file bundle.json
 ai-scan replay           --bundle bundle.json --validate-only
-ai-scan validate-receipt --auth-receipt FILE --target URL
 ai-scan validate-config  --kind KIND --file doc.json
 ai-scan doctor           [--json]
 ```
 
 `bundle validate|replay`, the top-level `replay`, `report`, `baseline`,
-`validate-receipt`, `validate-config`, `packs`, `adapters`, and `doctor` are all
-**offline** — they construct no transport and touch no network.
+`validate-config`, `packs`, `adapters`, and `doctor` are all **offline** — they
+construct no transport and touch no network.
 
-Active commands (`fingerprint`, `inject`, `assess`, `run`) require authorization. Without
-`--auth-receipt` they prompt for a literal confirmation phrase for the normalized
-target origin. With `--non-interactive` and no valid receipt, they exit `2`
-**before any network traffic is sent**.
+Active commands (`fingerprint`, `inject`, `assess`, `run`) run **unattended** —
+you point them at a `--target` and they run, so they can be launched and left to
+complete in CI or scripts. Every request is confined to the exact `--target`
+(scheme/host/port/path), redirects are never followed, and per-run budgets/rate
+limits apply.
 
 `assess`/`inject`/`fingerprint` run **legacy v1 semantics** (a single response per
 attack case, single-origin, no repeated-trial confirmation, controls, or evidence
 graph) — *not* Reliable (v2) mode. The **Reliable v2** engine (repeated trials,
 clean controls, non-reflected confirmation, evidence graph, replayable bundles) is
-the `plan` + `run` path. Headless `run` execution requires a receipt that is
-**plan-bound to the exact plan and target** (matching plan digest and target);
-an origin-only or mismatched receipt authorizes nothing and fails closed before
-any transport. Interactive confirmation remains available. Authenticated (signed)
-receipts are not yet implemented; receipts are tamper-evident, not authenticated
-(see [Receipt threat model](#receipt-threat-model)).
+the `plan` + `run` path. `run` verifies the exact target and plan integrity before
+any transport.
 
 ### Exit codes
 
@@ -82,12 +78,12 @@ receipts are not yet implemented; receipts are tamper-evident, not authenticated
 |------|-------------------------------------------|
 | `0`  | Completed, no confirmed findings          |
 | `1`  | Runtime/configuration failure             |
-| `2`  | Authorization denied or invalid           |
+| `2`  | Request blocked by a safety control (scope/budget) |
 | `3`  | Confirmed security finding (injection)    |
 | `4`  | Inconclusive assessment                   |
 
 Configuration/usage errors (bad flags, unknown subcommand) exit `1`, distinct
-from the `2` used for authorization failures.
+from the `2` used for safety-control denials (e.g. an out-of-scope request).
 
 ### Safety controls
 
@@ -100,19 +96,18 @@ from the `2` used for authorization failures.
 - **Redaction & scope** — see [SECURITY.md](SECURITY.md) for the full list
   (no-redirect-follow, header/URL/body redaction, exact-origin scoping).
 
-## Platform capabilities (v0.2.0)
+## Platform capabilities (v0.2.1)
 
 **Reliable vs Kitchen Sink modes** (`plan --mode ...`). Both share the same
-authorization, scope, budget, redaction, and confirmation rules — Kitchen Sink
-only broadens coverage, it never weakens safety.
+scope, budget, redaction, and confirmation rules — Kitchen Sink only broadens
+coverage, it never weakens safety.
 
 - **Reliable** — the default, conservative mode. Resolves the reliable-tier packs
   and confirms only with repeatable, controlled, non-reflected execution evidence
   (repeated attack trials, a clean control per family, and a genuine canary
   execution — never inferred from a single 1/1 result).
 - **Kitchen Sink** — broader coverage that resolves the additional packs for
-  separately labeled analyst leads. Headless Kitchen Sink still requires a
-  plan-bound exact-target receipt.
+  separately labeled analyst leads.
 
 **Attack packs** (`ai-scan packs list`). Eight digest-verified builtin packs:
 `direct-injection`, `indirect-injection`, `rag-isolation`, and `tool-abuse`, each
@@ -135,7 +130,7 @@ fields) fails closed with a scrubbed, non-zero error.
 
 **Offline `doctor`.** `ai-scan doctor` validates the packaged schemas, builtin
 packs, `py.typed`, and version/license metadata via `importlib.resources`,
-constructs no transport, needs no authorization, and exits `0` with a concise
+constructs no transport, needs no target, and exits `0` with a concise
 health summary (`--json` for machine-readable output).
 
 **Optional isolated worker.** An opt-in local worker runs a bounded JSON request
@@ -145,32 +140,13 @@ bounded CPU/memory/PID limits. The launcher streams bounded stdin/stdout under a
 timeout and exposes only an empty dedicated output directory. It changes no
 active-network semantics; egress stays disabled.
 
-## Manual example (interactive authorization)
+## Basic example
 
 ```bash
+# Point it at a target and it runs — no prompt, nothing to configure.
 ai-scan assess --target https://api.example.com/chat --out report.json
-# Prompts:
-#   Type exactly: I confirm I am authorized to assess https://api.example.com
-```
-
-## Automation example (headless with a receipt)
-
-Create a reusable, target-bound receipt once (interactive), then run headless
-in CI or scripts:
-
-```bash
-ai-scan authorize \
-  --target https://api.example.com/chat \
-  --client "Acme Corp" --engagement ENG-42 \
-  --expires 2026-12-31 --out auth.json
-
-ai-scan assess --target https://api.example.com/chat \
-  --auth-receipt auth.json --non-interactive --out report.json
 echo "exit code: $?"   # 0 clean / 3 confirmed / 4 inconclusive
 ```
-
-Receipts are written `0600` on POSIX and validated on every run: origin must
-match exactly, and the receipt must not be expired.
 
 ## Request template format (Burp-style)
 
@@ -205,8 +181,6 @@ response bodies. Redirects are captured but never followed.
 The JSON report (`--out`) is stable and machine-readable. Key sections:
 
 - `target_origin` — normalized scheme://host[:port] that was assessed.
-- `authorization` — client, engagement, and mode (`interactive`/`receipt`).
-  The confirmation phrase itself is **never** stored.
 - `request_budget` — bounds and requests actually used.
 - `fingerprint` — ranked heuristic candidates (see limitations below).
 - `injection` — per-family status and the overall status. A `confirmed`
@@ -228,21 +202,10 @@ unless a family clears both a minimum score and a minimum margin. It is **not**
 equivalent to the academic LLMmap pretrained-model inference approach, and its
 `heuristic` label reflects that. Treat candidates as leads, not attribution.
 
-## Receipt threat model
-
-Receipt integrity uses canonical JSON + SHA-256. This makes a receipt
-**tamper-evident**, not **authenticated**: it reliably detects accidental edits
-and corruption, but a party who can run the tool can recompute the digest and
-forge a receipt. Receipts are an operator convenience for staying in scope
-during authorized engagements — not an access-control mechanism. See
-[SECURITY.md](SECURITY.md).
-
 ## Roadmap
 
 Not yet implemented:
 
-- Authenticated (signed) receipts and centralized authorization (today's receipts
-  are tamper-evident, not authenticated).
 - An adapter for an upstream academic/PyTorch LLMmap backend and a current-model
   template registry (the built-in fingerprinter stays heuristic).
 - A signed/attested release supply chain (the release produces a CycloneDX SBOM
@@ -289,7 +252,7 @@ python -m build
 
 Release/operator documentation:
 
-- [Operator guide](docs/operator-guide.md) — safe authorization, run, replay, and release validation workflow.
+- [Operator guide](docs/operator-guide.md) — safe run, replay, and release validation workflow.
 - [Pack authoring](docs/pack-authoring.md) — declarative pack requirements and fail-closed validation rules.
 - [Evidence and retention](docs/evidence-and-retention.md) — redaction, bundle, replay, and retention guidance.
 - [Threat model](docs/threat-model.md) — trust boundaries and release-hardening controls.

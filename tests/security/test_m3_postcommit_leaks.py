@@ -3,8 +3,6 @@
 Each test reproduces one reported leak directly, so a regression re-opens the
 exact hole it closed:
 
-1. Untrusted ``expires`` / ``created_at`` rendered into ``AuthorizationError``
-   (and thus CLI output) without scrubbing.
 2. Short credential components (``Bearer abc123`` → ``abc123``) dropped by a
    length floor, while the scheme word must *not* be scrubbed.
 3. ``HttpResponse.evidence()`` redirect_location redacted by URL-key only, so a
@@ -15,13 +13,6 @@ exact hole it closed:
 
 from __future__ import annotations
 
-import pytest
-
-from ai_scan.authorization import (
-    AuthorizationError,
-    _validate_created_at,
-    _validate_expiry_format,
-)
 from ai_scan.transport import HttpResponse
 from ai_scan.transport.redaction import (
     REDACTED,
@@ -32,18 +23,6 @@ from ai_scan.transport.redaction import (
 
 # A credential-format literal that scrub_text redacts on sight (gh token family).
 _CRED = "ghp_1234567890abcdefABCDEF12"  # pragma: allowlist secret
-
-
-# --- Fix 1: expiry / created_at scrubbed before the error boundary ------------
-
-@pytest.mark.parametrize("validator", [_validate_expiry_format, _validate_created_at])
-def test_malformed_datetime_value_is_scrubbed_in_error(validator) -> None:
-    malformed = f"not-a-date {_CRED}"
-    with pytest.raises(AuthorizationError) as excinfo:
-        validator(malformed)
-    message = str(excinfo.value)
-    assert _CRED not in message
-    assert REDACTED in message
 
 
 # --- Fix 2: short credential components tracked; scheme word is not -----------

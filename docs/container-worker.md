@@ -3,8 +3,8 @@
 AI-Scan can launch a disposable local Docker worker for future adapter/plugin work
 without changing CLI semantics. The default worker protocol currently supports
 only safe non-network `ping`/`echo` smoke operations; active assessment traffic
-continues to flow through the in-process authorization gate, request broker,
-scope guard, budgets, and redaction pipeline.
+continues to flow through the in-process request broker, scope guard, budgets,
+and redaction pipeline.
 
 ## Build
 

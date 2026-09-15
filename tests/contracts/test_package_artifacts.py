@@ -24,7 +24,6 @@ EXPECTED_SCHEMAS = [
     "pack-v1.schema.json",
     "evidence-v2.schema.json",
     "finding-v2.schema.json",
-    "receipt-v2.schema.json",
 ]
 EXPECTED_DATA = [
     "py.typed",

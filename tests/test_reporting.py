@@ -52,7 +52,6 @@ def _build(injection):
     target = normalize_target("https://api.example.com:8443/chat")
     return Report.build(
         target=target,
-        authorization={"client": "Acme", "engagement": "ENG-1", "mode": "receipt"},
         fingerprint=_fingerprint(),
         injection=injection,
         request_budget={"max_requests": 24, "used": injection.request_count},
@@ -67,7 +66,6 @@ def test_report_schema_has_required_sections() -> None:
         "tool",
         "schema_version",
         "target_origin",
-        "authorization",
         "created_at",
         "request_budget",
         "fingerprint",
@@ -77,12 +75,6 @@ def test_report_schema_has_required_sections() -> None:
     ):
         assert key in data
     assert data["target_origin"] == "https://api.example.com:8443"
-
-
-def test_report_never_includes_confirmation_input() -> None:
-    report = _build(_confirmed_injection())
-    dumped = json.dumps(report.to_dict())
-    assert "I confirm I am authorized" not in dumped
 
 
 def test_exit_code_confirmed_is_3() -> None:
@@ -116,7 +108,6 @@ def test_exit_code_4_when_fingerprint_inconclusive_and_no_injection() -> None:
     target = normalize_target("https://api.example.com:8443/chat")
     report = Report.build(
         target=target,
-        authorization={"mode": "interactive"},
         fingerprint=fp,
         injection=None,
         request_budget={"max_requests": 64, "used": fp.request_count},

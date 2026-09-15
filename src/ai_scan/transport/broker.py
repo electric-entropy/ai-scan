@@ -5,7 +5,7 @@ No adapter or plugin is ever handed a raw network client. They call
 socket I/O* —
 
 1. acquires request, rate, time, and concurrency budget (via the ledger), then
-2. re-checks the authorized scope against the host's freshly resolved IPs (via
+2. re-checks the target scope against the host's freshly resolved IPs (via
    the scope guard), then
 3. connects to the *vetted* IP (pinning the connection to the address the guard
    validated, so a rebinding between check and connect cannot escape scope).
@@ -84,7 +84,7 @@ class RequestBroker:
         Raises:
             BudgetExceededError: If any budget (count/rate/time/concurrency) is
                 exhausted — no socket I/O occurs.
-            ScopeError: If the URL or its resolved IPs leave the authorized
+            ScopeError: If the URL or its resolved IPs leave the target
                 scope — no socket I/O occurs.
             TransportError: On a connection/timeout failure.
 
@@ -93,7 +93,7 @@ class RequestBroker:
         try:
             with self._ledger.attempt(kind):
                 # Budget is now held; scope is re-checked before any connection.
-                endpoint = self._guard.authorize(url)
+                endpoint = self._guard.check(url)
                 return self._perform(endpoint, url, method, data, headers)
         except TransportError as exc:
             if exc.totals is None:
@@ -130,8 +130,8 @@ class RequestBroker:
         return RawExchange(status=status, headers=resp_headers, payload=payload)
 
 
-def _authorized_authority(endpoint: ResolvedEndpoint) -> str:
-    """The ``Host`` authority of the authorized target (host[:non-default-port])."""
+def _target_authority(endpoint: ResolvedEndpoint) -> str:
+    """The ``Host`` authority of the in-scope target (host[:non-default-port])."""
     target = endpoint.target
     host = f"[{target.host}]" if ":" in target.host else target.host
     if target.port != _DEFAULT_PORTS[target.scheme]:
@@ -146,8 +146,8 @@ def _pin_connection(
 
     The ``Host`` header is transport-managed authority: a caller/adapter may not
     supply it (a forged ``Host`` could reach an unintended virtual host behind
-    the authorized origin), so any supplied ``Host`` is rejected and the broker
-    sets ``Host`` from the *authorized target* itself.
+    the target origin), so any supplied ``Host`` is rejected and the broker
+    sets ``Host`` from the *in-scope target* itself.
 
     For an IP-literal target the URL already *is* the vetted address, so it is
     returned unchanged (an IP-literal HTTPS target is likewise safe — no name to
@@ -165,9 +165,9 @@ def _pin_connection(
     if len(req_headers) != len(headers):
         raise ScopeError(
             "a caller-supplied Host header is not permitted; Host is pinned from "
-            "the authorized target at the broker boundary"
+            "the in-scope target at the broker boundary"
         )
-    authority = _authorized_authority(endpoint)
+    authority = _target_authority(endpoint)
     if endpoint.host_is_literal:
         req_headers["Host"] = authority
         return url, req_headers

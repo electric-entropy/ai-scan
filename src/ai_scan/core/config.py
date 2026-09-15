@@ -43,7 +43,6 @@ SUPPORTED_SCHEMAS: dict[str, frozenset[int]] = {
     "pack": frozenset({1}),
     "evidence": frozenset({2}),
     "finding": frozenset({2}),
-    "receipt": frozenset({2}),
 }
 
 # Credential-literal markers. Deliberately narrow (real credential formats) so
@@ -333,7 +332,6 @@ def _scan_traversal(value: Any, path: str) -> None:
 # Per-kind timestamp-ordering invariants (start must not be after end).
 _TIME_ORDERING: dict[str, tuple[str, str]] = {
     "engagement": ("issued_at", "expires_at"),
-    "receipt": ("valid_from", "valid_until"),
 }
 
 
@@ -402,8 +400,6 @@ def _validate_target_semantics(doc: dict[str, Any]) -> None:
         if mode == "stateless" and "session_header" in session:
             raise ConfigError("a stateless session must not define session_header")
 
-    for ref in doc.get("auth_refs", []):
-        _check_secret_ref(ref, "auth_refs")
     for ref in request.get("header_refs", []):
         _check_secret_ref(ref, "request.header_refs")
 

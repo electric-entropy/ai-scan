@@ -2,12 +2,12 @@
 
 Parses a raw HTTP/1.1 request (request line + headers + body) and replays its
 *shape* (method, path, headers, body, explicit ``*`` marker location) against
-the **authorized** target. The captured authority is never trusted for routing,
+the **in-scope** target. The captured authority is never trusted for routing,
 so a capture cannot smuggle traffic to another destination. Parsing fails closed
 (raising :class:`AdapterConfigError`, zero requests) on:
 
 * absolute-form / authority-form request targets (arbitrary destination),
-* a ``Host`` header that conflicts with the authorized target,
+* a ``Host`` header that conflicts with the in-scope target,
 * bare CR, NUL, obs-fold continuation lines, or control chars (header injection),
 * duplicate header names (ambiguous),
 * ``Transfer-Encoding`` (unsupported; classic smuggling vector),
@@ -160,7 +160,7 @@ def _check_authority(headers: dict[str, str], target: Target) -> None:
         return
     expected = _authority(target)
     if host_values[0].strip().lower() != expected.lower():
-        raise AdapterConfigError("captured Host header conflicts with the authorized target")
+        raise AdapterConfigError("captured Host header conflicts with the in-scope target")
 
 
 def _check_content_length(headers: dict[str, str], body: str) -> None:
@@ -176,7 +176,7 @@ def _check_content_length(headers: dict[str, str], body: str) -> None:
 
 @dataclass
 class CapturedHttpAdapter:
-    """Replays a parsed captured request against the authorized target."""
+    """Replays a parsed captured request against the in-scope target."""
 
     target: Target
     raw_request: str

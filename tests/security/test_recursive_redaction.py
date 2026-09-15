@@ -393,7 +393,6 @@ def test_secret_like_invalid_method_not_leaked_library(method: str) -> None:
 
 def test_secret_like_invalid_method_not_leaked_cli(mock_server, tmp_path, capsys) -> None:
     from ai_scan import cli
-    from ai_scan.authorization import Receipt, write_receipt
     from tests.conftest import MockRequest, MockResponse
 
     def app(req: MockRequest) -> MockResponse:
@@ -401,14 +400,9 @@ def test_secret_like_invalid_method_not_leaked_cli(mock_server, tmp_path, capsys
 
     server = mock_server(app)
     url = f"{server.base_url}/chat"
-    receipt = tmp_path / "auth.json"
-    rcpt = Receipt.create(
-        target=normalize_target(url), client="C", engagement="E", expires="2999-01-01"
-    )
-    write_receipt(rcpt, str(receipt))
     code = cli.main(
-        ["fingerprint", "--target", url, "--auth-receipt", str(receipt),
-         "--method", "Bearer sk-abcdef0123456789", "--non-interactive"],
+        ["fingerprint", "--target", url,
+         "--method", "Bearer sk-abcdef0123456789"],
     )
     out = capsys.readouterr().out
     assert code == cli.EXIT_RUNTIME_ERROR
@@ -447,7 +441,6 @@ def test_cli_assess_output_and_report_have_no_seeded_secret(mock_server, tmp_pat
     # Public CLI sink: a credential the target reflects must not reach the
     # console summary or the written report.
     from ai_scan import cli
-    from ai_scan.authorization import Receipt, write_receipt
     from tests.conftest import MockRequest, MockResponse
 
     seed = "AKIA1234567890ABCDEF"  # credential-format literal  # pragma: allowlist secret
@@ -461,20 +454,12 @@ def test_cli_assess_output_and_report_have_no_seeded_secret(mock_server, tmp_pat
 
     server = mock_server(reflecting)
     url = f"{server.base_url}/chat"
-    receipt = tmp_path / "auth.json"
-    rcpt = Receipt.create(
-        target=normalize_target(url), client="C", engagement="E", expires="2999-01-01"
-    )
-    write_receipt(rcpt, str(receipt))
     out = tmp_path / "report.json"
     import contextlib as _ctx
     import io
 
     buf = io.StringIO()
     with _ctx.redirect_stdout(buf):
-        cli.main(
-            ["assess", "--target", url, "--auth-receipt", str(receipt),
-             "--non-interactive", "--out", str(out)]
-        )
+        cli.main(["assess", "--target", url, "--out", str(out)])
     assert seed not in buf.getvalue()
     assert seed not in out.read_text(encoding="utf-8")

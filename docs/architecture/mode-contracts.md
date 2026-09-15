@@ -66,7 +66,7 @@ applicable conditions hold:
 
 ## Kitchen Sink mode
 
-**Purpose:** Maximum authorized technique coverage and hypothesis generation for
+**Purpose:** Maximum technique coverage and hypothesis generation for
 an analyst.
 
 **Defaults:**
@@ -86,8 +86,7 @@ an analyst.
   recommended defaults: 5 requests/second, 2,000 physical requests, 2-hour
   duration. A model-cost ceiling may be declared but is not yet enforced at
   runtime.
-- Intrusive families still require separate receipt capabilities and, for
-  interactive runs, a second exact confirmation naming the capability.
+- Intrusive families still require separately declared capability grants.
 - Any unconfirmed result is never phrased as a vulnerability.
 
 ## Mode-independent finding taxonomy
@@ -103,7 +102,7 @@ Both modes use the same states:
 - `not_observed`: valid test and valid controls completed without the success
   condition.
 - `inconclusive`: test ran but an error or ambiguity prevents interpretation.
-- `blocked`: policy, authorization, capability, rate, environment, or target
+- `blocked`: policy, scope, capability, rate, environment, or target
   behavior prevented execution.
 - `not_tested`: incompatible or intentionally excluded; include a structured
   reason.
@@ -133,7 +132,7 @@ critical vulnerability.
 - Exit codes remain stable where possible:
   - `0`: completed, no policy-triggering confirmed finding.
   - `1`: runtime/configuration failure.
-  - `2`: authorization denied/invalid.
+  - `2`: request blocked by a safety control (scope/budget).
   - `3`: confirmed finding triggered policy.
   - `4`: assessment/required coverage inconclusive.
   - `5`: completed with analyst leads only (opt-in for Kitchen Sink automation);

@@ -26,14 +26,14 @@ def _endpoint() -> ResolvedEndpoint:
 
 
 class _StaticGuard:
-    """Guard double that records calls and authorizes to a fixed endpoint."""
+    """Guard double that records calls and resolves to a fixed endpoint."""
 
     def __init__(self, endpoint: ResolvedEndpoint, *, error: Exception | None = None) -> None:
         self.endpoint = endpoint
         self.error = error
         self.calls = 0
 
-    def authorize(self, url: str) -> ResolvedEndpoint:
+    def check(self, url: str) -> ResolvedEndpoint:
         self.calls += 1
         if self.error is not None:
             raise self.error
@@ -105,8 +105,8 @@ def test_scope_denied_attempt_is_counted_but_performs_no_io() -> None:
 
 
 def test_real_guard_over_loopback_literal_needs_no_grant() -> None:
-    # A real ScopeGuard bound to a loopback literal authorizes with no DNS and
-    # no private grant — the operator authorized that exact address.
+    # A real ScopeGuard bound to a loopback literal checks with no DNS and
+    # no private grant — the operator named that exact address.
     ledger = BudgetLedger(max_requests=4)
     opener = RecordingOpener(FakeResponse(status=200, body=b"ok"))
     broker = _broker(ledger, ScopeGuard(target=TARGET), opener)

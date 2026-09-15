@@ -1,18 +1,11 @@
 {
-  "authorization": {
-    "client": "C",
-    "engagement": "E",
-    "expires": "2999-01-01",
-    "mode": "receipt",
-    "receipt_origin": "<ORIGIN>"
-  },
   "created_at": "<TS>",
   "evidence": [
     {
       "request": {
         "headers": {
           "Content-Type": "application/json",
-          "User-Agent": "ai-scan/0.1 (authorized-assessment)"
+          "User-Agent": "ai-scan/0.2"
         },
         "method": "POST",
         "url": "<ORIGIN>/chat"
@@ -35,7 +28,7 @@
       "request": {
         "headers": {
           "Content-Type": "application/json",
-          "User-Agent": "ai-scan/0.1 (authorized-assessment)"
+          "User-Agent": "ai-scan/0.2"
         },
         "method": "POST",
         "url": "<ORIGIN>/chat"
@@ -58,7 +51,7 @@
       "request": {
         "headers": {
           "Content-Type": "application/json",
-          "User-Agent": "ai-scan/0.1 (authorized-assessment)"
+          "User-Agent": "ai-scan/0.2"
         },
         "method": "POST",
         "url": "<ORIGIN>/chat"
@@ -81,7 +74,7 @@
       "request": {
         "headers": {
           "Content-Type": "application/json",
-          "User-Agent": "ai-scan/0.1 (authorized-assessment)"
+          "User-Agent": "ai-scan/0.2"
         },
         "method": "POST",
         "url": "<ORIGIN>/chat"
@@ -104,7 +97,7 @@
       "request": {
         "headers": {
           "Content-Type": "application/json",
-          "User-Agent": "ai-scan/0.1 (authorized-assessment)"
+          "User-Agent": "ai-scan/0.2"
         },
         "method": "POST",
         "url": "<ORIGIN>/chat"
@@ -127,7 +120,7 @@
       "request": {
         "headers": {
           "Content-Type": "application/json",
-          "User-Agent": "ai-scan/0.1 (authorized-assessment)"
+          "User-Agent": "ai-scan/0.2"
         },
         "method": "POST",
         "url": "<ORIGIN>/chat"
@@ -150,7 +143,7 @@
       "request": {
         "headers": {
           "Content-Type": "application/json",
-          "User-Agent": "ai-scan/0.1 (authorized-assessment)"
+          "User-Agent": "ai-scan/0.2"
         },
         "method": "POST",
         "url": "<ORIGIN>/chat"
@@ -173,7 +166,7 @@
       "request": {
         "headers": {
           "Content-Type": "application/json",
-          "User-Agent": "ai-scan/0.1 (authorized-assessment)"
+          "User-Agent": "ai-scan/0.2"
         },
         "method": "POST",
         "url": "<ORIGIN>/chat"
@@ -196,7 +189,7 @@
       "request": {
         "headers": {
           "Content-Type": "application/json",
-          "User-Agent": "ai-scan/0.1 (authorized-assessment)"
+          "User-Agent": "ai-scan/0.2"
         },
         "method": "POST",
         "url": "<ORIGIN>/chat"
@@ -219,7 +212,7 @@
       "request": {
         "headers": {
           "Content-Type": "application/json",
-          "User-Agent": "ai-scan/0.1 (authorized-assessment)"
+          "User-Agent": "ai-scan/0.2"
         },
         "method": "POST",
         "url": "<ORIGIN>/chat"
@@ -242,7 +235,7 @@
       "request": {
         "headers": {
           "Content-Type": "application/json",
-          "User-Agent": "ai-scan/0.1 (authorized-assessment)"
+          "User-Agent": "ai-scan/0.2"
         },
         "method": "POST",
         "url": "<ORIGIN>/chat"
@@ -265,7 +258,7 @@
       "request": {
         "headers": {
           "Content-Type": "application/json",
-          "User-Agent": "ai-scan/0.1 (authorized-assessment)"
+          "User-Agent": "ai-scan/0.2"
         },
         "method": "POST",
         "url": "<ORIGIN>/chat"
