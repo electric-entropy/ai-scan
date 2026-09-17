@@ -103,12 +103,17 @@ def test_owasp_docs_describe_current_mode_breadth_and_limits_truthfully() -> Non
     kitchen_sink = compile_plan(target, "kitchen-sink")
     normalized = " ".join(_text(_OWASP_COVERAGE).split()).lower()
 
-    assert reliable.packs == kitchen_sink.packs
-    assert [case.case_id for case in reliable.cases] == [
-        case.case_id for case in kitchen_sink.cases
-    ]
+    assert {pack_id for pack_id, _version, _digest in reliable.packs} == {
+        "direct-injection-reliable"
+    }
+    assert {pack_id for pack_id, _version, _digest in kitchen_sink.packs} == {
+        "direct-injection-reliable",
+        "direct-injection-kitchen",
+    }
+    assert len(kitchen_sink.cases) > len(reliable.cases)
     assert reliable.limits != kitchen_sink.limits
-    assert "same owasp llm01 breadth" in normalized
+    assert "different llm01 breadth, but only within direct prompt-injection cases" in normalized
+    assert "indirect injection and true multi-turn coverage remain unsupported" in normalized
     assert "modes may use different bounded operational limits" in normalized
     assert "both remain subject to scope" in normalized
     assert "request/rate/concurrency/duration ceilings" in normalized

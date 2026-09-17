@@ -1,7 +1,7 @@
 {
   "categories": [
     {
-      "active_coverage_source": "public Reliable and Kitchen Sink plans currently compile only the direct-injection-reliable pack: 12 cases across encoding, instruction_conflict, role_confusion, and system_boundary",
+      "active_coverage_source": "public Reliable plans compile direct-injection-reliable only; Kitchen Sink public plans additionally compile direct-injection-kitchen for bounded direct LLM01 breadth. Both use exact final-assistant canary execution, matched clean controls, repeatability, plan-bound request accounting, and mode-specific limits.",
       "allowed_outcomes": [
         "tested",
         "finding",
@@ -17,12 +17,14 @@
       "full_coverage_claim_allowed": false,
       "id": "LLM01",
       "known_limitations": [
-        "Partial current active CLI coverage only; Phase 2B must add category-specific fixtures before any full coverage claim",
-        "Indirect injection, capability-gated packs, adaptive generation, multilingual variants, and broader Kitchen Sink prompt-injection variants are Phase 2B work and are not current public executable breadth"
+        "Partial current active CLI coverage only; no full LLM01 coverage claim is allowed",
+        "Indirect injection remains unsupported until a complete local controlled ingestion/retrieval fixture and public capability path exist",
+        "True multi-turn prompt-injection coverage remains unsupported until plan/run architecture carries bounded conversation state rather than a single rendered prompt",
+        "Kitchen Sink bounded_adaptive_retry is a deterministic single-request variant; AI-Scan does not use an LLM judge or unbounded adaptive loop for confirmation"
       ],
       "mode_breadth": {
         "kitchen_sink": [
-          "direct-injection-reliable only: 12 compiled cases covering encoding, instruction_conflict, role_confusion, and system_boundary"
+          "direct-injection-reliable plus direct-injection-kitchen: 24 compiled cases adding bounded direct LLM01 payload_splitting, markdown_injection, encoded_envelope, multilingual_directive, role_play_boundary, and bounded_adaptive_retry families"
         ],
         "reliable": [
           "direct-injection-reliable only: 12 compiled cases covering encoding, instruction_conflict, role_confusion, and system_boundary"
@@ -60,11 +62,11 @@
         {
           "active_cli": true,
           "controls": [
-            "Same scope, redaction, cleanup, evidence, and confirmation controls as Reliable; bounded operational limits may differ"
+            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
           ],
-          "evidence": "Current Kitchen Sink public plan compiles the same direct-injection-reliable cases as Reliable; broader variants are Phase 2B and cannot weaken confirmation semantics",
+          "evidence": "Kitchen Sink public plans compile direct-injection-reliable plus direct-injection-kitchen: bounded direct variants execute through the same exact final-assistant canary, clean control, repeatability, plan-bound request-accounting, and plan-binding gates as Reliable, with mode-specific bounded limits",
           "id": "scenario.llm01.kitchen-sink",
-          "name": "Kitchen Sink Prompt Injection current direct-injection slice",
+          "name": "Kitchen Sink Prompt Injection bounded direct-injection slice",
           "status": "tested"
         }
       ],
@@ -132,7 +134,7 @@
         {
           "active_cli": false,
           "controls": [
-            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
           ],
           "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
           "id": "scenario.llm02.kitchen-sink",
@@ -204,7 +206,7 @@
         {
           "active_cli": false,
           "controls": [
-            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
           ],
           "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
           "id": "scenario.llm03.kitchen-sink",
@@ -276,7 +278,7 @@
         {
           "active_cli": false,
           "controls": [
-            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
           ],
           "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
           "id": "scenario.llm04.kitchen-sink",
@@ -348,7 +350,7 @@
         {
           "active_cli": false,
           "controls": [
-            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
           ],
           "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
           "id": "scenario.llm05.kitchen-sink",
@@ -420,7 +422,7 @@
         {
           "active_cli": false,
           "controls": [
-            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
           ],
           "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
           "id": "scenario.llm06.kitchen-sink",
@@ -492,7 +494,7 @@
         {
           "active_cli": false,
           "controls": [
-            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
           ],
           "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
           "id": "scenario.llm07.kitchen-sink",
@@ -564,7 +566,7 @@
         {
           "active_cli": false,
           "controls": [
-            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
           ],
           "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
           "id": "scenario.llm08.kitchen-sink",
@@ -636,7 +638,7 @@
         {
           "active_cli": false,
           "controls": [
-            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
           ],
           "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
           "id": "scenario.llm09.kitchen-sink",
@@ -708,7 +710,7 @@
         {
           "active_cli": false,
           "controls": [
-            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
           ],
           "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
           "id": "scenario.llm10.kitchen-sink",
@@ -721,7 +723,7 @@
       ]
     }
   ],
-  "content_sha256": "c94a941a1524d98b906b3105c203e7ae4123642a850e8db95b22eeecec398bfe",
+  "content_sha256": "57e760e263fb18079d0516f1c61c03efa95c33772700135807c41f77b0f83075",
   "coverage_arithmetic": {
     "aggregate_full_coverage_claim_allowed": false,
     "blocked_inconclusive_not_tested_do_not_count_as_tested": true,

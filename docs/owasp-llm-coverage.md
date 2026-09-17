@@ -20,15 +20,22 @@ Those reserved identifiers are not emitted by the current report or SARIF
 runtime surfaces; current JSON reports leave `remediation` and
 `framework_mappings` empty, and current SARIF rule IDs remain finding-family IDs.
 
-Current honest summary for Phase 2A:
+Current honest summary after the first Phase 2B LLM01 slice:
 
 - LLM01:2025 Prompt Injection — partial current active CLI coverage through the
-  public `direct-injection-reliable` pack only. Current Reliable and Kitchen
-  Sink plans both compile 12 cases covering `encoding`,
-  `instruction_conflict`, `role_confusion`, and `system_boundary`. Indirect
-  injection, capability-gated packs, adaptive generation, multilingual variants,
-  and broader Kitchen Sink prompt-injection breadth are Phase 2B work, not
-  current public executable breadth.
+  public direct-injection packs. Reliable plans compile 12 cases from
+  `direct-injection-reliable` covering `encoding`, `instruction_conflict`,
+  `role_confusion`, and `system_boundary`. Kitchen Sink plans compile those
+  plus 12 cases from `direct-injection-kitchen`, adding bounded direct variants:
+  `payload_splitting`, `markdown_injection`, `encoded_envelope`,
+  `multilingual_directive`, `role_play_boundary`, and
+  `bounded_adaptive_retry`. The Kitchen Sink additions use the same exact
+  final-assistant canary execution, clean controls, repeatability, redaction,
+  plan binding, scope gates, and canonical plan-bound ceilings as Reliable;
+  bounded operational limits may differ by mode. Indirect injection and
+  true multi-turn coverage remain unsupported until there is a complete local
+  controlled ingestion/retrieval or bounded conversation-state fixture wired
+  through the public CLI path.
 - LLM02:2025 Sensitive Information Disclosure — no current category-specific
   active CLI coverage. Existing canary/redaction machinery is required plumbing,
   but it is not target disclosure testing; synthetic context/secret, real PII,
@@ -60,10 +67,11 @@ Current honest summary for Phase 2A:
 
 Coverage arithmetic is conservative: the denominator is the ten OWASP categories;
 `not_applicable` is excluded and separately reported; `blocked`, `inconclusive`,
-and `not_tested` never increase tested coverage. Current Phase 2A public plans
-have the same OWASP LLM01 breadth. Modes may use different bounded operational
-limits; both remain subject to scope, request/rate/concurrency/duration ceilings,
-redaction, cleanup, evidence, and confirmed-semantics safety controls.
+and `not_tested` never increase tested coverage. Current public plans now have
+different LLM01 breadth, but only within direct prompt-injection cases. Modes may
+use different bounded operational limits; both remain subject to scope,
+request/rate/concurrency/duration ceilings, redaction, cleanup, evidence, and
+confirmed-semantics safety controls.
 
 AI-Scan does not claim full OWASP coverage, OWASP compliance, or comprehensive
 LLM01-LLM10 testing from this Phase 2A matrix. Such a claim remains blocked until

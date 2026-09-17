@@ -6,7 +6,7 @@ AI-Scan is a local, CLI-first tool for LLM security assessment. Active scans run
 
 1. Only run active commands against targets you own or are permitted to test.
 2. Define the exact target (scheme/host/port/path) before running — scope is enforced to that exact target and redirects off it are never followed.
-3. Prefer `reliable` mode for consulting findings and CI gates. Use `kitchen-sink` only for separately labeled analyst leads and only with the same scope and budget controls.
+3. Prefer `reliable` mode for consulting findings and CI gates. Use `kitchen-sink` only for separately labeled analyst leads and only with enforced scope and plan-bound budget controls; bounded operational limits may differ by mode.
 4. Keep intrusive capabilities separate from mode selection. Uploads, writes, tool actions, cross-identity tests, persistence, and resource-stress checks require explicit capability grants.
 5. Treat every request, retry, redirect attempt, control, confirmation, cleanup probe, discovery probe, upload, and read-back as a physical request for budget purposes.
 

@@ -111,39 +111,62 @@ def test_llm01_active_breadth_is_bound_to_public_compiled_plans() -> None:
         mode: compile_plan(target, mode)
         for mode in ("reliable", "kitchen-sink")
     }
-    expected_entry = (
+    reliable_entry = (
         "direct-injection-reliable only: 12 compiled cases covering "
         "encoding, instruction_conflict, role_confusion, and system_boundary"
+    )
+    kitchen_entry = (
+        "direct-injection-reliable plus direct-injection-kitchen: 24 compiled "
+        "cases adding bounded direct LLM01 payload_splitting, markdown_injection, "
+        "encoded_envelope, multilingual_directive, role_play_boundary, and "
+        "bounded_adaptive_retry families"
     )
     matrix = load_coverage_matrix()
     llm01 = next(c for c in matrix.categories if c.id == "LLM01")
 
-    for plan in plans.values():
-        assert {pack_id for pack_id, _version, _digest in plan.packs} == {
-            "direct-injection-reliable"
-        }
-        assert len(plan.cases) == 12
-        assert tuple(sorted({case.family for case in plan.attack_cases()})) == (
-            "encoding",
-            "instruction_conflict",
-            "role_confusion",
-            "system_boundary",
-        )
+    assert {pack_id for pack_id, _version, _digest in plans["reliable"].packs} == {
+        "direct-injection-reliable"
+    }
+    assert {pack_id for pack_id, _version, _digest in plans["kitchen-sink"].packs} == {
+        "direct-injection-reliable",
+        "direct-injection-kitchen",
+    }
+    assert len(plans["reliable"].cases) == 12
+    assert len(plans["kitchen-sink"].cases) == 24
+    assert tuple(sorted({case.family for case in plans["reliable"].attack_cases()})) == (
+        "encoding",
+        "instruction_conflict",
+        "role_confusion",
+        "system_boundary",
+    )
+    assert tuple(sorted({case.family for case in plans["kitchen-sink"].attack_cases()})) == (
+        "bounded_adaptive_retry",
+        "encoded_envelope",
+        "encoding",
+        "instruction_conflict",
+        "markdown_injection",
+        "multilingual_directive",
+        "payload_splitting",
+        "role_confusion",
+        "role_play_boundary",
+        "system_boundary",
+    )
 
     assert llm01.active_coverage_source == (
-        "public Reliable and Kitchen Sink plans currently compile only the "
-        "direct-injection-reliable pack: 12 cases across encoding, "
-        "instruction_conflict, role_confusion, and system_boundary"
+        "public Reliable plans compile direct-injection-reliable only; Kitchen "
+        "Sink public plans additionally compile direct-injection-kitchen for "
+        "bounded direct LLM01 breadth. Both use exact final-assistant canary "
+        "execution, matched clean controls, repeatability, plan-bound request "
+        "accounting, and mode-specific limits."
     )
-    assert llm01.mode_breadth.reliable == (expected_entry,)
-    assert llm01.mode_breadth.kitchen_sink == (expected_entry,)
+    assert llm01.mode_breadth.reliable == (reliable_entry,)
+    assert llm01.mode_breadth.kitchen_sink == (kitchen_entry,)
     categories_raw = cast(list[object], _doc()["categories"])
     llm01_text = json.dumps(categories_raw[0], sort_keys=True).lower()
-    for term in ("indirect", "adaptive", "multilingual", "direct plus"):
-        assert term not in llm01.active_coverage_source.lower()
-        assert term not in " ".join(llm01.mode_breadth.reliable).lower()
-        assert term not in " ".join(llm01.mode_breadth.kitchen_sink).lower()
-        assert term not in llm01_text or "phase 2b" in llm01_text
+    assert "indirect" not in llm01.active_coverage_source.lower()
+    assert "multi-turn" not in llm01.active_coverage_source.lower()
+    assert "multilingual_directive" in llm01_text
+    assert "bounded_adaptive_retry" in llm01_text
 
 
 def test_coverage_arithmetic_does_not_inflate_from_gaps_or_not_applicable() -> None:

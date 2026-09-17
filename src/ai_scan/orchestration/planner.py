@@ -376,7 +376,10 @@ def load_plan(data: Mapping[str, Any]) -> Plan:
             seen_packs.add(pack_identity[0])
             packs_list.append(pack_identity)
         packs = tuple(packs_list)
-        return Plan(
+        case_pack_ids = {case.pack_id for case in cases}
+        if seen_packs != case_pack_ids:
+            raise PlanError("noncanonical pack identity set in plan")
+        plan = Plan(
             plan_version=PLAN_VERSION,
             mode=mode,
             origin=origin,
@@ -395,6 +398,7 @@ def load_plan(data: Mapping[str, Any]) -> Plan:
         )
     except (KeyError, IndexError, TypeError, ValueError, PlanError) as exc:
         raise PlanError("malformed plan document") from exc
+    return plan
 
 
 def plan_to_json(plan: Plan) -> str:

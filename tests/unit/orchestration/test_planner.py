@@ -57,6 +57,30 @@ def test_public_planner_executable_owasp_categories_match_current_cli_wiring() -
     )
 
 
+def test_public_kitchen_sink_plan_adds_real_llm01_direct_injection_breadth() -> None:
+    target = normalize_target("http://127.0.0.1:8080/chat")
+
+    reliable = compile_plan(target, "reliable")
+    kitchen_sink = compile_plan(target, "kitchen-sink")
+
+    assert {pack_id for pack_id, _version, _digest in reliable.packs} == {
+        "direct-injection-reliable"
+    }
+    assert {pack_id for pack_id, _version, _digest in kitchen_sink.packs} == {
+        "direct-injection-reliable",
+        "direct-injection-kitchen",
+    }
+    assert len(reliable.cases) == 12
+    assert len(kitchen_sink.cases) == 24
+    assert set(kitchen_sink.attack_cases()) > set(reliable.attack_cases())
+    assert {
+        "encoded_envelope",
+        "multilingual_directive",
+        "role_play_boundary",
+        "bounded_adaptive_retry",
+    } <= {case.family for case in kitchen_sink.attack_cases()}
+
+
 def test_reliable_schedule_is_serial_sorted() -> None:
     plan = compile_plan(normalize_target("http://127.0.0.1:8000"), "reliable", seed=99)
 
@@ -111,6 +135,16 @@ def test_load_plan_rejects_extra_fields_even_when_redigested() -> None:
     data["digest"] = compute_digest(data)
 
     with pytest.raises(PlanError, match="unknown"):
+        load_plan(data)
+
+
+def test_load_plan_rejects_redigested_noncanonical_pack_set() -> None:
+    plan = compile_plan(normalize_target("http://127.0.0.1:8000"), "reliable")
+    data = plan_to_dict(plan)
+    data["packs"].append(["direct-injection-kitchen", "1", "0" * 64])
+    data["digest"] = compute_digest(data)
+
+    with pytest.raises(PlanError, match="malformed"):
         load_plan(data)
 
 

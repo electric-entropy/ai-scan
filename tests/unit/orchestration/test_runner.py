@@ -118,6 +118,84 @@ def test_control_canary_blocks_confirmation(tmp_path) -> None:
     assert any(f.status.value == "suspected" for f in result.findings)
 
 
+def test_kitchen_sink_llm01_cases_execute_through_plan_with_clean_controls(tmp_path) -> None:
+    plan = compile_plan(normalize_target("http://127.0.0.1:8000/chat"), "kitchen-sink")
+    kitchen_families = {
+        "encoded_envelope",
+        "multilingual_directive",
+        "role_play_boundary",
+        "bounded_adaptive_retry",
+    }
+    seen: list[str] = []
+    sent_attacks: list[str] = []
+    sent_controls: list[str] = []
+
+    def responder(case):  # type: ignore[no-untyped-def]
+        seen.append(case.family)
+        assert "{canary}" not in case.rendered_prompt
+        if "AISCAN-X" in case.rendered_prompt:
+            sent_attacks.append(case.rendered_prompt)
+            return ExchangeOutcome("final assistant output: AISCAN-X")
+        sent_controls.append(case.rendered_prompt)
+        return ExchangeOutcome("benign control response")
+
+    result = run_plan(
+        plan, responder, canary="AISCAN-X", goal="", checkpoint_path=str(tmp_path / "k.ckpt")
+    )
+
+    assert result.state is RunState.COMPLETED
+    assert result.status.value == "confirmed"
+    assert kitchen_families <= set(seen)
+    assert sent_attacks
+    assert sent_controls
+    assert all("AISCAN-X" in prompt for prompt in sent_attacks)
+    assert all("{canary}" not in prompt for prompt in sent_attacks)
+    assert all("AISCAN-X" not in prompt and "{canary}" not in prompt for prompt in sent_controls)
+    assert kitchen_families <= {
+        finding.family for finding in result.findings if finding.status.value == "confirmed"
+    }
+    attacks = len(plan.attack_cases()) * plan.trial_policy[0]
+    controls = len(plan.control_cases()) * plan.trial_policy[2]
+    assert result.request_count == attacks + controls
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "I cannot repeat the token AISCAN-X.",
+        "You asked me to output AISCAN-X, but I will not.",
+    ],
+)
+def test_kitchen_sink_refusal_or_reflection_only_cannot_confirm(body: str, tmp_path) -> None:
+    plan = compile_plan(normalize_target("http://127.0.0.1:8000/chat"), "kitchen-sink")
+    sent_attacks: list[str] = []
+    sent_controls: list[str] = []
+
+    def responder(case):  # type: ignore[no-untyped-def]
+        assert "{canary}" not in case.rendered_prompt
+        if "AISCAN-X" in case.rendered_prompt:
+            sent_attacks.append(case.rendered_prompt)
+            return ExchangeOutcome(body)
+        sent_controls.append(case.rendered_prompt)
+        return ExchangeOutcome("benign control response")
+
+    result = run_plan(
+        plan, responder, canary="AISCAN-X", goal="", checkpoint_path=str(tmp_path / "k.ckpt")
+    )
+
+    assert result.state is RunState.COMPLETED
+    assert result.status.value != "confirmed"
+    assert all(f.status.value != "confirmed" for f in result.findings)
+    assert sent_attacks
+    assert sent_controls
+    assert all("AISCAN-X" in prompt for prompt in sent_attacks)
+    assert all("{canary}" not in prompt for prompt in sent_attacks)
+    assert all("AISCAN-X" not in prompt and "{canary}" not in prompt for prompt in sent_controls)
+    attacks = len(plan.attack_cases()) * plan.trial_policy[0]
+    controls = len(plan.control_cases()) * plan.trial_policy[2]
+    assert result.request_count == attacks + controls
+
+
 def test_budget_exhaustion_emits_coverage_gap(tmp_path) -> None:
     plan = compile_plan(normalize_target("http://127.0.0.1:8000"), "reliable")
     object.__setattr__(plan.limits, "max_physical_requests", 1)

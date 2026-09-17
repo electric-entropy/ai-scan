@@ -122,16 +122,28 @@ def test_builtin_reliable_pack_preserves_legacy_safe_payloads_bit_for_bit() -> N
 
 def test_builtin_packs_resolve_to_expected_mode_breadth() -> None:
     reliable = resolve_injection_payloads("reliable")
-    kitchen = resolve_injection_payloads("kitchen-sink", capabilities=frozenset({"breadth"}))
+    kitchen = resolve_injection_payloads("kitchen-sink")
 
     assert len(reliable.families) == 4
-    assert len(kitchen.families) == 7
+    assert len(kitchen.families) == 10
     assert [f.name for f in reliable.families] == [
         "instruction_conflict",
         "encoding",
         "role_confusion",
         "system_boundary",
     ]
+    assert set(f.name for f in kitchen.families) == {
+        "instruction_conflict",
+        "encoding",
+        "role_confusion",
+        "system_boundary",
+        "payload_splitting",
+        "markdown_injection",
+        "encoded_envelope",
+        "multilingual_directive",
+        "role_play_boundary",
+        "bounded_adaptive_retry",
+    }
 
 
 def test_builtin_pack_resources_have_matching_declared_digests() -> None:
