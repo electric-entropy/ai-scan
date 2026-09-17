@@ -9,16 +9,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
-import stat
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal, NoReturn, cast
 from urllib.parse import unquote, urlsplit
 
 from ai_scan.core.config import load_json_strict
 from ai_scan.core.errors import ConfigError
+from ai_scan.core.safe_file import SafeFileError, read_stable_regular_file
 
 MANIFEST_SCHEMA_VERSION = "ai-scan-supply-chain-manifest-v1"
 RESULT_SCHEMA_VERSION = "ai-scan-supply-chain-audit-result-v1"
@@ -60,6 +59,11 @@ _FORBIDDEN_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn"})
 
 class SupplyChainManifestError(ValueError):
     """Manifest file or document is malformed and cannot be assessed safely."""
+
+
+def _raise_public_manifest_error(message: str) -> NoReturn:
+    """Raise from a frame that has never held submitted manifest data."""
+    raise SupplyChainManifestError(message)
 
 
 @dataclass(frozen=True)
@@ -153,90 +157,61 @@ _REMEDIATION = {
 }
 
 
+def _load_manifest_file(path: str) -> str:
+    try:
+        raw = read_stable_regular_file(path, max_bytes=MAX_MANIFEST_BYTES)
+    except SafeFileError as exc:
+        messages = {
+            "safe_open_unavailable": "nonblocking safe open is unavailable",
+            "invalid_path": "manifest path is invalid",
+            "not_regular": "manifest must be a regular non-symlink file",
+            "too_large": "manifest is too large",
+            "changed": "manifest changed during read",
+        }
+        raise SupplyChainManifestError(
+            messages.get(str(exc), "manifest changed during read")
+        ) from exc
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise SupplyChainManifestError("manifest must be UTF-8 JSON") from exc
+
+
 def load_manifest_file(path: str) -> str:
     """Open one bounded regular non-symlink manifest file and return its UTF-8 text."""
-    if not hasattr(os, "O_NONBLOCK") or not hasattr(os, "O_NOFOLLOW"):
-        raise SupplyChainManifestError("nonblocking safe open is unavailable")
-    flags = (
-        os.O_RDONLY
-        | getattr(os, "O_CLOEXEC", 0)
-        | os.O_NOFOLLOW
-        | os.O_NONBLOCK
-    )
+    text: str | None = None
+    error_message: str | None = None
     try:
-        fd = os.open(path, flags)
-    except OSError as exc:
-        raise SupplyChainManifestError("manifest must be a regular non-symlink file") from exc
-    try:
-        before = os.fstat(fd)
-        if not stat.S_ISREG(before.st_mode):
-            raise SupplyChainManifestError("manifest must be a regular non-symlink file")
-        if before.st_size > MAX_MANIFEST_BYTES:
-            raise SupplyChainManifestError("manifest is too large")
-        before_identity = _manifest_stat_identity(before)
-        chunks = _read_bounded_manifest(fd)
-        after = os.fstat(fd)
-        after_identity = _manifest_stat_identity(after)
-        if (
-            before_identity != after_identity
-            or len(chunks) != before.st_size
-        ):
-            raise SupplyChainManifestError("manifest changed during read")
-        try:
-            os.lseek(fd, 0, os.SEEK_SET)
-        except OSError as exc:
-            raise SupplyChainManifestError("manifest changed during read") from exc
-        repeated = _read_bounded_manifest(fd)
-        repeated_after = os.fstat(fd)
-        if (
-            _manifest_stat_identity(repeated_after) != before_identity
-            or repeated != chunks
-            or len(repeated) != before.st_size
-        ):
-            raise SupplyChainManifestError("manifest changed during read")
-        try:
-            return bytes(chunks).decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise SupplyChainManifestError("manifest must be UTF-8 JSON") from exc
-    finally:
-        os.close(fd)
-
-
-def _manifest_stat_identity(
-    info: os.stat_result,
-) -> tuple[int, int, int, int, int | None, int | None]:
-    return (
-        info.st_dev,
-        info.st_ino,
-        info.st_mode,
-        info.st_size,
-        getattr(info, "st_mtime_ns", None),
-        getattr(info, "st_ctime_ns", None),
-    )
-
-
-def _read_bounded_manifest(fd: int) -> bytes:
-    chunks = bytearray()
-    try:
-        while True:
-            chunk = os.read(fd, min(8192, MAX_MANIFEST_BYTES + 1 - len(chunks)))
-            if not chunk:
-                break
-            chunks.extend(chunk)
-            if len(chunks) > MAX_MANIFEST_BYTES:
-                raise SupplyChainManifestError("manifest is too large")
-    except OSError as exc:
-        raise SupplyChainManifestError("manifest changed during read") from exc
-    return bytes(chunks)
+        text = _load_manifest_file(path)
+    except SupplyChainManifestError as exc:
+        error_message = str(exc)
+    if error_message is not None:
+        del path, text
+        _raise_public_manifest_error(error_message)
+    assert text is not None
+    return text
 
 
 def audit_manifest_file(path: str) -> SupplyChainAuditResult:
     """Load and assess a local manifest file without touching listed artifacts."""
-    return audit_manifest_text(load_manifest_file(path))
+    text: str | None = None
+    result: SupplyChainAuditResult | None = None
+    error_message: str | None = None
+    try:
+        text = _load_manifest_file(path)
+        result = _audit_manifest_text(text)
+    except SupplyChainManifestError as exc:
+        error_message = str(exc)
+    except UnicodeEncodeError:
+        error_message = "manifest must be UTF-8 JSON"
+    if error_message is not None:
+        del path, text, result
+        _raise_public_manifest_error(error_message)
+    assert result is not None
+    return result
 
 
-def audit_manifest_text(text: str) -> SupplyChainAuditResult:
-    """Assess strict manifest JSON text and return a deterministic structured result."""
+def _audit_manifest_text(text: str) -> SupplyChainAuditResult:
     if len(text.encode("utf-8")) > MAX_MANIFEST_BYTES:
         raise SupplyChainManifestError("manifest is too large")
     try:
@@ -284,6 +259,23 @@ def audit_manifest_text(text: str) -> SupplyChainAuditResult:
         findings=tuple(findings),
         limitations=_LIMITATIONS,
     )
+
+
+def audit_manifest_text(text: str) -> SupplyChainAuditResult:
+    """Assess strict manifest JSON text and return a deterministic structured result."""
+    result: SupplyChainAuditResult | None = None
+    error_message: str | None = None
+    try:
+        result = _audit_manifest_text(text)
+    except SupplyChainManifestError as exc:
+        error_message = str(exc)
+    except UnicodeEncodeError:
+        error_message = "manifest must be UTF-8 JSON"
+    if error_message is not None:
+        del text, result
+        _raise_public_manifest_error(error_message)
+    assert result is not None
+    return result
 
 
 def render_human(result: SupplyChainAuditResult) -> str:

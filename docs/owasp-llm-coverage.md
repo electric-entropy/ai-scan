@@ -20,7 +20,7 @@ Those reserved identifiers are not emitted by the current report or SARIF
 runtime surfaces; current JSON reports leave `remediation` and
 `framework_mappings` empty, and current SARIF rule IDs remain finding-family IDs.
 
-Current honest summary after Phase 2B4:
+Current honest summary after Phase 2B5:
 
 - LLM01:2025 Prompt Injection — partial current active CLI coverage through the
   public direct-injection packs. Reliable plans compile 12 cases from
@@ -91,8 +91,21 @@ Current honest summary after Phase 2B4:
   an uncertain ingestion can leave the controlled poison item unresolved and
   requires explicit service-side or operator reconciliation. Public output uses
   fixed nonsecret wording and does not expose the target, item identifier, or marker.
-- LLM05:2025 Improper Output Handling — no current output-sink execution
-  coverage; dangerous text alone is not deterministic sink evidence.
+- LLM05:2025 Improper Output Handling — partial current active CLI coverage
+  through `ai-scan output-handling-audit --manifest FILE`, an unattended offline
+  declaration assessment only. It applies fixed sink/context checks to declared
+  HTML/DOM, Markdown, SQL, shell/process, code/template, logging/observability,
+  and structured/API consumers. It checks trust boundaries, contextual encoding,
+  parameterization and string concatenation, schema/allowlist validation, active
+  content, interpreter/renderer behavior, error/output isolation, and fixed size
+  limits. It never opens declared paths or URLs and never renders, deserializes,
+  imports, or executes model output, commands, templates, SQL, HTML, JavaScript,
+  payloads, or plugins. Findings are deterministic declaration findings bound to
+  the manifest digest and opaque sink references; they do not claim execution or
+  downstream effects. Declaration checks passed does not prove safe runtime
+  behavior. Runtime rendering and execution, browser behavior, database or
+  process effects, prompt injection, and downstream implementation verification
+  remain explicit gaps. This is not full LLM05 coverage.
 - LLM06:2025 Excessive Agency — no current active public CLI coverage.
   Tool-abuse packs carry LLM06 mappings, but they are capability-gated and
   unreachable through the current public `plan`/`run` path because there is no
@@ -114,8 +127,9 @@ Coverage arithmetic is conservative: the denominator is the ten OWASP categories
 `not_applicable` is excluded and separately reported; `blocked`, `inconclusive`,
 and `not_tested` never increase tested coverage. Current public coverage now has
 active LLM01, LLM02, partial offline-manifest LLM03, and partial active
-controlled-retrieval-protocol LLM04 coverage only, with additional bounded Kitchen Sink
-breadth in LLM01/LLM02. Modes may use different bounded operational limits;
+controlled-retrieval-protocol LLM04, plus partial offline-declaration LLM05
+coverage only, with additional bounded Kitchen Sink breadth in LLM01/LLM02.
+Modes may use different bounded operational limits;
 both remain subject to scope,
 request/rate/concurrency/duration ceilings, redaction, cleanup, evidence, and
 confirmed-semantics safety controls.

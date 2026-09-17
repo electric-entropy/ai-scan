@@ -295,43 +295,44 @@
       ]
     },
     {
-      "active_coverage_source": "no current end-to-end output-sink execution coverage; prompt-only proxies do not count",
+      "active_coverage_source": "public output-handling-audit CLI executes a partial offline LLM05 declaration assessment only: it reads one bounded local regular non-symlink manifest, applies fixed sink/context control checks, constructs no transport, performs no network access, and never opens or executes declared implementation references.",
       "allowed_outcomes": [
-        "not_tested",
+        "tested",
+        "finding",
         "blocked",
         "inconclusive",
         "not_applicable"
       ],
       "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
-      "current_active_cli_coverage": false,
+      "current_active_cli_coverage": true,
       "deterministic_evidence": [
-        "Typed sink-side effect or parser state change, never just dangerous text"
+        "Strict manifest validation plus opaque sink-bound findings from fixed sink/context rules for trust boundaries, contextual encoding, parameterization, concatenation, schema/allowlist validation, active content, interpreter behavior, error/output isolation, and fixed output limits"
       ],
       "full_coverage_claim_allowed": false,
       "id": "LLM05",
       "known_limitations": [
-        "Phase 2B work required before active end-to-end coverage",
-        "Prompt/template overlap or library scaffolding is not counted as active coverage",
-        "unsupported by current CLI as a finding-producing category"
+        "Partial offline declaration assessment only; no full LLM05 coverage claim is allowed",
+        "Runtime rendering or execution, browser behavior, database or process effects, prompt injection, and downstream implementation verification remain out of scope",
+        "A declaration passing fixed checks does not prove the downstream implementation safely handles model output"
       ],
       "mode_breadth": {
         "kitchen_sink": [
-          "planned additional sink families and parser contexts"
+          "same current offline declaration assessment as Reliable; no live rendering, execution, browser, database, process, or implementation-verification coverage is claimed"
         ],
         "reliable": [
-          "planned typed output-sink fixtures"
+          "output-handling-audit: bounded offline declaration checks for HTML/DOM, Markdown, SQL, shell/process, code/template, logging/observability, and structured/API sinks"
         ]
       },
       "name": "Improper Output Handling",
       "not_applicable_when": [
-        "Output is only displayed as inert text or no sink is observable"
+        "The supplied manifest explicitly declares no downstream model-output consumers"
       ],
-      "phase_2b_planned": true,
+      "phase_2b_planned": false,
       "prerequisites": [
-        "Sink execution/effect can be observed through a local fixture"
+        "Operator supplies an explicit local ai-scan-output-handling-manifest-v1 JSON file for offline assessment"
       ],
       "required_controls": [
-        "Escaped/benign output controls and no-effect controls"
+        "Strict schema and file-boundary controls reject malformed, oversized, symlink, special-file, duplicate-key, duplicate-id, unknown-field, type, count, string, depth, and non-finite manifest inputs before assessment"
       ],
       "reserved_remediation_id": "ai-scan.owasp.LLM05.remediation",
       "reserved_report_ids": [
@@ -339,31 +340,31 @@
         "ai-scan.owasp.LLM05.evidence"
       ],
       "reserved_sarif_rule_id": "ai-scan.owasp.LLM05.rule",
-      "scaffolding_only": true,
+      "scaffolding_only": false,
       "supported_scenarios": [
         {
-          "active_cli": false,
+          "active_cli": true,
           "controls": [
-            "Escaped/benign output controls and no-effect controls"
+            "Bounded local regular non-symlink manifest only; strict closed schema; fixed sink/context rules; opaque references; no transport, network, artifact opening, rendering, deserialization, import, or execution"
           ],
-          "evidence": "Typed sink-side effect or parser state change, never just dangerous text",
-          "id": "scenario.llm05.reliable",
-          "name": "Reliable Improper Output Handling scenario slice",
-          "status": "not_tested"
+          "evidence": "output-handling-audit emits deterministic opaque sink-bound findings for missing or unsafe declared controls; no finding claims runtime execution or side effects",
+          "id": "scenario.llm05.offline-declaration",
+          "name": "Partial offline Improper Output Handling declaration assessment",
+          "status": "tested"
         },
         {
           "active_cli": false,
           "controls": [
-            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
+            "Not implemented; matrix keeps gaps explicit so declaration checks cannot imply live sink safety"
           ],
-          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
-          "id": "scenario.llm05.kitchen-sink",
-          "name": "Kitchen Sink Improper Output Handling broader scenario slice",
+          "evidence": "Runtime rendering/execution, browser behavior, database/process effects, prompt injection, and downstream implementation verification remain gaps",
+          "id": "scenario.llm05.runtime-gaps",
+          "name": "Live downstream output-handling behavior gaps",
           "status": "not_tested"
         }
       ],
       "target_capabilities": [
-        "Model output reaches an HTML, Markdown, DOM, SQL, shell, template, parser, or similar sink"
+        "Local declaration identifies an HTML/DOM, Markdown, SQL, shell/process, code/template, logging/observability, or structured/API output consumer"
       ]
     },
     {
@@ -727,7 +728,7 @@
       ]
     }
   ],
-  "content_sha256": "2cc3a285a625c10b373480f378353548668b7cd615f5cd9fb4907166acaed04e",
+  "content_sha256": "8034c0fe1910247bf90b18e400ba02882909bf7c35d55d54ba4c458558137cbc",
   "coverage_arithmetic": {
     "aggregate_full_coverage_claim_allowed": false,
     "blocked_inconclusive_not_tested_do_not_count_as_tested": true,
@@ -736,7 +737,7 @@
     "not_applicable_excluded_from_tested_coverage": true,
     "rule": "Tested coverage is the count of categories with current active CLI wiring, deterministic evidence, and required negative controls. not_applicable is excluded and separately reported; blocked, inconclusive, and not_tested never increase tested coverage. Full/compliant OWASP claims require all ten categories to meet the active evidence contract and are not allowed by this Phase 2A matrix."
   },
-  "matrix_version": "1.1.0",
+  "matrix_version": "1.2.0",
   "schema_version": "owasp-llm-coverage-v1",
   "standard": "OWASP Top 10 for LLM Applications",
   "standard_year": 2025

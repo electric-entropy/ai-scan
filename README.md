@@ -172,6 +172,15 @@ gaps. A deadline, budget, transport, or cleanup-verification failure after an
 uncertain ingestion can leave the controlled poison item unresolved and requires
 explicit service-side or operator reconciliation; public output reports that
 state without exposing the target, item identifier, or marker.
+LLM05 has only partial offline declaration coverage through
+`ai-scan output-handling-audit --manifest FILE`. It applies fixed checks to
+declared downstream sink controls and emits only manifest-bound opaque findings.
+It never opens declared paths or URLs, constructs transport, accesses the
+network, or renders/executes model output, commands, templates, SQL, HTML/JS,
+payloads, or plugins. Declaration checks passed does not prove safe runtime
+behavior. Runtime rendering and execution, browser behavior, database or process
+effects, prompt injection, and downstream implementation verification remain
+gaps; no full LLM05 or OWASP compliance claim is made.
 LLM06 and LLM07 pack mappings are capability-gated/unreachable without a public
 capability selector and do not count as active end-to-end CLI coverage. Matrix identifiers
 for remediation/report/SARIF are reserved contract identifiers for future

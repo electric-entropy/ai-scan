@@ -1,0 +1,22 @@
+{
+  "schema_version": "ai-scan-output-handling-manifest-v1",
+  "sinks": [
+    {
+      "active_content": "allowed",
+      "allowlist_validation": false,
+      "context": "template",
+      "encoding": "raw",
+      "error_isolation": false,
+      "id": "template.vulnerable",
+      "implementation_ref": "https://example.invalid/render?template=untrusted",
+      "interpreter_behavior": "direct",
+      "max_output_chars": 1000001,
+      "output_isolation": false,
+      "parameterized": false,
+      "schema_validation": false,
+      "string_concatenation": true,
+      "trust_boundary": "trusted_internal",
+      "type": "code_template"
+    }
+  ]
+}

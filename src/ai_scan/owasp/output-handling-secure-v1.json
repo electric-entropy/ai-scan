@@ -1,0 +1,56 @@
+{
+  "schema_version": "ai-scan-output-handling-manifest-v1",
+  "sinks": [
+    {
+      "active_content": "disabled",
+      "allowlist_validation": true,
+      "context": "html_text",
+      "encoding": "html_escape",
+      "error_isolation": true,
+      "id": "web.primary",
+      "implementation_ref": "src/web/render.py#render",
+      "interpreter_behavior": "disabled",
+      "max_output_chars": 8192,
+      "output_isolation": true,
+      "parameterized": true,
+      "schema_validation": true,
+      "string_concatenation": false,
+      "trust_boundary": "untrusted_model_output",
+      "type": "html_dom"
+    },
+    {
+      "active_content": "disabled",
+      "allowlist_validation": true,
+      "context": "query",
+      "encoding": "parameterized_query",
+      "error_isolation": true,
+      "id": "database.query",
+      "implementation_ref": "src/storage/query.py#write",
+      "interpreter_behavior": "disabled",
+      "max_output_chars": 4096,
+      "output_isolation": true,
+      "parameterized": true,
+      "schema_validation": true,
+      "string_concatenation": false,
+      "trust_boundary": "untrusted_model_output",
+      "type": "sql"
+    },
+    {
+      "active_content": "disabled",
+      "allowlist_validation": true,
+      "context": "argv",
+      "encoding": "argv_array",
+      "error_isolation": true,
+      "id": "process.argv",
+      "implementation_ref": "src/jobs/run.py#spawn",
+      "interpreter_behavior": "disabled",
+      "max_output_chars": 1024,
+      "output_isolation": true,
+      "parameterized": true,
+      "schema_validation": true,
+      "string_concatenation": false,
+      "trust_boundary": "untrusted_model_output",
+      "type": "shell_process"
+    }
+  ]
+}

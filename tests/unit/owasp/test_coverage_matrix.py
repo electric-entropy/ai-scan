@@ -53,7 +53,7 @@ def test_packaged_matrix_loads_all_official_2025_categories() -> None:
     matrix = load_coverage_matrix()
     assert matrix.standard == "OWASP Top 10 for LLM Applications"
     assert matrix.standard_year == 2025
-    assert matrix.matrix_version == "1.1.0"
+    assert matrix.matrix_version == "1.2.0"
     assert {c.id: c.name for c in matrix.categories} == EXPECTED_NAMES
     assert CATEGORY_NAMES_2025 == EXPECTED_NAMES
 
@@ -65,10 +65,12 @@ def test_current_state_is_honest_about_active_end_to_end_coverage() -> None:
     assert categories["LLM02"].current_active_cli_coverage is True
     assert categories["LLM03"].current_active_cli_coverage is True
     assert categories["LLM04"].current_active_cli_coverage is True
+    assert categories["LLM05"].current_active_cli_coverage is True
     assert categories["LLM03"].scaffolding_only is False
     assert categories["LLM02"].scaffolding_only is False
     assert categories["LLM04"].scaffolding_only is False
-    inactive_ids = ("LLM05", "LLM06", "LLM07", "LLM08", "LLM09", "LLM10")
+    assert categories["LLM05"].scaffolding_only is False
+    inactive_ids = ("LLM06", "LLM07", "LLM08", "LLM09", "LLM10")
     for category_id in inactive_ids:
         category = categories[category_id]
         assert category.current_active_cli_coverage is False
@@ -108,7 +110,7 @@ def test_reliable_and_kitchen_sink_breadth_differ_without_full_claims() -> None:
     summary = coverage_summary(matrix)
     assert summary["categories_total"] == 10
     assert summary["full_coverage_claim_allowed"] is False
-    assert summary["active_end_to_end_categories"] == 4
+    assert summary["active_end_to_end_categories"] == 5
     assert summary["active_end_to_end_categories"] < summary["categories_total"]
 
 
@@ -242,6 +244,34 @@ def test_llm04_active_claim_is_limited_to_external_retrieval_protocol_cli() -> N
     )
 
 
+def test_llm05_active_claim_is_limited_to_offline_declaration_assessment() -> None:
+    matrix = load_coverage_matrix()
+    llm05 = next(c for c in matrix.categories if c.id == "LLM05")
+
+    assert llm05.current_active_cli_coverage is True
+    assert llm05.scaffolding_only is False
+    assert "finding" in llm05.allowed_outcomes
+    assert "partial offline LLM05 declaration assessment" in llm05.active_coverage_source
+    assert "output-handling-audit" in llm05.active_coverage_source
+    assert "never opens or executes declared implementation references" in (
+        llm05.active_coverage_source
+    )
+    limitations = " ".join(llm05.known_limitations).lower()
+    for gap in (
+        "runtime rendering or execution",
+        "browser behavior",
+        "database or process effects",
+        "prompt injection",
+        "downstream implementation verification",
+        "no full llm05 coverage",
+    ):
+        assert gap in limitations
+    assert llm05.mode_breadth.reliable == (
+        "output-handling-audit: bounded offline declaration checks for HTML/DOM, Markdown, "
+        "SQL, shell/process, code/template, logging/observability, and structured/API sinks",
+    )
+
+
 def test_coverage_arithmetic_does_not_inflate_from_gaps_or_not_applicable() -> None:
     matrix = load_coverage_matrix()
     summary = coverage_summary(matrix)
@@ -363,7 +393,7 @@ def test_duplicate_json_keys_are_rejected() -> None:
 
 def test_contradictory_active_or_full_states_are_rejected() -> None:
     def unsupported_marked_active(doc: dict[str, object]) -> None:
-        cat = doc["categories"][4]  # LLM05 improper output handling
+        cat = doc["categories"][5]  # LLM06 excessive agency
         cat["current_active_cli_coverage"] = True
 
     def full_claim_from_partial(doc: dict[str, object]) -> None:
@@ -371,7 +401,7 @@ def test_contradictory_active_or_full_states_are_rejected() -> None:
         cat["full_coverage_claim_allowed"] = True
 
     def finding_without_active_coverage(doc: dict[str, object]) -> None:
-        cat = doc["categories"][4]
+        cat = doc["categories"][5]
         cat["allowed_outcomes"] = ["finding", "tested"]
 
     for mutator in (

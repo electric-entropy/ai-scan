@@ -62,6 +62,10 @@ from ai_scan.orchestration import (
     run_plan,
     verify_plan_integrity,
 )
+from ai_scan.output_handling import OutputHandlingManifestError
+from ai_scan.output_handling import audit_manifest_file as audit_output_handling_manifest_file
+from ai_scan.output_handling import render_human as render_output_handling_human
+from ai_scan.output_handling import render_json as render_output_handling_json
 from ai_scan.owasp_llm import (
     coverage_summary,
     load_coverage_matrix,
@@ -316,6 +320,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format.",
     )
 
+    p_output_handling = subparsers.add_parser(
+        "output-handling-audit",
+        help=(
+            "Run an offline OWASP LLM05 partial declaration assessment of downstream "
+            "model-output consumers (no execution or network)."
+        ),
+        description=(
+            "Offline declaration-only assessment. Declared paths and URLs are never opened, "
+            "and model output is never rendered or executed."
+        ),
+    )
+    p_output_handling.add_argument(
+        "--manifest", required=True, help="Local output-handling declaration manifest JSON file."
+    )
+    p_output_handling.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format.",
+    )
+
     p_data_poisoning = subparsers.add_parser(
         "data-poisoning-audit",
         help=(
@@ -402,6 +427,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_owasp_coverage(args)
     if args.command == "supply-chain-audit":
         return _cmd_supply_chain_audit(args)
+    if args.command == "output-handling-audit":
+        return _cmd_output_handling_audit(args)
     if args.command == "data-poisoning-audit":
         return _cmd_data_poisoning_audit(args)
 
@@ -765,6 +792,27 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         load_protocol_resource_text(text)
         return "valid"
 
+    def _llm05_output_handling_resources() -> str:
+        from ai_scan.output_handling import audit_manifest_text, load_schema_text
+
+        schema_text = root.joinpath(
+            "owasp/output-handling-manifest-v1.schema.json"
+        ).read_text(encoding="utf-8")
+        load_schema_text(schema_text)
+        secure = audit_manifest_text(
+            root.joinpath("owasp/output-handling-secure-v1.json").read_text(encoding="utf-8")
+        )
+        vulnerable = audit_manifest_text(
+            root.joinpath("owasp/output-handling-vulnerable-v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        if secure.status != "passed" or secure.findings:
+            raise ValueError("LLM05 secure fixture semantic mismatch")
+        if vulnerable.status != "finding" or not vulnerable.findings:
+            raise ValueError("LLM05 vulnerable fixture semantic mismatch")
+        return "schema and 2 fixtures valid"
+
     record("metadata", _metadata)
     record("py.typed", _py_typed)
     record("schemas", _schemas)
@@ -774,6 +822,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     record("owasp-llm-coverage", _owasp_matrix)
     record("owasp-llm03-supply-chain-fixtures", _llm03_supply_chain_fixtures)
     record("owasp-llm04-data-poisoning-protocol", _llm04_data_poisoning_protocol)
+    record("owasp-llm05-output-handling-resources", _llm05_output_handling_resources)
 
     healthy = all(bool(check["ok"]) for check in checks)
     if args.json:
@@ -815,6 +864,22 @@ def _cmd_supply_chain_audit(args: argparse.Namespace) -> int:
         return EXIT_CONFIRMED_FINDING
     if result.status == "inconclusive":
         return EXIT_INCONCLUSIVE
+    return EXIT_OK
+
+
+def _cmd_output_handling_audit(args: argparse.Namespace) -> int:
+    """Run the offline LLM05 declaration audit; constructs no transport."""
+    try:
+        result = audit_output_handling_manifest_file(args.manifest)
+    except OutputHandlingManifestError as exc:
+        print(f"invalid: {exc}")
+        return EXIT_RUNTIME_ERROR
+    if args.format == "json":
+        print(render_output_handling_json(result))
+    else:
+        print(render_output_handling_human(result))
+    if result.status == "finding":
+        return EXIT_CONFIRMED_FINDING
     return EXIT_OK
 
 

@@ -1,0 +1,130 @@
+{
+  "$id": "https://electricentropy.com/schemas/ai-scan-output-handling-v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "ai-scan-output-handling-manifest-v1"
+    },
+    "sinks": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "active_content": {
+            "enum": [
+              "allowed",
+              "disabled",
+              "sanitized"
+            ],
+            "type": "string"
+          },
+          "allowlist_validation": {
+            "type": "boolean"
+          },
+          "context": {
+            "enum": [
+              "argv",
+              "html_attribute",
+              "html_text",
+              "json",
+              "log_record",
+              "markdown",
+              "query",
+              "template"
+            ],
+            "type": "string"
+          },
+          "encoding": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "error_isolation": {
+            "type": "boolean"
+          },
+          "id": {
+            "maxLength": 128,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}$",
+            "type": "string"
+          },
+          "implementation_ref": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "type": "string"
+          },
+          "interpreter_behavior": {
+            "enum": [
+              "direct",
+              "disabled",
+              "sandboxed"
+            ],
+            "type": "string"
+          },
+          "max_output_chars": {
+            "maximum": 10000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "output_isolation": {
+            "type": "boolean"
+          },
+          "parameterized": {
+            "type": "boolean"
+          },
+          "schema_validation": {
+            "type": "boolean"
+          },
+          "string_concatenation": {
+            "type": "boolean"
+          },
+          "trust_boundary": {
+            "enum": [
+              "trusted_internal",
+              "untrusted_model_output"
+            ],
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "code_template",
+              "html_dom",
+              "logging",
+              "markdown",
+              "shell_process",
+              "sql",
+              "structured_api"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "active_content",
+          "allowlist_validation",
+          "context",
+          "encoding",
+          "error_isolation",
+          "id",
+          "implementation_ref",
+          "interpreter_behavior",
+          "max_output_chars",
+          "output_isolation",
+          "parameterized",
+          "schema_validation",
+          "string_concatenation",
+          "trust_boundary",
+          "type"
+        ],
+        "type": "object"
+      },
+      "maxItems": 2000,
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "sinks"
+  ],
+  "title": "AI-Scan LLM05 output-handling declaration manifest v1",
+  "type": "object"
+}

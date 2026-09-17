@@ -56,6 +56,22 @@ def test_doctor_json_output_is_machine_readable(capsys: pytest.CaptureFixture) -
     assert doc["checks"]
     assert all(c["ok"] for c in doc["checks"])
     assert any(c["name"] == "owasp-llm-coverage" for c in doc["checks"])
+    assert any(c["name"] == "owasp-llm05-output-handling-resources" for c in doc["checks"])
+
+
+def test_doctor_semantically_validates_llm05_resources(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    def semantic_failure(_text: str) -> dict[str, object]:
+        raise ValueError("semantic tamper")
+
+    monkeypatch.setattr("ai_scan.output_handling.load_schema_text", semantic_failure)
+    assert cli.main(["doctor", "--json"]) == cli.EXIT_RUNTIME_ERROR
+    doc = __import__("json").loads(capsys.readouterr().out)
+    check = next(
+        item for item in doc["checks"] if item["name"] == "owasp-llm05-output-handling-resources"
+    )
+    assert check["ok"] is False
 
 
 def test_owasp_coverage_requires_no_target_and_constructs_no_transport(

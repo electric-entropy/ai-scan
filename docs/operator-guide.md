@@ -49,6 +49,14 @@ opaque deterministic item references; live model behavior, signatures/attestatio
 dataset contents, artifact byte hashing, and runtime dependency resolution remain
 out of scope.
 
+`output-handling-audit --manifest FILE` is an **offline partial OWASP LLM05**
+declaration check. It assesses fixed declared controls for downstream model-output
+consumers, emits opaque sink references, and never opens implementation paths or
+URLs, constructs transport, accesses the network, or renders/executes output.
+Declaration checks passed does not prove safe runtime behavior. Runtime
+rendering and execution, browser behavior, database or process effects, prompt
+injection, and downstream implementation verification remain out of scope.
+
 ## Interpreting outcomes
 
 - `confirmed` requires deterministic, controlled, reproducible evidence. Reflection, self-identification, heuristic similarity, and LLM judges cannot confirm by themselves.
