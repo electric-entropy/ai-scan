@@ -1,0 +1,737 @@
+{
+  "categories": [
+    {
+      "active_coverage_source": "public Reliable and Kitchen Sink plans currently compile only the direct-injection-reliable pack: 12 cases across encoding, instruction_conflict, role_confusion, and system_boundary",
+      "allowed_outcomes": [
+        "tested",
+        "finding",
+        "blocked",
+        "inconclusive",
+        "not_applicable"
+      ],
+      "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
+      "current_active_cli_coverage": true,
+      "deterministic_evidence": [
+        "Exact canary execution in final assistant output after matched clean controls and repeatability"
+      ],
+      "full_coverage_claim_allowed": false,
+      "id": "LLM01",
+      "known_limitations": [
+        "Partial current active CLI coverage only; Phase 2B must add category-specific fixtures before any full coverage claim",
+        "Indirect injection, capability-gated packs, adaptive generation, multilingual variants, and broader Kitchen Sink prompt-injection variants are Phase 2B work and are not current public executable breadth"
+      ],
+      "mode_breadth": {
+        "kitchen_sink": [
+          "direct-injection-reliable only: 12 compiled cases covering encoding, instruction_conflict, role_confusion, and system_boundary"
+        ],
+        "reliable": [
+          "direct-injection-reliable only: 12 compiled cases covering encoding, instruction_conflict, role_confusion, and system_boundary"
+        ]
+      },
+      "name": "Prompt Injection",
+      "not_applicable_when": [
+        "No prompt input or assistant response path exists"
+      ],
+      "phase_2b_planned": true,
+      "prerequisites": [
+        "Operator provides a local/in-scope target whose final assistant output is observable"
+      ],
+      "required_controls": [
+        "Clean prompt controls that do not contain the canary"
+      ],
+      "reserved_remediation_id": "ai-scan.owasp.LLM01.remediation",
+      "reserved_report_ids": [
+        "ai-scan.owasp.LLM01.coverage",
+        "ai-scan.owasp.LLM01.evidence"
+      ],
+      "reserved_sarif_rule_id": "ai-scan.owasp.LLM01.rule",
+      "scaffolding_only": false,
+      "supported_scenarios": [
+        {
+          "active_cli": true,
+          "controls": [
+            "Clean prompt controls that do not contain the canary"
+          ],
+          "evidence": "Exact canary execution in final assistant output after matched clean controls and repeatability",
+          "id": "scenario.llm01.reliable",
+          "name": "Reliable Prompt Injection scenario slice",
+          "status": "tested"
+        },
+        {
+          "active_cli": true,
+          "controls": [
+            "Same scope, redaction, cleanup, evidence, and confirmation controls as Reliable; bounded operational limits may differ"
+          ],
+          "evidence": "Current Kitchen Sink public plan compiles the same direct-injection-reliable cases as Reliable; broader variants are Phase 2B and cannot weaken confirmation semantics",
+          "id": "scenario.llm01.kitchen-sink",
+          "name": "Kitchen Sink Prompt Injection current direct-injection slice",
+          "status": "tested"
+        }
+      ],
+      "target_capabilities": [
+        "Prompt-bearing chat or completion endpoint reachable through an AI-Scan adapter"
+      ]
+    },
+    {
+      "active_coverage_source": "current canary/secret redaction and controlled final-output evidence paths; Phase 2B will expand fixtures",
+      "allowed_outcomes": [
+        "not_tested",
+        "blocked",
+        "inconclusive",
+        "not_applicable"
+      ],
+      "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
+      "current_active_cli_coverage": false,
+      "deterministic_evidence": [
+        "Target emits the exact synthetic secret/canary through final assistant output under controls"
+      ],
+      "full_coverage_claim_allowed": false,
+      "id": "LLM02",
+      "known_limitations": [
+        "Phase 2B work required before active end-to-end coverage",
+        "Prompt/template overlap or library scaffolding is not counted as active coverage",
+        "unsupported by current CLI as a finding-producing category"
+      ],
+      "mode_breadth": {
+        "kitchen_sink": [
+          "broader disclosure prompt/template variants; real PII and cross-tenant extraction remain out of scope"
+        ],
+        "reliable": [
+          "synthetic sensitive-value disclosure probes where supported by current packs"
+        ]
+      },
+      "name": "Sensitive Information Disclosure",
+      "not_applicable_when": [
+        "No controlled sensitive value can be introduced or observed"
+      ],
+      "phase_2b_planned": true,
+      "prerequisites": [
+        "A controlled secret/canary can be placed in target-visible context without real credentials"
+      ],
+      "required_controls": [
+        "Benign context controls and clean prompts proving ordinary operation does not emit the canary"
+      ],
+      "reserved_remediation_id": "ai-scan.owasp.LLM02.remediation",
+      "reserved_report_ids": [
+        "ai-scan.owasp.LLM02.coverage",
+        "ai-scan.owasp.LLM02.evidence"
+      ],
+      "reserved_sarif_rule_id": "ai-scan.owasp.LLM02.rule",
+      "scaffolding_only": true,
+      "supported_scenarios": [
+        {
+          "active_cli": false,
+          "controls": [
+            "Benign context controls and clean prompts proving ordinary operation does not emit the canary"
+          ],
+          "evidence": "Target emits the exact synthetic secret/canary through final assistant output under controls",
+          "id": "scenario.llm02.reliable",
+          "name": "Reliable Sensitive Information Disclosure scenario slice",
+          "status": "not_tested"
+        },
+        {
+          "active_cli": false,
+          "controls": [
+            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+          ],
+          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
+          "id": "scenario.llm02.kitchen-sink",
+          "name": "Kitchen Sink Sensitive Information Disclosure broader scenario slice",
+          "status": "not_tested"
+        }
+      ],
+      "target_capabilities": [
+        "Target may receive synthetic secrets or context canaries and return assistant text"
+      ]
+    },
+    {
+      "active_coverage_source": "library scaffolding and package self-checks only; no current target end-to-end supply-chain CLI coverage",
+      "allowed_outcomes": [
+        "not_tested",
+        "blocked",
+        "inconclusive",
+        "not_applicable"
+      ],
+      "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
+      "current_active_cli_coverage": false,
+      "deterministic_evidence": [
+        "Digest/provenance mismatch or vulnerable component evidence from an inspected artifact, not prompt text"
+      ],
+      "full_coverage_claim_allowed": false,
+      "id": "LLM03",
+      "known_limitations": [
+        "Phase 2B work required before active end-to-end coverage",
+        "Prompt/template overlap or library scaffolding is not counted as active coverage",
+        "unsupported by current CLI as a finding-producing category"
+      ],
+      "mode_breadth": {
+        "kitchen_sink": [
+          "planned model/adapter/plugin/dependency provenance checks"
+        ],
+        "reliable": [
+          "pack and adapter metadata are validated for AI-Scan itself, not the target supply chain"
+        ]
+      },
+      "name": "Supply Chain",
+      "not_applicable_when": [
+        "No supply-chain surface or metadata is available"
+      ],
+      "phase_2b_planned": true,
+      "prerequisites": [
+        "Target exposes supply-chain metadata or operator supplies manifests for offline validation"
+      ],
+      "required_controls": [
+        "Known-good manifest/digest controls"
+      ],
+      "reserved_remediation_id": "ai-scan.owasp.LLM03.remediation",
+      "reserved_report_ids": [
+        "ai-scan.owasp.LLM03.coverage",
+        "ai-scan.owasp.LLM03.evidence"
+      ],
+      "reserved_sarif_rule_id": "ai-scan.owasp.LLM03.rule",
+      "scaffolding_only": true,
+      "supported_scenarios": [
+        {
+          "active_cli": false,
+          "controls": [
+            "Known-good manifest/digest controls"
+          ],
+          "evidence": "Digest/provenance mismatch or vulnerable component evidence from an inspected artifact, not prompt text",
+          "id": "scenario.llm03.reliable",
+          "name": "Reliable Supply Chain scenario slice",
+          "status": "not_tested"
+        },
+        {
+          "active_cli": false,
+          "controls": [
+            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+          ],
+          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
+          "id": "scenario.llm03.kitchen-sink",
+          "name": "Kitchen Sink Supply Chain broader scenario slice",
+          "status": "not_tested"
+        }
+      ],
+      "target_capabilities": [
+        "Model, adapter, pack, plugin, dependency, or manifest provenance is inspectable"
+      ]
+    },
+    {
+      "active_coverage_source": "rag-isolation prompt overlap exists, but poisoning ingestion is not current active end-to-end coverage",
+      "allowed_outcomes": [
+        "not_tested",
+        "blocked",
+        "inconclusive",
+        "not_applicable"
+      ],
+      "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
+      "current_active_cli_coverage": false,
+      "deterministic_evidence": [
+        "Identity-bound poisoned item changes retrieval/model behavior and clean controls remain unaffected"
+      ],
+      "full_coverage_claim_allowed": false,
+      "id": "LLM04",
+      "known_limitations": [
+        "Phase 2B work required before active end-to-end coverage",
+        "Prompt/template overlap or library scaffolding is not counted as active coverage",
+        "unsupported by current CLI as a finding-producing category"
+      ],
+      "mode_breadth": {
+        "kitchen_sink": [
+          "planned dataset/fine-tuning/model provenance poisoning variants"
+        ],
+        "reliable": [
+          "planned controlled RAG/memory poisoning fixtures"
+        ]
+      },
+      "name": "Data and Model Poisoning",
+      "not_applicable_when": [
+        "No ingestion or retrieval/update path is exposed"
+      ],
+      "phase_2b_planned": true,
+      "prerequisites": [
+        "Operator can insert and later query controlled poisoned content in a local fixture"
+      ],
+      "required_controls": [
+        "Clean corpus/memory controls and absence checks"
+      ],
+      "reserved_remediation_id": "ai-scan.owasp.LLM04.remediation",
+      "reserved_report_ids": [
+        "ai-scan.owasp.LLM04.coverage",
+        "ai-scan.owasp.LLM04.evidence"
+      ],
+      "reserved_sarif_rule_id": "ai-scan.owasp.LLM04.rule",
+      "scaffolding_only": true,
+      "supported_scenarios": [
+        {
+          "active_cli": false,
+          "controls": [
+            "Clean corpus/memory controls and absence checks"
+          ],
+          "evidence": "Identity-bound poisoned item changes retrieval/model behavior and clean controls remain unaffected",
+          "id": "scenario.llm04.reliable",
+          "name": "Reliable Data and Model Poisoning scenario slice",
+          "status": "not_tested"
+        },
+        {
+          "active_cli": false,
+          "controls": [
+            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+          ],
+          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
+          "id": "scenario.llm04.kitchen-sink",
+          "name": "Kitchen Sink Data and Model Poisoning broader scenario slice",
+          "status": "not_tested"
+        }
+      ],
+      "target_capabilities": [
+        "Controlled ingestion path for RAG corpus, memory, feedback, dataset, or model-update input"
+      ]
+    },
+    {
+      "active_coverage_source": "no current end-to-end output-sink execution coverage; prompt-only proxies do not count",
+      "allowed_outcomes": [
+        "not_tested",
+        "blocked",
+        "inconclusive",
+        "not_applicable"
+      ],
+      "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
+      "current_active_cli_coverage": false,
+      "deterministic_evidence": [
+        "Typed sink-side effect or parser state change, never just dangerous text"
+      ],
+      "full_coverage_claim_allowed": false,
+      "id": "LLM05",
+      "known_limitations": [
+        "Phase 2B work required before active end-to-end coverage",
+        "Prompt/template overlap or library scaffolding is not counted as active coverage",
+        "unsupported by current CLI as a finding-producing category"
+      ],
+      "mode_breadth": {
+        "kitchen_sink": [
+          "planned additional sink families and parser contexts"
+        ],
+        "reliable": [
+          "planned typed output-sink fixtures"
+        ]
+      },
+      "name": "Improper Output Handling",
+      "not_applicable_when": [
+        "Output is only displayed as inert text or no sink is observable"
+      ],
+      "phase_2b_planned": true,
+      "prerequisites": [
+        "Sink execution/effect can be observed through a local fixture"
+      ],
+      "required_controls": [
+        "Escaped/benign output controls and no-effect controls"
+      ],
+      "reserved_remediation_id": "ai-scan.owasp.LLM05.remediation",
+      "reserved_report_ids": [
+        "ai-scan.owasp.LLM05.coverage",
+        "ai-scan.owasp.LLM05.evidence"
+      ],
+      "reserved_sarif_rule_id": "ai-scan.owasp.LLM05.rule",
+      "scaffolding_only": true,
+      "supported_scenarios": [
+        {
+          "active_cli": false,
+          "controls": [
+            "Escaped/benign output controls and no-effect controls"
+          ],
+          "evidence": "Typed sink-side effect or parser state change, never just dangerous text",
+          "id": "scenario.llm05.reliable",
+          "name": "Reliable Improper Output Handling scenario slice",
+          "status": "not_tested"
+        },
+        {
+          "active_cli": false,
+          "controls": [
+            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+          ],
+          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
+          "id": "scenario.llm05.kitchen-sink",
+          "name": "Kitchen Sink Improper Output Handling broader scenario slice",
+          "status": "not_tested"
+        }
+      ],
+      "target_capabilities": [
+        "Model output reaches an HTML, Markdown, DOM, SQL, shell, template, parser, or similar sink"
+      ]
+    },
+    {
+      "active_coverage_source": "capability-gated tool-abuse packs exist, but they are unreachable through the current public CLI planner with no capability selector and do not count as current public CLI active coverage",
+      "allowed_outcomes": [
+        "not_tested",
+        "blocked",
+        "inconclusive",
+        "not_applicable"
+      ],
+      "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
+      "current_active_cli_coverage": false,
+      "deterministic_evidence": [
+        "Identity-bound tool/action evidence with read-back and cleanup when stateful"
+      ],
+      "full_coverage_claim_allowed": false,
+      "id": "LLM06",
+      "known_limitations": [
+        "Capability-gated tool-abuse packs are unreachable through the current public CLI path because no capability selector is exposed",
+        "Phase 2B work required before active end-to-end coverage",
+        "unsupported by current CLI as a finding-producing category"
+      ],
+      "mode_breadth": {
+        "kitchen_sink": [
+          "additional tool-abuse and multi-step agency variants"
+        ],
+        "reliable": [
+          "tool-abuse reliable pack for bounded agency prompts"
+        ]
+      },
+      "name": "Excessive Agency",
+      "not_applicable_when": [
+        "No tool or agency surface exists"
+      ],
+      "phase_2b_planned": true,
+      "prerequisites": [
+        "Tool/action side effects are bounded, local, observable, and cleanable"
+      ],
+      "required_controls": [
+        "Denied-action, benign-action, and clean-control tool calls"
+      ],
+      "reserved_remediation_id": "ai-scan.owasp.LLM06.remediation",
+      "reserved_report_ids": [
+        "ai-scan.owasp.LLM06.coverage",
+        "ai-scan.owasp.LLM06.evidence"
+      ],
+      "reserved_sarif_rule_id": "ai-scan.owasp.LLM06.rule",
+      "scaffolding_only": true,
+      "supported_scenarios": [
+        {
+          "active_cli": false,
+          "controls": [
+            "Denied-action, benign-action, and clean-control tool calls"
+          ],
+          "evidence": "Identity-bound tool/action evidence with read-back and cleanup when stateful",
+          "id": "scenario.llm06.reliable",
+          "name": "Reliable Excessive Agency scenario slice",
+          "status": "not_tested"
+        },
+        {
+          "active_cli": false,
+          "controls": [
+            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+          ],
+          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
+          "id": "scenario.llm06.kitchen-sink",
+          "name": "Kitchen Sink Excessive Agency broader scenario slice",
+          "status": "not_tested"
+        }
+      ],
+      "target_capabilities": [
+        "Target can call tools, APIs, transactions, or multi-step agent workflows"
+      ]
+    },
+    {
+      "active_coverage_source": "capability-gated/prompt-overlap leakage pack mappings exist, but they are unreachable through the current public CLI planner with no capability selector and do not count as current public CLI active coverage",
+      "allowed_outcomes": [
+        "not_tested",
+        "blocked",
+        "inconclusive",
+        "not_applicable"
+      ],
+      "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
+      "current_active_cli_coverage": false,
+      "deterministic_evidence": [
+        "Exact hidden canary emitted in eligible final assistant text under controls"
+      ],
+      "full_coverage_claim_allowed": false,
+      "id": "LLM07",
+      "known_limitations": [
+        "Capability-gated and prompt-overlap leakage mappings are unreachable through the current public CLI path because no capability selector is exposed",
+        "Phase 2B work required before active end-to-end coverage",
+        "unsupported by current CLI as a finding-producing category"
+      ],
+      "mode_breadth": {
+        "kitchen_sink": [
+          "role-play, encoded, indirect leakage variants where packs exist"
+        ],
+        "reliable": [
+          "system-prompt leakage via controlled canary fixtures"
+        ]
+      },
+      "name": "System Prompt Leakage",
+      "not_applicable_when": [
+        "No hidden/system prompt or equivalent context exists"
+      ],
+      "phase_2b_planned": true,
+      "prerequisites": [
+        "Operator controls the hidden context fixture and can observe final assistant output"
+      ],
+      "required_controls": [
+        "Clean hidden-context controls and refusal/reflection controls"
+      ],
+      "reserved_remediation_id": "ai-scan.owasp.LLM07.remediation",
+      "reserved_report_ids": [
+        "ai-scan.owasp.LLM07.coverage",
+        "ai-scan.owasp.LLM07.evidence"
+      ],
+      "reserved_sarif_rule_id": "ai-scan.owasp.LLM07.rule",
+      "scaffolding_only": true,
+      "supported_scenarios": [
+        {
+          "active_cli": false,
+          "controls": [
+            "Clean hidden-context controls and refusal/reflection controls"
+          ],
+          "evidence": "Exact hidden canary emitted in eligible final assistant text under controls",
+          "id": "scenario.llm07.reliable",
+          "name": "Reliable System Prompt Leakage scenario slice",
+          "status": "not_tested"
+        },
+        {
+          "active_cli": false,
+          "controls": [
+            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+          ],
+          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
+          "id": "scenario.llm07.kitchen-sink",
+          "name": "Kitchen Sink System Prompt Leakage broader scenario slice",
+          "status": "not_tested"
+        }
+      ],
+      "target_capabilities": [
+        "Hidden/system/developer context can be represented by a synthetic canary in a local fixture"
+      ]
+    },
+    {
+      "active_coverage_source": "rag-isolation prompt overlap exists, but vector/embedding behavior is not current active end-to-end coverage",
+      "allowed_outcomes": [
+        "not_tested",
+        "blocked",
+        "inconclusive",
+        "not_applicable"
+      ],
+      "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
+      "current_active_cli_coverage": false,
+      "deterministic_evidence": [
+        "Namespace/provenance violation or controlled retrieval manipulation with deterministic IDs"
+      ],
+      "full_coverage_claim_allowed": false,
+      "id": "LLM08",
+      "known_limitations": [
+        "Phase 2B work required before active end-to-end coverage",
+        "Prompt/template overlap or library scaffolding is not counted as active coverage",
+        "unsupported by current CLI as a finding-producing category"
+      ],
+      "mode_breadth": {
+        "kitchen_sink": [
+          "planned poisoning/inversion/extraction variants"
+        ],
+        "reliable": [
+          "planned namespace isolation and retrieval manipulation fixtures"
+        ]
+      },
+      "name": "Vector and Embedding Weaknesses",
+      "not_applicable_when": [
+        "No vector/embedding/retrieval surface exists"
+      ],
+      "phase_2b_planned": true,
+      "prerequisites": [
+        "Operator can seed/query controlled vector or retrieval fixtures"
+      ],
+      "required_controls": [
+        "Clean namespace and benign retrieval controls"
+      ],
+      "reserved_remediation_id": "ai-scan.owasp.LLM08.remediation",
+      "reserved_report_ids": [
+        "ai-scan.owasp.LLM08.coverage",
+        "ai-scan.owasp.LLM08.evidence"
+      ],
+      "reserved_sarif_rule_id": "ai-scan.owasp.LLM08.rule",
+      "scaffolding_only": true,
+      "supported_scenarios": [
+        {
+          "active_cli": false,
+          "controls": [
+            "Clean namespace and benign retrieval controls"
+          ],
+          "evidence": "Namespace/provenance violation or controlled retrieval manipulation with deterministic IDs",
+          "id": "scenario.llm08.reliable",
+          "name": "Reliable Vector and Embedding Weaknesses scenario slice",
+          "status": "not_tested"
+        },
+        {
+          "active_cli": false,
+          "controls": [
+            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+          ],
+          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
+          "id": "scenario.llm08.kitchen-sink",
+          "name": "Kitchen Sink Vector and Embedding Weaknesses broader scenario slice",
+          "status": "not_tested"
+        }
+      ],
+      "target_capabilities": [
+        "Vector database, embedding index, RAG namespace, retrieval provenance, or embedding endpoint is exposed"
+      ]
+    },
+    {
+      "active_coverage_source": "no current end-to-end misinformation coverage; subjective disagreement is unsupported",
+      "allowed_outcomes": [
+        "not_tested",
+        "blocked",
+        "inconclusive",
+        "not_applicable"
+      ],
+      "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
+      "current_active_cli_coverage": false,
+      "deterministic_evidence": [
+        "Deterministic contradiction to fixture truth/citation requirements with controls"
+      ],
+      "full_coverage_claim_allowed": false,
+      "id": "LLM09",
+      "known_limitations": [
+        "Phase 2B work required before active end-to-end coverage",
+        "Prompt/template overlap or library scaffolding is not counted as active coverage",
+        "unsupported by current CLI as a finding-producing category"
+      ],
+      "mode_breadth": {
+        "kitchen_sink": [
+          "planned calibration and overreliance scenarios"
+        ],
+        "reliable": [
+          "planned grounded truth-set misinformation fixtures"
+        ]
+      },
+      "name": "Misinformation",
+      "not_applicable_when": [
+        "Subjective or unverifiable claims only"
+      ],
+      "phase_2b_planned": true,
+      "prerequisites": [
+        "Objective local truth set and expected citations are available"
+      ],
+      "required_controls": [
+        "Known-true, known-false, and uncertainty controls"
+      ],
+      "reserved_remediation_id": "ai-scan.owasp.LLM09.remediation",
+      "reserved_report_ids": [
+        "ai-scan.owasp.LLM09.coverage",
+        "ai-scan.owasp.LLM09.evidence"
+      ],
+      "reserved_sarif_rule_id": "ai-scan.owasp.LLM09.rule",
+      "scaffolding_only": true,
+      "supported_scenarios": [
+        {
+          "active_cli": false,
+          "controls": [
+            "Known-true, known-false, and uncertainty controls"
+          ],
+          "evidence": "Deterministic contradiction to fixture truth/citation requirements with controls",
+          "id": "scenario.llm09.reliable",
+          "name": "Reliable Misinformation scenario slice",
+          "status": "not_tested"
+        },
+        {
+          "active_cli": false,
+          "controls": [
+            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+          ],
+          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
+          "id": "scenario.llm09.kitchen-sink",
+          "name": "Kitchen Sink Misinformation broader scenario slice",
+          "status": "not_tested"
+        }
+      ],
+      "target_capabilities": [
+        "Target answers against a domain truth set or citation/grounding fixture"
+      ]
+    },
+    {
+      "active_coverage_source": "resource prompts exist as bounded fixtures, but no current active end-to-end unbounded-consumption coverage claim",
+      "allowed_outcomes": [
+        "not_tested",
+        "blocked",
+        "inconclusive",
+        "not_applicable"
+      ],
+      "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
+      "current_active_cli_coverage": false,
+      "deterministic_evidence": [
+        "Budgeted local counter proves bounded amplification without exceeding AI-Scan limits"
+      ],
+      "full_coverage_claim_allowed": false,
+      "id": "LLM10",
+      "known_limitations": [
+        "Phase 2B work required before active end-to-end coverage",
+        "Prompt/template overlap or library scaffolding is not counted as active coverage",
+        "unsupported by current CLI as a finding-producing category"
+      ],
+      "mode_breadth": {
+        "kitchen_sink": [
+          "planned recursion/concurrency/tool-loop amplification variants under local caps"
+        ],
+        "reliable": [
+          "planned bounded token/context/retry fixtures"
+        ]
+      },
+      "name": "Unbounded Consumption",
+      "not_applicable_when": [
+        "No resource-consuming path is accessible or measurable"
+      ],
+      "phase_2b_planned": true,
+      "prerequisites": [
+        "Local budgets and counters can bound and observe resource use"
+      ],
+      "required_controls": [
+        "Normal-cost baseline and capped-resource controls"
+      ],
+      "reserved_remediation_id": "ai-scan.owasp.LLM10.remediation",
+      "reserved_report_ids": [
+        "ai-scan.owasp.LLM10.coverage",
+        "ai-scan.owasp.LLM10.evidence"
+      ],
+      "reserved_sarif_rule_id": "ai-scan.owasp.LLM10.rule",
+      "scaffolding_only": true,
+      "supported_scenarios": [
+        {
+          "active_cli": false,
+          "controls": [
+            "Normal-cost baseline and capped-resource controls"
+          ],
+          "evidence": "Budgeted local counter proves bounded amplification without exceeding AI-Scan limits",
+          "id": "scenario.llm10.reliable",
+          "name": "Reliable Unbounded Consumption scenario slice",
+          "status": "not_tested"
+        },
+        {
+          "active_cli": false,
+          "controls": [
+            "Same scope, budget, redaction, cleanup, and confirmation controls as Reliable"
+          ],
+          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
+          "id": "scenario.llm10.kitchen-sink",
+          "name": "Kitchen Sink Unbounded Consumption broader scenario slice",
+          "status": "not_tested"
+        }
+      ],
+      "target_capabilities": [
+        "Target exposes token, context, recursion, retry, tool-loop, concurrency, or cost-amplification controls"
+      ]
+    }
+  ],
+  "content_sha256": "c94a941a1524d98b906b3105c203e7ae4123642a850e8db95b22eeecec398bfe",
+  "coverage_arithmetic": {
+    "aggregate_full_coverage_claim_allowed": false,
+    "blocked_inconclusive_not_tested_do_not_count_as_tested": true,
+    "denominator_categories": 10,
+    "minimum_active_cli_categories_for_full_claim": 10,
+    "not_applicable_excluded_from_tested_coverage": true,
+    "rule": "Tested coverage is the count of categories with current active CLI wiring, deterministic evidence, and required negative controls. not_applicable is excluded and separately reported; blocked, inconclusive, and not_tested never increase tested coverage. Full/compliant OWASP claims require all ten categories to meet the active evidence contract and are not allowed by this Phase 2A matrix."
+  },
+  "matrix_version": "1.0.0",
+  "schema_version": "owasp-llm-coverage-v1",
+  "standard": "OWASP Top 10 for LLM Applications",
+  "standard_year": 2025
+}

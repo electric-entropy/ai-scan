@@ -43,6 +43,12 @@ from ai_scan.orchestration import (
     run_plan,
     verify_plan_integrity,
 )
+from ai_scan.owasp_llm import (
+    coverage_summary,
+    load_coverage_matrix,
+    matrix_document,
+    render_coverage_summary,
+)
 from ai_scan.packs import (
     PackError,
     PackResolutionError,
@@ -248,6 +254,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="Emit the health report as JSON."
     )
 
+    p_owasp = subparsers.add_parser(
+        "owasp-coverage",
+        help="Show the packaged OWASP LLM 2025 coverage contract offline (no network).",
+    )
+    p_owasp.add_argument(
+        "--format",
+        choices=["summary", "json"],
+        default="summary",
+        help="Render a deterministic summary or the strict machine-readable matrix.",
+    )
+
     return parser
 
 
@@ -289,6 +306,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_replay(args)
     if args.command == "doctor":
         return _cmd_doctor(args)
+    if args.command == "owasp-coverage":
+        return _cmd_owasp_coverage(args)
 
     # Active, network-touching commands. Validate the exact target before any
     # transport is constructed. Requests are confined to this exact target.
@@ -626,12 +645,22 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             raise FileNotFoundError("report.html missing")
         return "present"
 
+    def _owasp_matrix() -> str:
+        matrix = load_coverage_matrix()
+        summary = coverage_summary(matrix)
+        return (
+            f"{summary['active_end_to_end_categories']}/"
+            f"{summary['denominator_categories']} active-cli categories; "
+            "full-claim=false"
+        )
+
     record("metadata", _metadata)
     record("py.typed", _py_typed)
     record("schemas", _schemas)
     record("packs", _packs)
     record("payloads", _payloads)
     record("report-template", _report_template)
+    record("owasp-llm-coverage", _owasp_matrix)
 
     healthy = all(bool(check["ok"]) for check in checks)
     if args.json:
@@ -642,6 +671,20 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             mark = "ok" if check["ok"] else "FAIL"
             print(f"  [{mark}] {check['name']}: {check['detail']}")
     return EXIT_OK if healthy else EXIT_RUNTIME_ERROR
+
+
+def _cmd_owasp_coverage(args: argparse.Namespace) -> int:
+    """Render the packaged OWASP LLM matrix offline; constructs no transport."""
+    try:
+        matrix = load_coverage_matrix()
+        if args.format == "json":
+            print(json.dumps(matrix_document(matrix), indent=2, sort_keys=True, allow_nan=False))
+        else:
+            print(render_coverage_summary(matrix))
+    except Exception as exc:
+        print(f"error: {scrub_text(str(exc))}")
+        return EXIT_RUNTIME_ERROR
+    return EXIT_OK
 
 
 def _load_body_template(args: argparse.Namespace) -> str:

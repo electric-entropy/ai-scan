@@ -49,6 +49,25 @@ def test_sarif_excludes_leads_by_default() -> None:
     assert with_leads["runs"][0]["results"][0]["level"] == "warning"
 
 
+def test_current_reports_do_not_emit_reserved_owasp_matrix_integrations() -> None:
+    doc = report_document(_report("executed {canary}"))
+    assert doc["remediation"] == []
+    assert doc["framework_mappings"] == []
+    rendered = json.dumps(doc, sort_keys=True)
+    assert "ai-scan.owasp.LLM01" not in rendered
+
+
+def test_current_sarif_uses_family_rules_not_reserved_owasp_rule_ids() -> None:
+    sarif = sarif_document(_report("executed {canary}"), include_leads=True)
+    rendered = json.dumps(sarif, sort_keys=True)
+    assert "ai-scan.owasp.LLM01" not in rendered
+    assert any(
+        str(result["ruleId"]).startswith("ai-scan.")
+        and not str(result["ruleId"]).startswith("ai-scan.owasp.")
+        for result in sarif["runs"][0]["results"]
+    )
+
+
 def test_text_formats_are_secret_free_and_html_has_no_active_content() -> None:
     report = _report("executed {canary}")
     outputs = [

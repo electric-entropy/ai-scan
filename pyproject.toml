@@ -47,6 +47,7 @@ ai_scan = [
     "payloads/*.json",
     "schemas/*.schema.json",
     "packs/builtin/*.json",
+    "owasp/*.json",
     "reporting/templates/*.html",
     "py.typed",
 ]

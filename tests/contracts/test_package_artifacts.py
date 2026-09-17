@@ -34,6 +34,7 @@ EXPECTED_DATA = [
     "packs/builtin/indirect-injection-kitchen-v1.json",
     "packs/builtin/rag-isolation-reliable-v1.json",
     "packs/builtin/rag-isolation-kitchen-v1.json",
+    "owasp/llm-top10-2025-v1.json",
     "reporting/templates/report.html",
 ]
 EXPECTED_SDIST_FILES = [
@@ -44,6 +45,7 @@ EXPECTED_SDIST_FILES = [
     "docs/operator-guide.md",
     "docs/pack-authoring.md",
     "docs/evidence-and-retention.md",
+    "docs/owasp-llm-coverage.md",
     "docs/threat-model.md",
 ]
 # Phase D contract change: tests are intentionally no longer shipped in the sdist

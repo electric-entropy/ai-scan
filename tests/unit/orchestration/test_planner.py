@@ -14,6 +14,7 @@ from ai_scan.orchestration import (
     plan_to_dict,
 )
 from ai_scan.orchestration.scheduler import schedule
+from ai_scan.packs import load_builtin_pack
 from ai_scan.packs.signatures import compute_digest
 from ai_scan.targets import normalize_target
 
@@ -30,6 +31,30 @@ def test_compile_plan_is_offline_and_deterministic() -> None:
     assert first.control_cases()
     assert first.attack_cases()
     assert load_plan(plan_to_dict(first)) == first
+
+
+def _executable_owasp_categories(plan) -> set[str]:  # type: ignore[no-untyped-def]
+    categories: set[str] = set()
+    for pack_id, _version, _digest in plan.packs:
+        pack = load_builtin_pack(pack_id)
+        categories.update(pack.mappings.get("owasp-llm", ()))
+    return categories
+
+
+def test_public_planner_executable_owasp_categories_match_current_cli_wiring() -> None:
+    target = normalize_target("http://127.0.0.1:8080/chat")
+
+    reliable = compile_plan(target, "reliable")
+    kitchen_sink = compile_plan(target, "kitchen-sink")
+
+    assert _executable_owasp_categories(reliable) == {"LLM01"}
+    assert _executable_owasp_categories(kitchen_sink) == {"LLM01"}
+    assert all(
+        "LLM06" not in _executable_owasp_categories(plan) for plan in (reliable, kitchen_sink)
+    )
+    assert all(
+        "LLM07" not in _executable_owasp_categories(plan) for plan in (reliable, kitchen_sink)
+    )
 
 
 def test_reliable_schedule_is_serial_sorted() -> None:

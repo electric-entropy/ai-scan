@@ -53,11 +53,12 @@ ai-scan bundle           validate|replay --file bundle.json
 ai-scan replay           --bundle bundle.json --validate-only
 ai-scan validate-config  --kind KIND --file doc.json
 ai-scan doctor           [--json]
+ai-scan owasp-coverage   [--format summary|json]
 ```
 
 `bundle validate|replay`, the top-level `replay`, `report`, `baseline`,
-`validate-config`, `packs`, `adapters`, and `doctor` are all **offline** — they
-construct no transport and touch no network.
+`validate-config`, `packs`, `adapters`, `doctor`, and `owasp-coverage` are all
+**offline** — they construct no transport and touch no network.
 
 Active commands (`fingerprint`, `inject`, `assess`, `run`) run **unattended** —
 you point them at a `--target` and they run, so they can be launched and left to
@@ -129,9 +130,23 @@ any tamper (digest mismatch, altered prompt/proof, inflated trial counts, unknow
 fields) fails closed with a scrubbed, non-zero error.
 
 **Offline `doctor`.** `ai-scan doctor` validates the packaged schemas, builtin
-packs, `py.typed`, and version/license metadata via `importlib.resources`,
-constructs no transport, needs no target, and exits `0` with a concise
-health summary (`--json` for machine-readable output).
+packs, OWASP LLM coverage matrix, `py.typed`, and version/license metadata via
+`importlib.resources`, constructs no transport, needs no target, and exits `0`
+with a concise health summary (`--json` for machine-readable output).
+
+**OWASP LLM 2025 coverage contract.** `ai-scan owasp-coverage` renders the
+packaged, versioned applicability/evidence matrix for OWASP Top 10 for LLM
+Applications 2025 (LLM01-LLM10). The matrix is a truthful contract, not a scan
+result: it distinguishes current active CLI coverage from scaffolding, prompt
+overlap, planned Phase 2B work, and unsupported scenarios. It explicitly does
+not claim full OWASP coverage or OWASP compliance. AI-Scan does not claim full
+OWASP coverage from this Phase 2A matrix; see
+[`docs/owasp-llm-coverage.md`](docs/owasp-llm-coverage.md).
+The current active public `plan`/`run` OWASP category is LLM01 only; LLM06 and
+LLM07 pack mappings are capability-gated/unreachable without a public capability
+selector and do not count as active end-to-end CLI coverage. Matrix identifiers
+for remediation/report/SARIF are reserved contract identifiers for future
+integration, not values emitted by the current report or SARIF renderers.
 
 **Named-host HTTPS limitation.** AI-Scan currently fails closed for named-host
 HTTPS targets. Vetted-IP connection with preserved SNI and certificate hostname

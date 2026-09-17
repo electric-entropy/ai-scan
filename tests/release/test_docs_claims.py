@@ -6,11 +6,15 @@ from pathlib import Path
 
 import pytest
 
+from ai_scan.orchestration import compile_plan
+from ai_scan.targets import normalize_target
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DOCS = _REPO_ROOT / "docs"
 _OPERATOR = _DOCS / "operator-guide.md"
 _EVIDENCE = _DOCS / "evidence-and-retention.md"
 _README = _REPO_ROOT / "README.md"
+_OWASP_COVERAGE = _DOCS / "owasp-llm-coverage.md"
 
 # Operator-facing docs must not imply current cryptographic signing.
 _OPERATOR_FACING = [_OPERATOR, _EVIDENCE, _README]
@@ -74,7 +78,44 @@ def test_docs_document_shipped_contents() -> None:
     combined = "\n".join(_text(p).lower() for p in (_README, _OPERATOR, _EVIDENCE))
     assert "py.typed" in combined
     assert "schemas" in combined and "packs" in combined
+    assert "owasp llm coverage matrix" in combined or "owasp top 10" in combined
     assert "tests are not shipped" in combined or "not shipped in the sdist" in combined
+
+
+def test_docs_block_full_owasp_coverage_or_compliance_claims() -> None:
+    raw = "\n".join(_text(p).lower() for p in (_README, _OPERATOR, _EVIDENCE))
+    combined = " ".join(raw.split())
+    assert "does not claim full owasp coverage" in combined
+    assert "does not claim" in combined and "owasp compliance" in combined
+    forbidden = (
+        "full owasp coverage is supported",
+        "owasp compliant",
+        "owasp compliance certified",
+        "comprehensive llm01-llm10 testing",
+    )
+    for phrase in forbidden:
+        assert phrase not in combined, phrase
+
+
+def test_owasp_docs_describe_current_mode_breadth_and_limits_truthfully() -> None:
+    target = normalize_target("http://127.0.0.1:8080/chat")
+    reliable = compile_plan(target, "reliable")
+    kitchen_sink = compile_plan(target, "kitchen-sink")
+    normalized = " ".join(_text(_OWASP_COVERAGE).split()).lower()
+
+    assert reliable.packs == kitchen_sink.packs
+    assert [case.case_id for case in reliable.cases] == [
+        case.case_id for case in kitchen_sink.cases
+    ]
+    assert reliable.limits != kitchen_sink.limits
+    assert "same owasp llm01 breadth" in normalized
+    assert "modes may use different bounded operational limits" in normalized
+    assert "both remain subject to scope" in normalized
+    assert "request/rate/concurrency/duration ceilings" in normalized
+    assert "redaction, cleanup, evidence, and confirmed-semantics safety controls" in normalized
+    assert "differ only in scenario breadth" not in normalized
+    assert "never change budgets" not in normalized
+    assert "budgets are identical" not in normalized
 
 
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"
