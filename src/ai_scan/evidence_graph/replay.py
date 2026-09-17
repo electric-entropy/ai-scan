@@ -69,6 +69,7 @@ def replay_bundle(source: str | bytes | Bundle) -> ReplayResult:
 
     content = bundle.content
     canary = str(content["canary"])
+    disclosure_marker = content.get("disclosure_marker")
     records = content["records"]
     try:
         verified = verify_records(
@@ -90,6 +91,7 @@ def replay_bundle(source: str | bytes | Bundle) -> ReplayResult:
                 )
                 for r in records
             ],
+            str(disclosure_marker) if disclosure_marker is not None else None,
         )
     except EvidenceError as exc:
         raise ReplayError(f"replayed evidence does not match the bundle: {exc}") from exc

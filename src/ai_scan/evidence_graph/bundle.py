@@ -58,6 +58,7 @@ _TOP_LEVEL_KEYS = frozenset(
         "plan_digest",
         "checkpoint",
         "canary",
+        "disclosure_marker",
         "control_results",
         "coverage_gaps",
         "request_count",
@@ -235,6 +236,7 @@ def build_bundle(
     plan: Plan,
     records: Sequence[CaseRecord],
     canary: str,
+    disclosure_marker: str | None = None,
     run_id: str,
     checkpoint_digest: str | None = None,
     checkpoint_state: str | None = None,
@@ -269,17 +271,26 @@ def build_bundle(
             else None
         ),
         "canary": canary,
+        "disclosure_marker": disclosure_marker,
         "coverage_gaps": list(coverage_gaps),
         "records": [r.to_dict() for r in records],
     }
     secrets = frozenset(known_secrets).union(*(r.known_secrets for r in records))
+    if disclosure_marker is not None and disclosure_marker != canary:
+        secrets = secrets | {disclosure_marker}
     # Scrub BEFORE deriving and digesting, so the digest seals — and replay
     # re-derives from — exactly the redacted evidence that is exported.
     scrubbed: dict[str, Any] = scrub_structure(content, secrets)
     try:
         packs = resolve_plan_packs(plan)
         evidence = _case_evidence(scrubbed["records"])
-        verified = derive_records(plan, packs, scrubbed["canary"], evidence)
+        verified = derive_records(
+            plan,
+            packs,
+            scrubbed["canary"],
+            evidence,
+            scrubbed.get("disclosure_marker") or None,
+        )
     except (EvidenceError, KeyError, TypeError) as exc:
         raise BundleError(f"run evidence does not satisfy the evidence contract: {exc}") from exc
     for record in scrubbed["records"]:
@@ -342,6 +353,7 @@ class BundleCollector:
         *,
         plan: Plan,
         canary: str,
+        disclosure_marker: str | None = None,
         run_id: str,
         coverage_gaps: Sequence[str] = (),
         provenance: Mapping[str, str] | None = None,
@@ -351,6 +363,7 @@ class BundleCollector:
             plan=plan,
             records=self._records,
             canary=canary,
+            disclosure_marker=disclosure_marker,
             run_id=run_id,
             coverage_gaps=coverage_gaps,
             provenance=provenance,
@@ -413,6 +426,9 @@ def load_bundle(text: str) -> Bundle:
     canary = data.get("canary")
     if not isinstance(canary, str) or not canary:
         raise BundleError("bundle canary is malformed")
+    disclosure_marker = data.get("disclosure_marker")
+    if disclosure_marker is not None and not isinstance(disclosure_marker, str):
+        raise BundleError("bundle disclosure_marker is malformed")
     _validate_coverage_gaps(data.get("coverage_gaps"))
     _validate_checkpoint_ref(data.get("checkpoint"))
 
@@ -421,7 +437,11 @@ def load_bundle(text: str) -> Bundle:
     records = _validate_records(data.get("records"))
     try:
         verified = verify_records(
-            plan, resolve_plan_packs(plan), canary, _case_evidence(records)
+            plan,
+            resolve_plan_packs(plan),
+            canary,
+            _case_evidence(records),
+            disclosure_marker,
         )
     except EvidenceError as exc:
         raise BundleError(f"bundle evidence is invalid: {exc}") from exc

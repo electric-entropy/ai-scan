@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
+import stat
 import sys
 from collections.abc import Callable, Sequence
 
@@ -151,6 +154,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         help="Model id for a provider adapter (required when the plan's adapter is a "
         "JSON provider such as ollama/openai_compatible/anthropic/gemini).",
+    )
+    p_run.add_argument(
+        "--synthetic-canary-file",
+        help=(
+            "Read a pre-provisioned synthetic LLM02 marker from a local file. "
+            "The marker is never placed in the plan or command line; use only "
+            "with a controlled target fixture seeded out-of-band."
+        ),
     )
 
     p_validate_config = subparsers.add_parser(
@@ -709,6 +720,53 @@ _DEFAULT_MIN_INTERVAL = 0.05
 # preserves the historical command shape while preventing unbounded transport,
 # extraction, and classification work.
 _DEFAULT_MAX_DURATION_SECONDS = 300.0
+_SYNTHETIC_CANARY_RE = re.compile(r"^AISCAN-[0-9A-F]{16,64}$")
+_SYNTHETIC_CANARY_MAX_BYTES = len("AISCAN-") + 64 + 1
+
+
+def _load_synthetic_canary(path: str | None) -> str | None:
+    if path is None:
+        return None
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError("synthetic canary file could not be opened safely") from exc
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("synthetic canary file must be a regular file")
+        if info.st_size > _SYNTHETIC_CANARY_MAX_BYTES:
+            raise ValueError("synthetic canary file is too large")
+        chunks = bytearray()
+        while True:
+            chunk = os.read(fd, _SYNTHETIC_CANARY_MAX_BYTES + 1 - len(chunks))
+            if not chunk:
+                break
+            chunks.extend(chunk)
+            if len(chunks) > _SYNTHETIC_CANARY_MAX_BYTES:
+                raise ValueError("synthetic canary file is too large")
+        try:
+            text = bytes(chunks).decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise ValueError("synthetic canary file must be ASCII") from exc
+    finally:
+        os.close(fd)
+    if text.endswith("\n"):
+        text = text[:-1]
+    if "\n" in text or "\r" in text:
+        raise ValueError("synthetic canary file must contain one marker line")
+    marker = text
+    if not _SYNTHETIC_CANARY_RE.fullmatch(marker):
+        raise ValueError(
+            "synthetic canary file must contain exactly one AISCAN- uppercase hex marker"
+        )
+    return marker
 
 
 def _make_transport(controller: RequestController) -> Transport:
@@ -774,6 +832,8 @@ def _run_plan_active(
     # Reject a re-digested/tampered plan (widened limits, altered cases, swapped
     # packs, unknown adapter) before any transport is constructed.
     verify_plan_integrity(plan)
+    prompt_canary = generate_canary()
+    disclosure_marker = _load_synthetic_canary(getattr(args, "synthetic_canary_file", None))
     body_template = _load_body_template(args)
     # Build the adapter the plan selected (e.g. ollama) BEFORE transport, so a
     # provider adapter's assistant-content extraction is what feeds confirmation.
@@ -787,7 +847,16 @@ def _run_plan_active(
     transport = _make_transport(controller)
     evidence: list[dict[str, object]] = []
     run_secrets: set[str] = set()
-    canary = generate_canary()
+    run_secrets.add(prompt_canary)
+    if disclosure_marker is not None and disclosure_marker != prompt_canary:
+        run_secrets.add(disclosure_marker)
+
+    def outcome_secrets(resp_secrets: frozenset[str]) -> frozenset[str]:
+        secrets = set(resp_secrets)
+        secrets.add(prompt_canary)
+        if disclosure_marker is not None:
+            secrets.add(disclosure_marker)
+        return frozenset(secrets)
 
     def responder(case: InjectionCase) -> ExchangeOutcome:
         try:
@@ -804,14 +873,21 @@ def _run_plan_active(
             # A provider error, request echo, truncated or unsupported shape is
             # not model output: the exchange is unusable (inconclusive) evidence.
             return ExchangeOutcome(
-                body="", status=resp.status, transport_ok=False, attempts=resp.attempts,
-                known_secrets=resp.known_secrets,
+                body="",
+                status=resp.status,
+                transport_ok=False,
+                attempts=resp.attempts,
+                known_secrets=outcome_secrets(resp.known_secrets),
             )
         if _deadline_passed(controller):
             # Extraction crossed the absolute deadline: this result is unusable
             # (inconclusive) and must not be able to confirm.
             return ExchangeOutcome(
-                body="", status=resp.status, transport_ok=False, attempts=resp.attempts
+                body="",
+                status=resp.status,
+                transport_ok=False,
+                attempts=resp.attempts,
+                known_secrets=outcome_secrets(resp.known_secrets),
             )
         return ExchangeOutcome(
             body=body,
@@ -820,13 +896,14 @@ def _run_plan_active(
             truncated=resp.truncated,
             transport_ok=True,
             attempts=resp.attempts,
-            known_secrets=resp.known_secrets,
+            known_secrets=outcome_secrets(resp.known_secrets),
         )
 
     result = run_plan(
         plan,
         responder,
-        canary=canary,
+        canary=prompt_canary,
+        disclosure_marker=disclosure_marker,
         goal="planned run",
         checkpoint_path=getattr(args, "checkpoint", None),
         expected_plan_digest=plan.digest,
@@ -841,7 +918,7 @@ def _run_plan_active(
         target=target,
         fingerprint=None,
         injection=InjectionResult(
-            result.status, list(result.findings), result.request_count, canary
+            result.status, list(result.findings), result.request_count, prompt_canary
         ),
         request_budget=budget,
         evidence=evidence,

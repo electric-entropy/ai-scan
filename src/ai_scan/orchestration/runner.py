@@ -38,6 +38,7 @@ from ai_scan.orchestration.evidence import (
     CONTROL_STATUS,
     derive_attack,
     derive_control,
+    disclosure_semantic,
     family_key,
     rendered_prompt,
     trial_from_dict,
@@ -107,6 +108,7 @@ def run_plan(
     responder: Responder,
     *,
     canary: str,
+    disclosure_marker: str | None = None,
     goal: str = "",
     checkpoint_path: str | None = None,
     expected_plan_digest: str | None = None,
@@ -123,7 +125,7 @@ def run_plan(
         raise PlanError("plan digest does not match the expected plan")
 
     packs = _resolve_plan_packs(plan)
-    checkpoint = _initial_checkpoint(plan, checkpoint_path)
+    checkpoint = _initial_checkpoint(plan, checkpoint_path, disclosure_marker=disclosure_marker)
     # A resumed checkpoint carries the original canary; reuse it so rendered
     # prompts stay consistent with the already-completed (plan-bound) records.
     canary = checkpoint.canary or canary
@@ -131,6 +133,8 @@ def run_plan(
     # Reflected/known secrets observed across the run, threaded into every
     # checkpoint write so persisted proof/prompt state is redacted on disk.
     run_secrets: set[str] = set()
+    if disclosure_marker is not None and disclosure_marker != canary:
+        run_secrets.add(disclosure_marker)
     checkpoint.state = RunState.VALIDATED.value
     _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
 
@@ -145,9 +149,11 @@ def run_plan(
     for case_id, record in checkpoint.completed.items():
         if record.get("kind") == "control":
             trials = [trial_from_dict(t) for t in record["trials"]]
-            key = family_key(plan_cases[case_id])
+            case = plan_cases[case_id]
+            key = family_key(case)
             control_results[key] = merge_control_results(
-                control_results.get(key), derive_control(plan, trials, canary)
+                control_results.get(key),
+                derive_control(plan, case, packs[case.pack_id], trials, canary, disclosure_marker),
             )
     checkpoint.control_results = dict(control_results)
     # M3: a prior in-flight attempt was physically issued (already counted) but its
@@ -175,14 +181,26 @@ def run_plan(
         for case in plan.control_cases():
             if case.case_id in completed:
                 continue
+            if _requires_explicit_marker(packs[case.pack_id], case, disclosure_marker):
+                coverage_gaps.append(f"{case.case_id}: LLM02 disclosure marker not supplied")
+                family = family_key(case)
+                control_results[family] = merge_control_results(
+                    control_results.get(family), CONTROL_GAP
+                )
+                checkpoint.control_results = dict(control_results)
+                checkpoint.progress.pop(case.case_id, None)
+                continue
             outcomes = _run_trials(
                 case, responder, canary, min_control_trials,
                 checkpoint, plan, run_secrets, checkpoint_path,
+                pack=packs[case.pack_id], disclosure_marker=disclosure_marker,
             )
             if not outcomes:
                 coverage_gaps.append(f"{case.case_id}: control coverage incomplete")
                 continue
-            result = derive_control(plan, outcomes, canary)
+            result = derive_control(
+                plan, case, packs[case.pack_id], outcomes, canary, disclosure_marker
+            )
             status = CONTROL_STATUS[result]
             if result == CONTROL_GAP:
                 coverage_gaps.append(f"{case.case_id}: control coverage incomplete")
@@ -208,9 +226,16 @@ def run_plan(
         for case in schedule(plan).order:
             if case.case_id in completed:
                 continue
+            if _requires_explicit_marker(packs[case.pack_id], case, disclosure_marker):
+                coverage_gaps.append(f"{case.case_id}: LLM02 disclosure marker not supplied")
+                finding = _inconclusive_disclosure_finding(case, canary)
+                findings.append(finding)
+                checkpoint.progress.pop(case.case_id, None)
+                continue
             outcomes = _run_trials(
                 case, responder, canary, min_attack_trials,
                 checkpoint, plan, run_secrets, checkpoint_path,
+                pack=packs[case.pack_id], disclosure_marker=disclosure_marker,
             )
             if not outcomes:
                 coverage_gaps.append(f"{case.case_id}: budget exhausted")
@@ -219,6 +244,7 @@ def run_plan(
                 plan, case, outcomes, canary,
                 pack=packs[case.pack_id],
                 control=control_results.get(family_key(case)),
+                disclosure_marker=disclosure_marker,
             )
             findings.append(finding)
             checkpoint.completed[case.case_id] = _record_from_finding(finding, kind="attack")
@@ -275,11 +301,18 @@ def _resolve_plan_packs(plan: Plan) -> dict[str, Pack]:
     return resolved
 
 
-def _initial_checkpoint(plan: Plan, checkpoint_path: str | None) -> Checkpoint:
+def _initial_checkpoint(
+    plan: Plan, checkpoint_path: str | None, *, disclosure_marker: str | None = None
+) -> Checkpoint:
     if checkpoint_path is None:
         return Checkpoint(plan_digest=plan.digest, state=RunState.PLANNED.value)
     try:
-        return load_checkpoint(checkpoint_path, expected_plan_digest=plan.digest, plan=plan)
+        return load_checkpoint(
+            checkpoint_path,
+            expected_plan_digest=plan.digest,
+            plan=plan,
+            disclosure_marker=disclosure_marker,
+        )
     except FileNotFoundError:
         return Checkpoint(plan_digest=plan.digest, state=RunState.PLANNED.value)
 
@@ -333,6 +366,9 @@ def _run_trials(
     plan: Plan,
     run_secrets: set[str],
     checkpoint_path: str | None,
+    *,
+    pack: Pack,
+    disclosure_marker: str | None,
 ) -> list[ExchangeOutcome]:
     """Run up to ``trials`` physical attempts for one case, write-ahead accounted.
 
@@ -354,6 +390,17 @@ def _run_trials(
         checkpoint.request_count += 1
         _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
         outcome = _send(case, responder, canary)
+        if disclosure_marker is not None and _requires_semantic(pack, case):
+            outcome = ExchangeOutcome(
+                body=outcome.body,
+                status=outcome.status,
+                redirected=outcome.redirected,
+                truncated=outcome.truncated,
+                transport_ok=outcome.transport_ok,
+                attempts=outcome.attempts,
+                known_secrets=outcome.known_secrets,
+                semantic=disclosure_semantic(plan, case, disclosure_marker, outcome.body),
+            )
         run_secrets.update(outcome.known_secrets)
         try:
             attempts = physical_attempts(outcome)
@@ -388,6 +435,33 @@ def _run_trials(
     return outcomes
 
 
+def _requires_semantic(pack: Pack, case: PlannedCase) -> bool:
+    categories = frozenset(pack.mappings.get("owasp-llm", ()))
+    return (
+        case.family.startswith("prompt_disclosure")
+        and "LLM02" in categories
+        and "LLM01" not in categories
+    )
+
+
+def _requires_explicit_marker(
+    pack: Pack, case: PlannedCase, disclosure_marker: str | None
+) -> bool:
+    return disclosure_marker is None and _requires_semantic(pack, case)
+
+
+def _inconclusive_disclosure_finding(case: PlannedCase, canary: str) -> InjectionFinding:
+    return InjectionFinding(
+        case.family,
+        InjectionStatus.INCONCLUSIVE,
+        rendered_prompt(case, canary),
+        None,
+        attack_trials=0,
+        successes=0,
+        evidence=(),
+    )
+
+
 def _classify_case(
     plan: Plan,
     case: PlannedCase,
@@ -396,6 +470,7 @@ def _classify_case(
     *,
     pack: Pack,
     control: str | None,
+    disclosure_marker: str | None,
 ) -> tuple[InjectionFinding, ExchangeOutcome]:
     """Classify one attack case's repeated trials through the evidence contract.
 
@@ -403,7 +478,9 @@ def _classify_case(
     requires a matched clean control to reach ``confirmed``. Returns the finding
     (carrying its counts and every trial outcome) plus the representative outcome.
     """
-    derived, representative = derive_attack(plan, case, pack, outcomes, canary, control)
+    derived, representative = derive_attack(
+        plan, case, pack, outcomes, canary, disclosure_marker, control
+    )
     finding = InjectionFinding(
         case.family, derived.status, rendered_prompt(case, canary), derived.proof,
         attack_trials=derived.attack_trials, successes=derived.successes,

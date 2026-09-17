@@ -149,7 +149,11 @@ def write_checkpoint_atomic(
 
 
 def load_checkpoint(
-    path: str, *, expected_plan_digest: str, plan: object | None = None
+    path: str,
+    *,
+    expected_plan_digest: str,
+    plan: object | None = None,
+    disclosure_marker: str | None = None,
 ) -> Checkpoint:
     """Load and verify a checkpoint, failing closed on tamper / plan mismatch.
 
@@ -209,11 +213,13 @@ def load_checkpoint(
     except (KeyError, TypeError, ValueError, CheckpointError) as exc:
         raise CheckpointError("malformed checkpoint") from exc
     if plan is not None:
-        _bind_completed_to_plan(checkpoint, plan)
+        _bind_completed_to_plan(checkpoint, plan, disclosure_marker=disclosure_marker)
     return checkpoint
 
 
-def _bind_completed_to_plan(checkpoint: Checkpoint, plan: object) -> None:
+def _bind_completed_to_plan(
+    checkpoint: Checkpoint, plan: object, *, disclosure_marker: str | None = None
+) -> None:
     """Reject any completed record not derivable from the verified plan.
 
     Each record's case must exist in the plan with a matching family/kind and the
@@ -233,6 +239,9 @@ def _bind_completed_to_plan(checkpoint: Checkpoint, plan: object) -> None:
     )
 
     plan_cases = {c.case_id: c for c in plan.cases}  # type: ignore[attr-defined]
+    from ai_scan.orchestration.planner import Plan
+
+    typed_plan = cast(Plan, plan)
     # Prefer the stored canary; fall back to deriving it from the completed
     # records themselves so a legacy checkpoint (written before the canary field)
     # still binds and resumes rather than being rejected as non-plan-derived.
@@ -272,7 +281,11 @@ def _bind_completed_to_plan(checkpoint: Checkpoint, plan: object) -> None:
     if evidence:
         try:
             verified = verify_records(
-                plan, resolve_plan_packs(plan), canary, evidence  # type: ignore[arg-type]
+                typed_plan,
+                resolve_plan_packs(typed_plan),
+                canary,
+                evidence,
+                disclosure_marker,
             )
         except EvidenceError as exc:
             raise CheckpointError(f"completed record evidence is invalid: {exc}") from exc
@@ -287,9 +300,6 @@ def _bind_completed_to_plan(checkpoint: Checkpoint, plan: object) -> None:
     # the cumulative physical count to cover every persisted attempt (no reset /
     # undercount). progress trials are budget-bounded exactly like completed ones.
     from ai_scan.orchestration.evidence import rendered_prompt, trial_ceiling, trials_from_list
-    from ai_scan.orchestration.planner import Plan
-
-    typed_plan = cast(Plan, plan)
     budget = typed_plan.limits.max_physical_requests
     progress_physical = 0
     for case_id, record in checkpoint.progress.items():

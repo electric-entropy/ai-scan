@@ -90,13 +90,13 @@ def test_resume_does_not_repeat_completed_physical_attempt(tmp_path) -> None:
         plan, responder, canary="AISCAN-X", goal="", checkpoint_path=str(checkpoint_path)
     )
 
-    assert result.state is RunState.COMPLETED
+    assert result.state is RunState.COMPLETED_WITH_GAPS
     assert first_attack.template not in seen
     assert any(f.status.value == "confirmed" for f in result.findings)
     # Completed controls and the completed attack are not re-run; the remaining
     # attacks run min_attack_trials each on top of the persisted request count.
     min_a, _, _min_c = plan.trial_policy
-    attacks = plan.attack_cases()
+    attacks = [c for c in plan.attack_cases() if not c.family.startswith("prompt_disclosure")]
     assert result.request_count == kept + (len(attacks) - 1) * min_a
 
 
@@ -110,7 +110,7 @@ def test_control_canary_blocks_confirmation(tmp_path) -> None:
         plan, responder, canary="AISCAN-X", goal="", checkpoint_path=str(tmp_path / "r.ckpt")
     )
 
-    assert result.state is RunState.COMPLETED
+    assert result.state is RunState.COMPLETED_WITH_GAPS
     assert result.findings
     # A control that emits the canary poisons the family baseline: attacks are
     # capped at 'suspected' (7-state preserved, never collapsed to 'potential').
@@ -143,7 +143,7 @@ def test_kitchen_sink_llm01_cases_execute_through_plan_with_clean_controls(tmp_p
         plan, responder, canary="AISCAN-X", goal="", checkpoint_path=str(tmp_path / "k.ckpt")
     )
 
-    assert result.state is RunState.COMPLETED
+    assert result.state is RunState.COMPLETED_WITH_GAPS
     assert result.status.value == "confirmed"
     assert kitchen_families <= set(seen)
     assert sent_attacks
@@ -154,8 +154,12 @@ def test_kitchen_sink_llm01_cases_execute_through_plan_with_clean_controls(tmp_p
     assert kitchen_families <= {
         finding.family for finding in result.findings if finding.status.value == "confirmed"
     }
-    attacks = len(plan.attack_cases()) * plan.trial_policy[0]
-    controls = len(plan.control_cases()) * plan.trial_policy[2]
+    attacks = sum(
+        not c.family.startswith("prompt_disclosure") for c in plan.attack_cases()
+    ) * plan.trial_policy[0]
+    controls = sum(
+        not c.family.startswith("prompt_disclosure") for c in plan.control_cases()
+    ) * plan.trial_policy[2]
     assert result.request_count == attacks + controls
 
 
@@ -183,7 +187,7 @@ def test_kitchen_sink_refusal_or_reflection_only_cannot_confirm(body: str, tmp_p
         plan, responder, canary="AISCAN-X", goal="", checkpoint_path=str(tmp_path / "k.ckpt")
     )
 
-    assert result.state is RunState.COMPLETED
+    assert result.state is RunState.COMPLETED_WITH_GAPS
     assert result.status.value != "confirmed"
     assert all(f.status.value != "confirmed" for f in result.findings)
     assert sent_attacks
@@ -191,8 +195,12 @@ def test_kitchen_sink_refusal_or_reflection_only_cannot_confirm(body: str, tmp_p
     assert all("AISCAN-X" in prompt for prompt in sent_attacks)
     assert all("{canary}" not in prompt for prompt in sent_attacks)
     assert all("AISCAN-X" not in prompt and "{canary}" not in prompt for prompt in sent_controls)
-    attacks = len(plan.attack_cases()) * plan.trial_policy[0]
-    controls = len(plan.control_cases()) * plan.trial_policy[2]
+    attacks = sum(
+        not c.family.startswith("prompt_disclosure") for c in plan.attack_cases()
+    ) * plan.trial_policy[0]
+    controls = sum(
+        not c.family.startswith("prompt_disclosure") for c in plan.control_cases()
+    ) * plan.trial_policy[2]
     assert result.request_count == attacks + controls
 
 

@@ -22,7 +22,8 @@ def test_replay_reproduces_confirmed_findings() -> None:
     result = replay_bundle(sample_bundle_text())
     assert result.verified
     assert result.findings
-    assert all(status == "confirmed" for status in result.findings.values())
+    assert "confirmed" in set(result.findings.values())
+    assert set(result.findings.values()) <= {"confirmed", "not_observed"}
     assert result.canary == CANARY
 
 
@@ -55,7 +56,8 @@ def test_sufficient_trial_metadata_replay_verifies_confirmed() -> None:
         assert record["finding"]["attack_trials"] >= 3
         assert record["finding"]["successes"] >= 2
     result = replay_bundle(sample_bundle_text())
-    assert all(status == "confirmed" for status in result.findings.values())
+    assert "confirmed" in set(result.findings.values())
+    assert set(result.findings.values()) <= {"confirmed", "not_observed"}
 
 
 def test_replay_constructs_no_transport(monkeypatch) -> None:

@@ -47,8 +47,8 @@ def test_public_planner_executable_owasp_categories_match_current_cli_wiring() -
     reliable = compile_plan(target, "reliable")
     kitchen_sink = compile_plan(target, "kitchen-sink")
 
-    assert _executable_owasp_categories(reliable) == {"LLM01"}
-    assert _executable_owasp_categories(kitchen_sink) == {"LLM01"}
+    assert _executable_owasp_categories(reliable) == {"LLM01", "LLM02"}
+    assert _executable_owasp_categories(kitchen_sink) == {"LLM01", "LLM02"}
     assert all(
         "LLM06" not in _executable_owasp_categories(plan) for plan in (reliable, kitchen_sink)
     )
@@ -64,14 +64,17 @@ def test_public_kitchen_sink_plan_adds_real_llm01_direct_injection_breadth() -> 
     kitchen_sink = compile_plan(target, "kitchen-sink")
 
     assert {pack_id for pack_id, _version, _digest in reliable.packs} == {
-        "direct-injection-reliable"
+        "direct-injection-reliable",
+        "prompt-disclosure-reliable",
     }
     assert {pack_id for pack_id, _version, _digest in kitchen_sink.packs} == {
         "direct-injection-reliable",
         "direct-injection-kitchen",
+        "prompt-disclosure-reliable",
+        "prompt-disclosure-kitchen",
     }
-    assert len(reliable.cases) == 12
-    assert len(kitchen_sink.cases) == 24
+    assert len(reliable.cases) == 16
+    assert len(kitchen_sink.cases) == 32
     assert set(kitchen_sink.attack_cases()) > set(reliable.attack_cases())
     assert {
         "encoded_envelope",

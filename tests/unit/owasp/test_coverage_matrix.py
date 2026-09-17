@@ -62,7 +62,9 @@ def test_current_state_is_honest_about_active_end_to_end_coverage() -> None:
     matrix = load_coverage_matrix()
     categories = {c.id: c for c in matrix.categories}
     assert categories["LLM01"].current_active_cli_coverage is True
-    inactive_ids = ("LLM02", "LLM03", "LLM04", "LLM05", "LLM06", "LLM07", "LLM08", "LLM09", "LLM10")
+    assert categories["LLM02"].current_active_cli_coverage is True
+    assert categories["LLM02"].scaffolding_only is False
+    inactive_ids = ("LLM03", "LLM04", "LLM05", "LLM06", "LLM07", "LLM08", "LLM09", "LLM10")
     for category_id in inactive_ids:
         category = categories[category_id]
         assert category.current_active_cli_coverage is False
@@ -102,6 +104,7 @@ def test_reliable_and_kitchen_sink_breadth_differ_without_full_claims() -> None:
     summary = coverage_summary(matrix)
     assert summary["categories_total"] == 10
     assert summary["full_coverage_claim_allowed"] is False
+    assert summary["active_end_to_end_categories"] == 2
     assert summary["active_end_to_end_categories"] < summary["categories_total"]
 
 
@@ -125,17 +128,22 @@ def test_llm01_active_breadth_is_bound_to_public_compiled_plans() -> None:
     llm01 = next(c for c in matrix.categories if c.id == "LLM01")
 
     assert {pack_id for pack_id, _version, _digest in plans["reliable"].packs} == {
-        "direct-injection-reliable"
+        "direct-injection-reliable",
+        "prompt-disclosure-reliable",
     }
     assert {pack_id for pack_id, _version, _digest in plans["kitchen-sink"].packs} == {
         "direct-injection-reliable",
         "direct-injection-kitchen",
+        "prompt-disclosure-reliable",
+        "prompt-disclosure-kitchen",
     }
-    assert len(plans["reliable"].cases) == 12
-    assert len(plans["kitchen-sink"].cases) == 24
+    assert len(plans["reliable"].cases) == 16
+    assert len(plans["kitchen-sink"].cases) == 32
     assert tuple(sorted({case.family for case in plans["reliable"].attack_cases()})) == (
         "encoding",
         "instruction_conflict",
+        "prompt_disclosure_debug_config",
+        "prompt_disclosure_system_text",
         "role_confusion",
         "system_boundary",
     )
@@ -147,6 +155,10 @@ def test_llm01_active_breadth_is_bound_to_public_compiled_plans() -> None:
         "markdown_injection",
         "multilingual_directive",
         "payload_splitting",
+        "prompt_disclosure_boundary",
+        "prompt_disclosure_debug_config",
+        "prompt_disclosure_system_text",
+        "prompt_disclosure_translation",
         "role_confusion",
         "role_play_boundary",
         "system_boundary",

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ai_scan.core.modes import resolve_policy
-from ai_scan.packs import Pack, resolve_packs
+from ai_scan.packs import Pack, load_builtin_pack, resolve_packs
 from ai_scan.packs.signatures import compute_digest, verify_digest
 from ai_scan.targets import Target, TargetError, normalize_target
 
@@ -345,9 +345,16 @@ def load_plan(data: Mapping[str, Any]) -> Plan:
             # re-pointed at a different pack/family/kind/index than its id claims.
             if case_id != f"{pack_id}:{family}:{kind}:{index}":
                 raise PlanError("case_id is inconsistent with its pack/family/kind/index")
-            # Attack templates must carry the prompt marker; controls must not.
-            if kind == "attack" and _CANARY_MARKER not in template:
-                raise PlanError("attack case template is missing the canary marker")
+            # LLM01-style prompt-injection attacks must carry the prompt marker;
+            # LLM02 disclosure attacks must not, because their expected synthetic
+            # marker is provisioned out-of-band in a controlled fixture instead
+            # of being embedded in the request or plan.
+            if kind == "attack" and _attack_template_requires_canary(pack_id):
+                if _CANARY_MARKER not in template:
+                    raise PlanError("attack case template is missing the canary marker")
+            if kind == "attack" and _attack_template_forbids_canary(pack_id):
+                if _CANARY_MARKER in template:
+                    raise PlanError("LLM02 disclosure attack template contains the canary marker")
             if kind == "control" and _CANARY_MARKER in template:
                 raise PlanError("control case template must not contain the canary marker")
             cases_list.append(
@@ -404,6 +411,22 @@ def load_plan(data: Mapping[str, Any]) -> Plan:
 def plan_to_json(plan: Plan) -> str:
     """Deterministic JSON rendering of a plan (stable key order)."""
     return json.dumps(plan_to_dict(plan), indent=2, sort_keys=True)
+
+
+def _pack_owasp_categories(pack_id: str) -> frozenset[str]:
+    try:
+        return frozenset(load_builtin_pack(pack_id).mappings.get("owasp-llm", ()))
+    except Exception as exc:
+        raise PlanError("plan references an unknown or invalid pack") from exc
+
+
+def _attack_template_forbids_canary(pack_id: str) -> bool:
+    categories = _pack_owasp_categories(pack_id)
+    return "LLM02" in categories and "LLM01" not in categories
+
+
+def _attack_template_requires_canary(pack_id: str) -> bool:
+    return not _attack_template_forbids_canary(pack_id)
 
 
 def _require_str(value: object, name: str) -> str:

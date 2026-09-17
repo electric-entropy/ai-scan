@@ -63,7 +63,8 @@ def test_text_bytes_and_bundle_forms_replay_identically() -> None:
     from_bytes = replay_bundle(text.encode("utf-8"))
     from_bundle = replay_bundle(bundle)
     assert from_text == from_bytes == from_bundle
-    assert set(from_bundle.findings.values()) == {"confirmed"}
+    assert "confirmed" in set(from_bundle.findings.values())
+    assert set(from_bundle.findings.values()) <= {"confirmed", "not_observed"}
 
 
 def test_in_memory_bundle_with_unsealed_forgery_is_rejected() -> None:

@@ -23,6 +23,7 @@ from ai_scan.targets import normalize_target
 
 _URL = "http://127.0.0.1:8000/chat"
 _CANARY = "AISCAN-M3ACCT0001"
+_RELIABLE_REQUEST_COUNT = 32
 
 
 def _plan():  # type: ignore[no-untyped-def]
@@ -87,8 +88,8 @@ def test_no_interruption_counts_every_physical_attempt(tmp_path) -> None:
     path = tmp_path / "run.ckpt"
     counter = _InterruptAt(10**9)
     result = run_plan(plan, counter, canary=_CANARY, checkpoint_path=str(path))
-    assert result.request_count == counter.calls == 32
-    assert _load(path)["request_count"] == 32
+    assert result.request_count == counter.calls == _RELIABLE_REQUEST_COUNT
+    assert _load(path)["request_count"] == _RELIABLE_REQUEST_COUNT
 
 
 def test_interrupt_on_second_control_is_counted_not_undercounted(tmp_path) -> None:
@@ -146,8 +147,8 @@ def test_resume_does_not_repeat_completed_trials(tmp_path) -> None:
     assert result.state in (RunState.COMPLETED, RunState.COMPLETED_WITH_GAPS)
     # The resumed run issues only the REMAINING attempts; total never resets and
     # equals a single clean run's count. No completed trial is replayed.
-    assert counter.calls == 32 - before
-    assert result.request_count == 32
+    assert counter.calls == _RELIABLE_REQUEST_COUNT - before
+    assert result.request_count == _RELIABLE_REQUEST_COUNT
     assert any(f.status.value == "confirmed" for f in result.findings)
 
 
@@ -163,8 +164,8 @@ def test_uncertain_in_flight_attempt_is_reconciled_not_reissued(tmp_path) -> Non
     result = run_plan(plan, counter, canary=_CANARY, checkpoint_path=str(path))
     # The in-flight attempt was already counted; resume neither re-counts nor
     # reissues it as an extra physical attempt.
-    assert result.request_count == 32
-    assert counter.calls == 32 - before
+    assert result.request_count == _RELIABLE_REQUEST_COUNT
+    assert counter.calls == _RELIABLE_REQUEST_COUNT - before
 
 
 # --- forged / malformed progress fails closed --------------------------------------

@@ -118,6 +118,7 @@ class ExchangeOutcome:
     transport_ok: bool = True
     attempts: int = 1
     known_secrets: frozenset[str] = field(default_factory=frozenset)
+    semantic: dict[str, Any] | None = None
 
 
 @dataclass

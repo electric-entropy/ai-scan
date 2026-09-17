@@ -323,4 +323,5 @@ def test_cli_gemini_invalid_provider_output_is_inconclusive(
     assert rc != cli.EXIT_RUNTIME_ERROR  # an unusable exchange, not a crashed run
     statuses = _statuses(report)
     assert statuses, "run must complete and write findings"
-    assert statuses <= {"inconclusive"}
+    assert "confirmed" not in statuses
+    assert statuses <= {"inconclusive", "not_observed"}

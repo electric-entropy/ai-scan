@@ -140,11 +140,17 @@ Applications 2025 (LLM01-LLM10). The matrix is a truthful contract, not a scan
 result: it distinguishes current active CLI coverage from scaffolding, prompt
 overlap, planned Phase 2B work, and unsupported scenarios. It explicitly does
 not claim full OWASP coverage or OWASP compliance. AI-Scan does not claim full
-OWASP coverage from this Phase 2A matrix; see
+OWASP coverage from this partial matrix; see
 [`docs/owasp-llm-coverage.md`](docs/owasp-llm-coverage.md).
-The current active public `plan`/`run` OWASP category is LLM01 only; LLM06 and
-LLM07 pack mappings are capability-gated/unreachable without a public capability
-selector and do not count as active end-to-end CLI coverage. Matrix identifiers
+The current active public `plan`/`run` OWASP categories are LLM01 and LLM02 only;
+LLM02 uses deterministic synthetic hidden-canary fixtures, never real secrets. Its
+expected marker must be provisioned to the target out-of-band (for local checks,
+pass `run --synthetic-canary-file FILE`). Without that explicit marker input, live
+`run` and checkpoint resume skip LLM02 controls/attacks as inconclusive coverage
+gaps while continuing normal LLM01 execution. AI-Scan does not put that marker in
+the plan, prompt, URL, headers, or request body for LLM02 disclosure probes.
+LLM06 and LLM07 pack mappings are capability-gated/unreachable without a public
+capability selector and do not count as active end-to-end CLI coverage. Matrix identifiers
 for remediation/report/SARIF are reserved contract identifiers for future
 integration, not values emitted by the current report or SARIF renderers.
 

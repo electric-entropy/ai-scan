@@ -59,6 +59,10 @@ def _exact_token(case: InjectionCase) -> ExchangeOutcome:
     return ExchangeOutcome(body="A benign, unrelated synthetic answer.")
 
 
+def _direct_attacks(findings: Any) -> list[Any]:
+    return [f for f in findings if not f.family.startswith("prompt_disclosure")]
+
+
 def _statuses(findings: Any) -> dict[str, str]:
     return {f.prompt: f.status.value for f in findings}
 
@@ -69,7 +73,7 @@ def _statuses(findings: Any) -> dict[str, str]:
 def test_live_exact_token_confirms_with_persisted_per_trial_evidence() -> None:
     plan = _plan()
     result = run_plan(plan, _exact_token, canary=_CANARY)
-    attacks = [f for f in result.findings]
+    attacks = _direct_attacks(result.findings)
     assert attacks and all(f.status.value == "confirmed" for f in attacks)
     for finding in attacks:
         assert (finding.attack_trials, finding.successes) == plan.trial_policy[:1] * 2
@@ -85,7 +89,7 @@ def test_exact_token_round_trips_through_checkpoint(tmp_path) -> None:
     assert all(
         record["status"] == "confirmed"
         for record in restored.completed.values()
-        if record["kind"] == "attack"
+        if record["kind"] == "attack" and not str(record["family"]).startswith("prompt_disclosure")
     )
 
     calls: list[str] = []
@@ -121,8 +125,10 @@ def test_exact_token_round_trips_through_bundle_and_replay() -> None:
     live_attacks = {
         c.case_id: f.status.value
         for c, f in zip(plan.attack_cases(), live.findings, strict=False)
+        if not c.family.startswith("prompt_disclosure")
     }
-    assert set(replayed.findings.values()) == {"confirmed"}
+    assert "confirmed" in set(replayed.findings.values())
+    assert set(replayed.findings.values()) <= {"confirmed", "not_observed"}
     assert len(replayed.findings) == len(live_attacks)
 
 
