@@ -67,6 +67,13 @@ from ai_scan.reporting.json_report import render_json
 from ai_scan.reporting.jsonl import render_jsonl
 from ai_scan.reporting.markdown import render_markdown
 from ai_scan.reporting.sarif import render_sarif
+from ai_scan.supply_chain import SupplyChainManifestError, audit_manifest_file
+from ai_scan.supply_chain import (
+    render_human as render_supply_chain_human,
+)
+from ai_scan.supply_chain import (
+    render_json as render_supply_chain_json,
+)
 from ai_scan.targets import Target, TargetError, normalize_target
 from ai_scan.transport import (
     ACTIVE_METHODS,
@@ -276,6 +283,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Render a deterministic summary or the strict machine-readable matrix.",
     )
 
+    p_supply_chain = subparsers.add_parser(
+        "supply-chain-audit",
+        help=(
+            "Run an offline OWASP LLM03 partial supply-chain assessment of a local "
+            "artifact manifest (no network, no artifact loading)."
+        ),
+    )
+    p_supply_chain.add_argument(
+        "--manifest", required=True, help="Local AI artifact manifest JSON file."
+    )
+    p_supply_chain.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format.",
+    )
+
     return parser
 
 
@@ -319,6 +343,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_doctor(args)
     if args.command == "owasp-coverage":
         return _cmd_owasp_coverage(args)
+    if args.command == "supply-chain-audit":
+        return _cmd_supply_chain_audit(args)
 
     # Active, network-touching commands. Validate the exact target before any
     # transport is constructed. Requests are confined to this exact target.
@@ -665,6 +691,14 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             "full-claim=false"
         )
 
+    def _llm03_supply_chain_fixtures() -> str:
+        from ai_scan.supply_chain import audit_manifest_text
+
+        for name in ("supply-chain-secure-v1.json", "supply-chain-vulnerable-v1.json"):
+            text = root.joinpath(f"owasp/{name}").read_text(encoding="utf-8")
+            audit_manifest_text(text)
+        return "2 valid"
+
     record("metadata", _metadata)
     record("py.typed", _py_typed)
     record("schemas", _schemas)
@@ -672,6 +706,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     record("payloads", _payloads)
     record("report-template", _report_template)
     record("owasp-llm-coverage", _owasp_matrix)
+    record("owasp-llm03-supply-chain-fixtures", _llm03_supply_chain_fixtures)
 
     healthy = all(bool(check["ok"]) for check in checks)
     if args.json:
@@ -695,6 +730,24 @@ def _cmd_owasp_coverage(args: argparse.Namespace) -> int:
     except Exception as exc:
         print(f"error: {scrub_text(str(exc))}")
         return EXIT_RUNTIME_ERROR
+    return EXIT_OK
+
+
+def _cmd_supply_chain_audit(args: argparse.Namespace) -> int:
+    """Run the offline LLM03 manifest audit; constructs no transport."""
+    try:
+        result = audit_manifest_file(args.manifest)
+    except SupplyChainManifestError as exc:
+        print(f"invalid: {scrub_text(str(exc))}")
+        return EXIT_RUNTIME_ERROR
+    if args.format == "json":
+        print(render_supply_chain_json(result))
+    else:
+        print(render_supply_chain_human(result))
+    if result.status == "finding":
+        return EXIT_CONFIRMED_FINDING
+    if result.status == "inconclusive":
+        return EXIT_INCONCLUSIVE
     return EXIT_OK
 
 

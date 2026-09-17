@@ -53,7 +53,7 @@ def test_packaged_matrix_loads_all_official_2025_categories() -> None:
     matrix = load_coverage_matrix()
     assert matrix.standard == "OWASP Top 10 for LLM Applications"
     assert matrix.standard_year == 2025
-    assert matrix.matrix_version == "1.0.0"
+    assert matrix.matrix_version == "1.1.0"
     assert {c.id: c.name for c in matrix.categories} == EXPECTED_NAMES
     assert CATEGORY_NAMES_2025 == EXPECTED_NAMES
 
@@ -63,8 +63,10 @@ def test_current_state_is_honest_about_active_end_to_end_coverage() -> None:
     categories = {c.id: c for c in matrix.categories}
     assert categories["LLM01"].current_active_cli_coverage is True
     assert categories["LLM02"].current_active_cli_coverage is True
+    assert categories["LLM03"].current_active_cli_coverage is True
+    assert categories["LLM03"].scaffolding_only is False
     assert categories["LLM02"].scaffolding_only is False
-    inactive_ids = ("LLM03", "LLM04", "LLM05", "LLM06", "LLM07", "LLM08", "LLM09", "LLM10")
+    inactive_ids = ("LLM04", "LLM05", "LLM06", "LLM07", "LLM08", "LLM09", "LLM10")
     for category_id in inactive_ids:
         category = categories[category_id]
         assert category.current_active_cli_coverage is False
@@ -104,7 +106,7 @@ def test_reliable_and_kitchen_sink_breadth_differ_without_full_claims() -> None:
     summary = coverage_summary(matrix)
     assert summary["categories_total"] == 10
     assert summary["full_coverage_claim_allowed"] is False
-    assert summary["active_end_to_end_categories"] == 2
+    assert summary["active_end_to_end_categories"] == 3
     assert summary["active_end_to_end_categories"] < summary["categories_total"]
 
 
@@ -179,6 +181,33 @@ def test_llm01_active_breadth_is_bound_to_public_compiled_plans() -> None:
     assert "multi-turn" not in llm01.active_coverage_source.lower()
     assert "multilingual_directive" in llm01_text
     assert "bounded_adaptive_retry" in llm01_text
+
+
+def test_llm03_active_claim_is_limited_to_offline_manifest_cli() -> None:
+    matrix = load_coverage_matrix()
+    llm03 = next(c for c in matrix.categories if c.id == "LLM03")
+
+    assert llm03.current_active_cli_coverage is True
+    assert llm03.scaffolding_only is False
+    assert "finding" in llm03.allowed_outcomes
+    assert "partial offline LLM03 manifest assessment" in llm03.active_coverage_source
+    assert "constructs no transport" in llm03.active_coverage_source
+    assert "never imports, deserializes, loads, hashes, or executes model artifacts" in (
+        llm03.active_coverage_source
+    )
+    limitations = " ".join(llm03.known_limitations).lower()
+    for gap in (
+        "no live target/model behavior execution",
+        "registry lookup",
+        "signature or attestation",
+        "dataset-content inspection",
+        "runtime dependency loading",
+    ):
+        assert gap in limitations
+    assert llm03.mode_breadth.reliable == (
+        "supply-chain-audit: bounded offline manifest validation for declared model, "
+        "dataset, plugin, and dependency provenance fields",
+    )
 
 
 def test_coverage_arithmetic_does_not_inflate_from_gaps_or_not_applicable() -> None:
@@ -302,7 +331,7 @@ def test_duplicate_json_keys_are_rejected() -> None:
 
 def test_contradictory_active_or_full_states_are_rejected() -> None:
     def unsupported_marked_active(doc: dict[str, object]) -> None:
-        cat = doc["categories"][2]  # LLM03 supply chain
+        cat = doc["categories"][3]  # LLM04 data and model poisoning
         cat["current_active_cli_coverage"] = True
 
     def full_claim_from_partial(doc: dict[str, object]) -> None:
@@ -310,7 +339,7 @@ def test_contradictory_active_or_full_states_are_rejected() -> None:
         cat["full_coverage_claim_allowed"] = True
 
     def finding_without_active_coverage(doc: dict[str, object]) -> None:
-        cat = doc["categories"][2]
+        cat = doc["categories"][3]
         cat["allowed_outcomes"] = ["finding", "tested"]
 
     for mutator in (

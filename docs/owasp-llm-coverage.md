@@ -20,7 +20,7 @@ Those reserved identifiers are not emitted by the current report or SARIF
 runtime surfaces; current JSON reports leave `remediation` and
 `framework_mappings` empty, and current SARIF rule IDs remain finding-family IDs.
 
-Current honest summary after Phase 2B2:
+Current honest summary after Phase 2B3:
 
 - LLM01:2025 Prompt Injection — partial current active CLI coverage through the
   public direct-injection packs. Reliable plans compile 12 cases from
@@ -56,9 +56,21 @@ Current honest summary after Phase 2B2:
   LLM-judge-only evidence do not confirm. Real PII, credentials, cross-tenant
   data, training-data extraction, and real system prompt extraction remain out of
   scope.
-- LLM03:2025 Supply Chain — no current target end-to-end active CLI coverage.
-  AI-Scan validates its own packaged packs/adapters/resources, but that does not
-  count as target supply-chain testing.
+- LLM03:2025 Supply Chain — partial current active CLI coverage through
+  `ai-scan supply-chain-audit --manifest FILE`, an unattended offline manifest
+  assessment only. The command reads one bounded local regular non-symlink
+  `ai-scan-supply-chain-manifest-v1` JSON file, constructs no transport,
+  performs no network access, and never imports, deserializes, loads, hashes, or
+  executes model artifacts. It validates declared model, dataset, plugin, and
+  dependency provenance fields: source URL, immutable revision/version pin,
+  SHA-256 digest shape, unsafe serialization indicators (`.pkl`, `.pt`, `.bin`,
+  etc.), remote-code enablement, and missing provenance. Findings and
+  inconclusive evidence are bound to the manifest SHA-256 and opaque deterministic
+  item references.
+  This is not live target/model execution coverage: registry lookups,
+  signatures/attestations, dataset-content inspection, model behavior, artifact
+  byte hashing, transitive dependency resolution, and runtime dependency loading
+  remain explicit gaps.
 - LLM04:2025 Data and Model Poisoning — no current end-to-end poisoning coverage;
   prompt/template overlap and RAG-isolation prompts do not count without a
   controlled ingestion and retrieval/update fixture.
@@ -84,8 +96,8 @@ Current honest summary after Phase 2B2:
 Coverage arithmetic is conservative: the denominator is the ten OWASP categories;
 `not_applicable` is excluded and separately reported; `blocked`, `inconclusive`,
 and `not_tested` never increase tested coverage. Current public plans now have
-active LLM01 and LLM02 coverage only, with additional bounded Kitchen Sink
-breadth in those categories. Modes may use different bounded operational limits;
+active LLM01, LLM02, and partial offline-manifest LLM03 coverage only, with
+additional bounded Kitchen Sink breadth in LLM01/LLM02. Modes may use different bounded operational limits;
 both remain subject to scope,
 request/rate/concurrency/duration ceilings, redaction, cleanup, evidence, and
 confirmed-semantics safety controls.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 import pytest
 
@@ -99,6 +100,62 @@ def test_missing_schema_version_rejected() -> None:
 def test_non_integer_schema_version_rejected() -> None:
     with pytest.raises(ConfigError):
         load_document(json.dumps(_target(schema_version="1")), "target")
+
+
+def test_schema_validation_errors_do_not_echo_attacker_values_or_numbers() -> None:
+    hostile = "ATTACKER_SECRET_VALUE_12345"
+    huge = 987654321
+
+    cases: list[tuple[Callable[[], tuple[str, str]], tuple[str, ...]]] = [
+        (lambda: (json.dumps(_target(kind=hostile)), "target"), (hostile,)),
+        (lambda: (json.dumps(_target(response={"extract": hostile})), "target"), (hostile,)),
+        (
+            lambda: (
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "kind": "pack",
+                        "id": "p",
+                        "version": "v",
+                        "trust": "builtin",
+                        "digest": hostile,
+                        "families": ["x"],
+                    }
+                ),
+                "pack",
+            ),
+            (hostile,),
+        ),
+        (lambda: (json.dumps(_target(endpoints=[hostile])), "target"), (hostile,)),
+        (lambda: (json.dumps(_target(adapter=huge)), "target"), (str(huge),)),
+        (
+            lambda: (json.dumps(_engagement(max_physical_requests=0)), "engagement"),
+            (" 0", "0 <", "minimum 1"),
+        ),
+        (
+            lambda: (json.dumps(_engagement(max_duration_seconds=huge)), "engagement"),
+            (str(huge), "maximum 86400"),
+        ),
+        (lambda: (json.dumps(_engagement_ts(hostile, _TS_Z)), "engagement"), (hostile,)),
+        (lambda: (json.dumps(_target(test_identities=[huge])), "target"), (str(huge),)),
+        (lambda: (json.dumps(_target()), "evidence"), ("target",)),
+        (lambda: (json.dumps(_target(surprise=hostile)), "target"), (hostile,)),
+    ]
+
+    for make_case, forbidden in cases:
+        text, kind = make_case()
+        with pytest.raises(ConfigError) as exc_info:
+            load_document(text, kind)
+        message = str(exc_info.value)
+        for value in forbidden:
+            assert value not in message
+
+
+def test_strict_json_number_errors_do_not_echo_numeric_input() -> None:
+    with pytest.raises(ConfigError) as exc_info:
+        load_json_strict('{"x": 1e999}')
+
+    assert "1e999" not in str(exc_info.value)
 
 
 # --- unknown fields -----------------------------------------------------------

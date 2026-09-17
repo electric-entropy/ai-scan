@@ -1,0 +1,27 @@
+{
+  "schema_version": "ai-scan-supply-chain-manifest-v1",
+  "items": [
+    {
+      "id": "model.main",
+      "kind": "model",
+      "name": "example-chat-model",
+      "source_url": "https://huggingface.co/example/chat-model",
+      "revision": "0123456789abcdef0123456789abcdef01234567",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "artifact_path": "models/example-chat-model.safetensors",
+      "uses_unsafe_serialization": false,
+      "enables_remote_code": false
+    },
+    {
+      "id": "dataset.eval",
+      "kind": "dataset",
+      "name": "example-eval-dataset",
+      "source_url": "https://huggingface.co/datasets/example/eval",
+      "revision": "1.2.3",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "artifact_path": "datasets/example-eval.jsonl",
+      "uses_unsafe_serialization": false,
+      "enables_remote_code": false
+    }
+  ]
+}

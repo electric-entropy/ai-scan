@@ -148,43 +148,44 @@
       ]
     },
     {
-      "active_coverage_source": "library scaffolding and package self-checks only; no current target end-to-end supply-chain CLI coverage",
+      "active_coverage_source": "public supply-chain-audit CLI executes a partial offline LLM03 manifest assessment only: it reads one bounded local regular non-symlink AI artifact manifest, constructs no transport, performs no network access, and never imports, deserializes, loads, hashes, or executes model artifacts.",
       "allowed_outcomes": [
-        "not_tested",
+        "tested",
+        "finding",
         "blocked",
         "inconclusive",
         "not_applicable"
       ],
       "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
-      "current_active_cli_coverage": false,
+      "current_active_cli_coverage": true,
       "deterministic_evidence": [
-        "Digest/provenance mismatch or vulnerable component evidence from an inspected artifact, not prompt text"
+        "Strict manifest validation plus item-bound evidence for missing provenance, mutable revisions, invalid SHA-256 digest declarations, non-HTTPS source URLs, unsafe serialization flags/extensions, and remote-code enablement; findings are bound to the manifest SHA-256 and item id"
       ],
       "full_coverage_claim_allowed": false,
       "id": "LLM03",
       "known_limitations": [
-        "Phase 2B work required before active end-to-end coverage",
-        "Prompt/template overlap or library scaffolding is not counted as active coverage",
-        "unsupported by current CLI as a finding-producing category"
+        "Partial offline manifest assessment only; no full LLM03 coverage claim is allowed",
+        "No live target/model behavior execution, registry lookup, signature or attestation verification, dataset-content inspection, transitive dependency resolution, or runtime dependency loading is performed",
+        "Declared SHA-256 values are shape-checked but artifact bytes are not fetched or hashed by this command"
       ],
       "mode_breadth": {
-        "kitchen_sink": [
-          "planned model/adapter/plugin/dependency provenance checks"
-        ],
         "reliable": [
-          "pack and adapter metadata are validated for AI-Scan itself, not the target supply chain"
+          "supply-chain-audit: bounded offline manifest validation for declared model, dataset, plugin, and dependency provenance fields"
+        ],
+        "kitchen_sink": [
+          "same current offline manifest assessment as Reliable; no broader live supply-chain, registry, signature, or runtime dependency-resolution coverage is claimed"
         ]
       },
       "name": "Supply Chain",
       "not_applicable_when": [
-        "No supply-chain surface or metadata is available"
+        "No local AI artifact manifest is supplied or the manifest explicitly lists no assessable items"
       ],
-      "phase_2b_planned": true,
+      "phase_2b_planned": false,
       "prerequisites": [
-        "Target exposes supply-chain metadata or operator supplies manifests for offline validation"
+        "Operator supplies an explicit local ai-scan-supply-chain-manifest-v1 JSON file for offline assessment"
       ],
       "required_controls": [
-        "Known-good manifest/digest controls"
+        "Strict schema and file-boundary controls reject malformed, oversized, symlink, special-file, duplicate-key, duplicate-id, unknown-field, traversal, and Unicode/confusable manifest inputs before assessment"
       ],
       "reserved_remediation_id": "ai-scan.owasp.LLM03.remediation",
       "reserved_report_ids": [
@@ -192,31 +193,31 @@
         "ai-scan.owasp.LLM03.evidence"
       ],
       "reserved_sarif_rule_id": "ai-scan.owasp.LLM03.rule",
-      "scaffolding_only": true,
+      "scaffolding_only": false,
       "supported_scenarios": [
         {
-          "active_cli": false,
+          "active_cli": true,
           "controls": [
-            "Known-good manifest/digest controls"
+            "Bounded local regular non-symlink manifest file only; strict duplicate-key/unknown-field/id/path/Unicode validation; no transport construction or artifact loading"
           ],
-          "evidence": "Digest/provenance mismatch or vulnerable component evidence from an inspected artifact, not prompt text",
-          "id": "scenario.llm03.reliable",
-          "name": "Reliable Supply Chain scenario slice",
-          "status": "not_tested"
+          "evidence": "supply-chain-audit emits item-bound finding/inconclusive evidence tied to the manifest SHA-256 and item identity for declared provenance weaknesses",
+          "id": "scenario.llm03.offline-manifest",
+          "name": "Partial offline Supply Chain manifest assessment",
+          "status": "tested"
         },
         {
           "active_cli": false,
           "controls": [
-            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
+            "Not implemented; matrix keeps gaps explicit so offline manifest checks cannot imply live supply-chain assurance"
           ],
-          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
-          "id": "scenario.llm03.kitchen-sink",
-          "name": "Kitchen Sink Supply Chain broader scenario slice",
+          "evidence": "Registry lookups, signatures/attestations, dataset contents, model behavior, and runtime dependency resolution remain gaps",
+          "id": "scenario.llm03.live-runtime-gaps",
+          "name": "Live registry, attestation, dataset, and runtime dependency coverage gaps",
           "status": "not_tested"
         }
       ],
       "target_capabilities": [
-        "Model, adapter, pack, plugin, dependency, or manifest provenance is inspectable"
+        "Local AI artifact manifest declaring model, dataset, plugin, or dependency provenance fields"
       ]
     },
     {
@@ -724,7 +725,6 @@
       ]
     }
   ],
-  "content_sha256": "5bd9c9019fd2cebfd084920f5982dbd52c6cf2a74cad0c010b5e296bc5105159",
   "coverage_arithmetic": {
     "aggregate_full_coverage_claim_allowed": false,
     "blocked_inconclusive_not_tested_do_not_count_as_tested": true,
@@ -733,8 +733,9 @@
     "not_applicable_excluded_from_tested_coverage": true,
     "rule": "Tested coverage is the count of categories with current active CLI wiring, deterministic evidence, and required negative controls. not_applicable is excluded and separately reported; blocked, inconclusive, and not_tested never increase tested coverage. Full/compliant OWASP claims require all ten categories to meet the active evidence contract and are not allowed by this Phase 2A matrix."
   },
-  "matrix_version": "1.0.0",
+  "matrix_version": "1.1.0",
   "schema_version": "owasp-llm-coverage-v1",
   "standard": "OWASP Top 10 for LLM Applications",
-  "standard_year": 2025
+  "standard_year": 2025,
+  "content_sha256": "118e9f04884aa1d9c421b25ea932a3524f18a7b9df8962a92cc01f662baf0a81"
 }

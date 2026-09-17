@@ -10,6 +10,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import tarfile
+import venv
 import zipfile
 from pathlib import Path
 
@@ -35,6 +36,8 @@ EXPECTED_DATA = [
     "packs/builtin/rag-isolation-reliable-v1.json",
     "packs/builtin/rag-isolation-kitchen-v1.json",
     "owasp/llm-top10-2025-v1.json",
+    "owasp/supply-chain-secure-v1.json",
+    "owasp/supply-chain-vulnerable-v1.json",
     "reporting/templates/report.html",
 ]
 EXPECTED_SDIST_FILES = [
@@ -94,3 +97,30 @@ def test_sdist_contains_all_schemas_and_data(built_dists) -> None:
         assert present(data), f"sdist missing {data}"
     for suffix in EXPECTED_SDIST_FILES:
         assert any(n.endswith(f"/{suffix}") for n in names), f"sdist missing {suffix}"
+
+
+def test_fresh_wheel_import_version_matches_metadata(built_dists, tmp_path) -> None:  # type: ignore[no-untyped-def]
+    wheel, _sdist = built_dists
+    venv_dir = tmp_path / "venv"
+    venv.EnvBuilder(with_pip=True).create(venv_dir)
+    python = venv_dir / "bin" / "python"
+    install = subprocess.run(
+        [str(python), "-m", "pip", "install", "--no-index", str(wheel)],
+        capture_output=True,
+        text=True,
+    )
+    if install.returncode != 0:  # pragma: no cover - surfaces packaging failures
+        pytest.fail(f"wheel install failed:\n{install.stdout}\n{install.stderr}")
+    result = subprocess.run(
+        [
+            str(python),
+            "-c",
+            (
+                "from importlib import metadata; import ai_scan; "
+                "assert ai_scan.__version__ == metadata.version('ai-scan') == '0.2.1'"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

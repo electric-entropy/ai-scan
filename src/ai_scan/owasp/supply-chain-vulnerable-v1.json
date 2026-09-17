@@ -1,0 +1,23 @@
+{
+  "schema_version": "ai-scan-supply-chain-manifest-v1",
+  "items": [
+    {
+      "id": "model.vulnerable",
+      "kind": "model",
+      "name": "mutable-unsafe-model",
+      "source_url": "http://example.test/model",
+      "revision": "main",
+      "sha256": "not-a-sha256-digest",
+      "artifact_path": "models/mutable-unsafe-model.bin",
+      "uses_unsafe_serialization": true,
+      "enables_remote_code": true
+    },
+    {
+      "id": "plugin.local",
+      "kind": "plugin",
+      "name": "local-plugin-with-missing-provenance",
+      "uses_unsafe_serialization": false,
+      "enables_remote_code": false
+    }
+  ]
+}

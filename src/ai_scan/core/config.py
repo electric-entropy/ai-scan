@@ -76,19 +76,19 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     seen: set[str] = set()
     for key, _value in pairs:
         if key in seen:
-            raise ConfigError(f"Duplicate JSON key: {key!r}")
+            raise ConfigError("duplicate JSON key is not allowed")
         seen.add(key)
     return dict(pairs)
 
 
 def _reject_constant(token: str) -> Any:
-    raise ConfigError(f"Non-finite JSON literal not allowed: {token}")
+    raise ConfigError("non-finite JSON literal is not allowed")
 
 
 def _strict_float(token: str) -> float:
     value = float(token)
     if not math.isfinite(value):
-        raise ConfigError(f"Non-finite JSON number not allowed: {token}")
+        raise ConfigError("non-finite JSON number is not allowed")
     return value
 
 
@@ -104,7 +104,7 @@ def load_json_strict(text: str) -> Any:
     except ConfigError:
         raise
     except json.JSONDecodeError as exc:
-        raise ConfigError(f"Malformed JSON: {exc}") from exc
+        raise ConfigError("malformed JSON document") from exc
 
 
 # --- packaged schema access ---------------------------------------------------
@@ -113,15 +113,15 @@ def load_json_strict(text: str) -> Any:
 def load_schema(kind: str, version: int) -> dict[str, Any]:
     """Load the packaged schema for ``kind``/``version``."""
     if kind not in SUPPORTED_SCHEMAS or version not in SUPPORTED_SCHEMAS[kind]:
-        raise ConfigError(f"Unsupported schema {kind!r} version {version!r}")
+        raise ConfigError("unsupported schema kind or version")
     resource = resources.files("ai_scan.schemas").joinpath(f"{kind}-v{version}.schema.json")
     try:
         raw = resource.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError) as exc:  # pragma: no cover - packaging bug
-        raise ConfigError(f"Missing packaged schema for {kind} v{version}") from exc
+        raise ConfigError("missing packaged schema") from exc
     parsed = json.loads(raw)
     if not isinstance(parsed, dict):  # pragma: no cover - packaging bug
-        raise ConfigError(f"Packaged schema for {kind} v{version} is not an object")
+        raise ConfigError("packaged schema is not an object")
     return parsed
 
 
@@ -153,18 +153,22 @@ def _type_ok(value: Any, json_type: str) -> bool:
         return isinstance(value, (int, float)) and not isinstance(value, bool)
     if json_type == "null":
         return value is None
-    raise ConfigError(f"Schema error: unknown type {json_type!r}")  # pragma: no cover
+    raise ConfigError("schema error: unknown type")  # pragma: no cover
+
+
+def _validation_error(path: str, code: str) -> ConfigError:
+    return ConfigError(f"{path}: {code}")
 
 
 def _validate(value: Any, schema: dict[str, Any], path: str) -> None:
     if "const" in schema and not _json_equal(value, schema["const"]):
-        raise ConfigError(f"{path}: must equal {schema['const']!r}")
+        raise _validation_error(path, "const_mismatch")
     if "enum" in schema and not any(_json_equal(value, opt) for opt in schema["enum"]):
-        raise ConfigError(f"{path}: {value!r} is not one of {schema['enum']}")
+        raise _validation_error(path, "enum_mismatch")
 
     json_type = schema.get("type")
     if json_type is not None and not _type_ok(value, json_type):
-        raise ConfigError(f"{path}: expected {json_type}, got {type(value).__name__}")
+        raise _validation_error(path, "type_mismatch")
 
     if json_type in ("integer", "number"):
         _validate_number(value, schema, path)
@@ -178,25 +182,25 @@ def _validate(value: Any, schema: dict[str, Any], path: str) -> None:
 
 def _validate_number(value: Any, schema: dict[str, Any], path: str) -> None:
     if isinstance(value, float) and not math.isfinite(value):
-        raise ConfigError(f"{path}: non-finite number is not allowed")
+        raise _validation_error(path, "non_finite_number")
     if "minimum" in schema and value < schema["minimum"]:
-        raise ConfigError(f"{path}: {value} < minimum {schema['minimum']}")
+        raise _validation_error(path, "below_minimum")
     if "maximum" in schema and value > schema["maximum"]:
-        raise ConfigError(f"{path}: {value} > maximum {schema['maximum']}")
+        raise _validation_error(path, "above_maximum")
     if "exclusiveMinimum" in schema and value <= schema["exclusiveMinimum"]:
-        raise ConfigError(f"{path}: {value} <= exclusiveMinimum {schema['exclusiveMinimum']}")
+        raise _validation_error(path, "below_exclusive_minimum")
     if "exclusiveMaximum" in schema and value >= schema["exclusiveMaximum"]:
-        raise ConfigError(f"{path}: {value} >= exclusiveMaximum {schema['exclusiveMaximum']}")
+        raise _validation_error(path, "above_exclusive_maximum")
 
 
 def _validate_string(value: str, schema: dict[str, Any], path: str) -> None:
     if "minLength" in schema and len(value) < schema["minLength"]:
-        raise ConfigError(f"{path}: shorter than minLength {schema['minLength']}")
+        raise _validation_error(path, "below_min_length")
     if "maxLength" in schema and len(value) > schema["maxLength"]:
-        raise ConfigError(f"{path}: longer than maxLength {schema['maxLength']}")
+        raise _validation_error(path, "above_max_length")
     pattern = schema.get("pattern")
     if pattern is not None and not re.search(pattern, value):
-        raise ConfigError(f"{path}: does not match pattern {pattern!r}")
+        raise _validation_error(path, "pattern_mismatch")
     if schema.get("x-url"):
         _check_url(value, path, origin_only=False)
     if schema.get("x-origin"):
@@ -208,14 +212,14 @@ def _validate_string(value: str, schema: dict[str, Any], path: str) -> None:
         # reference fields (e.g. an env reference), never in free-text/payload.
         for secret in _SECRET_PATTERNS:
             if secret.search(value):
-                raise ConfigError(f"{path}: embedded secret literal is not allowed here")
+                raise _validation_error(path, "embedded_secret_literal")
 
 
 def _validate_array(value: list[Any], schema: dict[str, Any], path: str) -> None:
     if "minItems" in schema and len(value) < schema["minItems"]:
-        raise ConfigError(f"{path}: fewer than minItems {schema['minItems']}")
+        raise _validation_error(path, "below_min_items")
     if "maxItems" in schema and len(value) > schema["maxItems"]:
-        raise ConfigError(f"{path}: more than maxItems {schema['maxItems']}")
+        raise _validation_error(path, "above_max_items")
     item_schema = schema.get("items")
     if isinstance(item_schema, dict):
         for i, item in enumerate(value):
@@ -226,15 +230,15 @@ def _validate_object(value: dict[str, Any], schema: dict[str, Any], path: str) -
     properties: dict[str, Any] = schema.get("properties", {})
     for required in schema.get("required", []):
         if required not in value:
-            raise ConfigError(f"{path}: missing required field {required!r}")
+            raise _validation_error(f"{path}.{required}", "required_missing")
     additional = schema.get("additionalProperties", True)
     for key, item in value.items():
         if key in properties:
             _validate(item, properties[key], f"{path}.{key}")
         elif additional is False:
-            raise ConfigError(f"{path}: unknown field {key!r}")
+            raise _validation_error(path, "additional_property")
         elif isinstance(additional, dict):
-            _validate(item, additional, f"{path}.{key}")
+            _validate(item, additional, f"{path}.*")
 
 
 # --- semantic validation ------------------------------------------------------
@@ -245,47 +249,40 @@ def _check_url(value: str, path: str, *, origin_only: bool) -> None:
         # Reject whitespace and every Unicode control/format/surrogate/private-use/
         # unassigned character (not just ASCII C0/DEL).
         if ch.isspace() or unicodedata.category(ch) in _FORBIDDEN_URL_CATEGORIES:
-            raise ConfigError(
-                f"{path}: URL must not contain whitespace or "
-                f"control/format/surrogate/private/unassigned characters"
-            )
+            raise _validation_error(path, "invalid_url_character")
     try:
         target = normalize_target(value)
     except TargetError as exc:
-        raise ConfigError(f"{path}: invalid HTTP(S) URL ({exc})") from exc
+        raise _validation_error(path, "invalid_url") from exc
     # normalize_target already rejects credentials, fragments, and non-HTTP(S).
     parts = urlsplit(value)
     if "%" in parts.netloc:
-        raise ConfigError(f"{path}: URL host/authority must not be percent-encoded")
+        raise _validation_error(path, "invalid_url_authority")
     if origin_only:
         # A scope must be exactly its canonical origin: no path/query and already
         # normalized (lowercased host, no default port).
         if value != target.origin:
-            raise ConfigError(
-                f"{path}: scope must be a bare, normalized origin, e.g. {target.origin}"
-            )
+            raise _validation_error(path, "invalid_origin")
     else:
         # An endpoint may carry a path, but its *origin* must be canonical. Compare
         # the value's literal origin (not a startswith prefix, which would accept
         # a non-canonical ":443"/uppercase-host form) against the normalized origin.
         raw_origin = f"{parts.scheme}://{parts.netloc}"
         if raw_origin != target.origin:
-            raise ConfigError(
-                f"{path}: URL origin is not canonical (expected {target.origin})"
-            )
+            raise _validation_error(path, "noncanonical_url_origin")
 
 
 def _check_datetime(value: str, path: str) -> datetime:
     # Enforce strict RFC 3339 (T separator + timezone) before delegating to
     # fromisoformat, which would otherwise accept a space separator / naive form.
     if not _RFC3339.fullmatch(value):
-        raise ConfigError(f"{path}: not a strict RFC 3339 timestamp: {value!r}")
+        raise _validation_error(path, "invalid_datetime")
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError as exc:
-        raise ConfigError(f"{path}: invalid RFC 3339 timestamp {value!r} ({exc})") from exc
+        raise _validation_error(path, "invalid_datetime") from exc
     if parsed.tzinfo is None:  # pragma: no cover - regex already requires a tz
-        raise ConfigError(f"{path}: timestamp must be timezone-aware: {value!r}")
+        raise _validation_error(path, "invalid_datetime")
     return parsed
 
 
@@ -318,9 +315,7 @@ def _scan_traversal(value: Any, path: str) -> None:
     handled field-aware via the ``x-secret-scan`` schema annotation."""
     if isinstance(value, str):
         if _decoded_has_traversal(value):
-            raise ConfigError(
-                f"{path}: path traversal or excessive percent-encoding is not allowed"
-            )
+            raise _validation_error(path, "unsafe_path_encoding")
     elif isinstance(value, dict):
         for key, item in value.items():
             _scan_traversal(item, f"{path}.{key}")
@@ -344,7 +339,7 @@ def _check_time_ordering(doc: dict[str, Any], kind: str) -> None:
         start = _check_datetime(doc[start_key], f"$.{start_key}")
         end = _check_datetime(doc[end_key], f"$.{end_key}")
         if start > end:
-            raise ConfigError(f"{start_key} ({doc[start_key]}) is after {end_key} ({doc[end_key]})")
+            raise ConfigError(f"$.{start_key}: datetime_order_invalid")
 
 
 # --- plan semantics -----------------------------------------------------------
@@ -427,7 +422,7 @@ def _validate_runtime_plan(text: str) -> dict[str, Any]:
         plan = load_plan(data)
         verify_plan_integrity(plan)
     except PlanError as exc:
-        raise ConfigError(f"invalid plan: {exc}") from exc
+        raise ConfigError("invalid plan") from exc
     return plan_to_dict(plan)
 
 

@@ -27,6 +27,7 @@ ai-scan report --file report.json --format markdown
 ai-scan bundle validate --file evidence-bundle.json
 ai-scan bundle replay --file evidence-bundle.json
 ai-scan replay --bundle evidence-bundle.json --validate-only
+ai-scan supply-chain-audit --manifest local-ai-artifacts.json
 ai-scan doctor
 ```
 
@@ -39,6 +40,14 @@ and exits `0` with a concise summary (add `--json` for machine-readable output).
 are **offline** — they verify digests/graph and reproduce the stored
 classification without constructing any transport. A tampered bundle exits
 non-zero with a scrubbed error.
+
+`supply-chain-audit --manifest FILE` is an **offline partial OWASP LLM03** check.
+It reads one bounded local regular non-symlink artifact manifest and never
+contacts a registry, constructs transport, or imports/loads/deserializes listed
+model artifacts. Its JSON/human output binds findings to the manifest SHA-256 and
+opaque deterministic item references; live model behavior, signatures/attestations,
+dataset contents, artifact byte hashing, and runtime dependency resolution remain
+out of scope.
 
 ## Interpreting outcomes
 

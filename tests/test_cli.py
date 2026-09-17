@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from importlib import metadata
 
 import pytest
 
+import ai_scan
 from ai_scan import cli
 
-SUBCOMMANDS = ("fingerprint", "inject", "assess", "plan", "run")
+SUBCOMMANDS = ("fingerprint", "inject", "assess", "plan", "run", "supply-chain-audit")
 
 
 def _run_module(*args: str) -> subprocess.CompletedProcess[str]:
@@ -47,6 +49,10 @@ def test_exit_code_constants_are_stable() -> None:
     assert cli.EXIT_DENIED == 2
     assert cli.EXIT_CONFIRMED_FINDING == 3
     assert cli.EXIT_INCONCLUSIVE == 4
+
+
+def test_source_tree_version_matches_package_metadata() -> None:
+    assert ai_scan.__version__ == metadata.version("ai-scan") == "0.2.1"
 
 
 def test_scope_denial_through_real_transport_maps_to_blocked(monkeypatch, capsys) -> None:

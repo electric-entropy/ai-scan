@@ -33,7 +33,7 @@ CATEGORY_NAMES_2025: dict[str, str] = {
 _ALLOWED_OUTCOMES = frozenset(
     {"tested", "not_tested", "blocked", "inconclusive", "finding", "not_applicable"}
 )
-_ACTIVE_CATEGORIES = frozenset({"LLM01", "LLM02"})
+_ACTIVE_CATEGORIES = frozenset({"LLM01", "LLM02", "LLM03"})
 # Phase 2A is a contract only. Even categories with current active coverage are
 # partial scenario coverage, so no category may claim full/comprehensive coverage.
 _FULL_CLAIM_ALLOWED = False
@@ -302,7 +302,7 @@ def render_coverage_summary(matrix: CoverageMatrix | None = None) -> str:
         f"{matrix.standard} {matrix.standard_year} coverage matrix v{matrix.matrix_version}",
         "AI-Scan does not claim full OWASP coverage or compliance from this partial matrix.",
         (
-            "Active end-to-end CLI categories: "
+            "Active public CLI categories: "
             f"{summary['active_end_to_end_categories']}/{summary['denominator_categories']}"
         ),
         "Blocked, inconclusive, not_tested, and not_applicable outcomes do not "

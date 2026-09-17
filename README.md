@@ -142,13 +142,19 @@ overlap, planned Phase 2B work, and unsupported scenarios. It explicitly does
 not claim full OWASP coverage or OWASP compliance. AI-Scan does not claim full
 OWASP coverage from this partial matrix; see
 [`docs/owasp-llm-coverage.md`](docs/owasp-llm-coverage.md).
-The current active public `plan`/`run` OWASP categories are LLM01 and LLM02 only;
+The current active public `plan`/`run` OWASP categories are LLM01 and LLM02;
 LLM02 uses deterministic synthetic hidden-canary fixtures, never real secrets. Its
 expected marker must be provisioned to the target out-of-band (for local checks,
 pass `run --synthetic-canary-file FILE`). Without that explicit marker input, live
 `run` and checkpoint resume skip LLM02 controls/attacks as inconclusive coverage
 gaps while continuing normal LLM01 execution. AI-Scan does not put that marker in
 the plan, prompt, URL, headers, or request body for LLM02 disclosure probes.
+LLM03 has only partial offline manifest coverage through
+`ai-scan supply-chain-audit --manifest FILE`: it reads one bounded local regular
+non-symlink artifact manifest, performs no network access, constructs no
+transport, and never imports/loads/deserializes model artifacts. Registry checks,
+signatures/attestations, dataset contents, model behavior, artifact byte hashing,
+and runtime dependency resolution remain gaps.
 LLM06 and LLM07 pack mappings are capability-gated/unreachable without a public
 capability selector and do not count as active end-to-end CLI coverage. Matrix identifiers
 for remediation/report/SARIF are reserved contract identifiers for future

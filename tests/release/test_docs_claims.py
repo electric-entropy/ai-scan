@@ -115,7 +115,10 @@ def test_owasp_docs_describe_current_mode_breadth_and_limits_truthfully() -> Non
     }
     assert len(kitchen_sink.cases) > len(reliable.cases)
     assert reliable.limits != kitchen_sink.limits
-    assert "active llm01 and llm02 coverage only" in normalized
+    assert "active llm01, llm02, and partial offline-manifest llm03 coverage only" in normalized
+    assert "supply-chain-audit --manifest file" in normalized
+    assert "never imports, deserializes, loads, hashes, or executes model artifacts" in normalized
+    assert "registry lookups" in normalized and "runtime dependency loading" in normalized
     assert "prompt-disclosure-reliable" in normalized
     assert "indirect injection and true multi-turn coverage remain unsupported" in normalized
     assert "modes may use different bounded operational limits" in normalized

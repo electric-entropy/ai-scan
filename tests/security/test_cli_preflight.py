@@ -76,6 +76,73 @@ def test_validate_config_rejects_invalid_document(tmp_path) -> None:
     assert code == cli.EXIT_RUNTIME_ERROR
 
 
+@pytest.mark.parametrize(
+    ("kind", "doc"),
+    [
+        (
+            "target",
+            {
+                "schema_version": 1,
+                "kind": "target",
+                "name": "app",
+                "adapter": "generic_http",
+                "endpoints": ["https://api.example.com/chat"],
+                "request": {"method": "ATTACKER_VALUE", "prompt_marker": "*"},
+                "response": {"extract": "raw_body"},
+            },
+        ),
+        (
+            "engagement",
+            {
+                "schema_version": 1,
+                "kind": "engagement",
+                "engagement_id": "E",
+                "client": "C",
+                "approver": "A",
+                "issued_at": "ATTACKER_VALUE",
+                "expires_at": "2026-09-12T00:00:00Z",
+                "target_scopes": ["https://api.example.com"],
+                "capabilities": ["read"],
+                "limits": {
+                    "max_physical_requests": 987654321,
+                    "max_duration_seconds": 1800,
+                    "requests_per_second": 1,
+                    "max_concurrency": 1,
+                },
+                "signer_key_id": "k",
+            },
+        ),
+        (
+            "finding",
+            {
+                "schema_version": 2,
+                "kind": "finding",
+                "id": "f-1",
+                "attack_id": "a",
+                "status": "ATTACKER_VALUE",
+                "severity": "low",
+                "title": "t",
+                "description": "d",
+                "evidence_ids": [],
+            },
+        ),
+    ],
+)
+def test_validate_config_errors_do_not_echo_schema_values_or_numbers(
+    kind: str, doc: dict, tmp_path, capsys
+) -> None:
+    path = tmp_path / f"{kind}.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+
+    assert (
+        cli.main(["validate-config", "--kind", kind, "--file", str(path)])
+        == cli.EXIT_RUNTIME_ERROR
+    )
+    out = capsys.readouterr().out
+    assert "ATTACKER_VALUE" not in out
+    assert "987654321" not in out
+
+
 def test_validate_config_rejects_missing_file(tmp_path) -> None:
     assert cli.main(
         ["validate-config", "--kind", "pack", "--file", str(tmp_path / "nope.json")]
