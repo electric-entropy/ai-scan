@@ -101,7 +101,7 @@ jobs:
         if: matrix.python-version == '3.12'
         run: python -m scripts.reproducible_build
 
-      - name: Container worker static scan
+      - name: Container worker hardened protocol smoke
         if: matrix.python-version == '3.12'
         run: |
           test -f Dockerfile.worker
@@ -112,3 +112,6 @@ jobs:
           # Fail closed unless the image runs as a non-root user.
           uid="$(docker run --rm --entrypoint id ai-scan-worker:ci -u)"
           test "$uid" != "0"
+          expected='{"protocol_version":"worker-v1","operation":"ping","payload":""}'
+          actual="$(printf '%s' "$expected" | docker run --rm --interactive --read-only --network none --cap-drop ALL --security-opt no-new-privileges --user 65532:65532 --workdir /work --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m --tmpfs /work:rw,noexec,nosuid,nodev,size=16m ai-scan-worker:ci)"
+          test "$actual" = '{"output":"pong","protocol_version":"worker-v1","status":"ok"}'

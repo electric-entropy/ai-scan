@@ -45,15 +45,20 @@ worker code must not perform active network assessment traffic.
 ## CI/rootless-compatible test path
 
 The committed tests do not require a Docker daemon. They verify the protocol,
-entrypoint subprocess behavior, and generated Docker hardening arguments. On a
-host with Docker available, run the optional smoke path manually:
+entrypoint subprocess behavior, and generated Docker hardening arguments. The CI
+and package workflows additionally run a hardened worker protocol smoke when
+Docker is available: they build the image, verify a non-root uid, then send the
+exact `worker-v1` ping request and require the exact pong result under
+`--network none`, `--read-only`, `--cap-drop ALL`, and
+`--security-opt no-new-privileges`. On a host with Docker available, run the same
+smoke path manually:
 
 ```bash
 docker build -f Dockerfile.worker -t ai-scan-worker:local .
-python - <<'PY'
-from ai_scan.worker import LocalWorker, WorkerRequest
-print(LocalWorker().run(WorkerRequest('worker-v1', 'ping', '')).to_json())
-PY
+uid="$(docker run --rm --entrypoint id ai-scan-worker:local -u)"
+test "$uid" != "0"
+actual="$(printf '%s' '{"protocol_version":"worker-v1","operation":"ping","payload":""}' | docker run --rm --interactive --read-only --network none --cap-drop ALL --security-opt no-new-privileges --user 65532:65532 --workdir /work --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m --tmpfs /work:rw,noexec,nosuid,nodev,size=16m ai-scan-worker:local)"
+test "$actual" = '{"output":"pong","protocol_version":"worker-v1","status":"ok"}'
 ```
 
 Expected result: `{"output":"pong","protocol_version":"worker-v1","status":"ok"}`.

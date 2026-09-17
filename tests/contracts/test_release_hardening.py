@@ -67,7 +67,13 @@ def test_ci_release_gates_cover_milestone_21_acceptance() -> None:
         "py.typed",
         "Secret scan",
         "Dependency audit and SBOM",
-        "Container worker static scan",
+        "Container worker hardened protocol smoke",
+        "--network none",
+        "--read-only",
+        "--cap-drop ALL",
+        "--security-opt no-new-privileges",
+        '{"protocol_version":"worker-v1","operation":"ping","payload":""}',
+        '{"output":"pong","protocol_version":"worker-v1","status":"ok"}',
     ]
     for snippet in required_snippets:
         assert snippet in ci

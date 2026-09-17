@@ -138,6 +138,30 @@ def test_readme_has_no_authorization_or_receipt_concept() -> None:
     assert "validate-receipt" not in lowered
 
 
+def test_named_host_https_limitation_is_documented() -> None:
+    combined = (_text(_README) + "\n" + _text(_OPERATOR)).lower()
+    tokens = (
+        "named-host https",
+        "fails closed",
+        "vetted-ip",
+        "sni",
+        "certificate",
+        "not yet implemented",
+    )
+    for token in tokens:
+        assert token in combined, token
+    assert "https://api.example.com/chat" not in _text(_README)
+
+
+def test_docs_claim_hardened_worker_protocol_smoke_not_static_scan() -> None:
+    combined = (_text(_README) + "\n" + _text(_OPERATOR)).lower()
+    assert "hardened worker protocol smoke" in combined
+    assert "exact pong" in combined
+    assert "non-root uid" in combined
+    assert "container-worker build/scan" not in combined
+    assert "static scan" not in combined
+
+
 def test_docs_do_not_reference_missing_paths() -> None:
     # Referenced tooling paths must exist.
     for path in _OPERATOR_FACING:

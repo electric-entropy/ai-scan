@@ -61,7 +61,7 @@ def test_package_gates_precede_upload() -> None:
         "scripts.credential_scan",
         "scripts.generate_sbom",
         "scripts.reproducible_build",
-        "Dockerfile.worker",
+        "Container worker hardened protocol smoke",
     ):
         assert gate in text, gate
         assert text.index(gate) < upload_at, gate
@@ -139,3 +139,32 @@ def test_pinned_shas_match_known_versions() -> None:
             known = _KNOWN_ACTION_SHAS.get(action, {})
             if ver in known:
                 assert sha.lower() == known[ver], f"{action}@{ver} SHA mismatch: {sha}"
+
+
+@pytest.mark.parametrize(
+    "path,image",
+    [(_CI, "ai-scan-worker:ci"), (_PACKAGE, "ai-scan-worker:release")],
+)
+def test_worker_workflow_runs_hardened_protocol_smoke(path: Path, image: str) -> None:
+    text = _text(path)
+    expected_request = (
+        "expected='{" + '"protocol_version":"worker-v1","operation":"ping","payload":""' + "}'"
+    )
+    expected_result = (
+        "test \"$actual\" = '{\"output\":\"pong\","
+        "\"protocol_version\":\"worker-v1\",\"status\":\"ok\"}'"
+    )
+    assert "Container worker hardened protocol smoke" in text
+    assert f"docker build -f Dockerfile.worker -t {image} ." in text
+    assert f"docker run --rm --entrypoint id {image} -u" in text
+    assert "test \"$uid\" != \"0\"" in text
+    for flag in (
+        "--network none",
+        "--read-only",
+        "--cap-drop ALL",
+        "--security-opt no-new-privileges",
+        "--user 65532:65532",
+    ):
+        assert flag in text
+    assert expected_request in text
+    assert expected_result in text

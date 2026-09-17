@@ -1,7 +1,8 @@
 """Agent memory poisoning and persistence boundary plugin.
 
-Memory checks use synthetic state only. They require explicit state-write
-authorization, declared identities, read-back evidence, and controls that prove a
+Memory checks use synthetic state only. Intrusive synthetic-state writes stay
+behind the separate ``state_write`` capability policy and require declared identities,
+read-back evidence, cleanup semantics, and controls that prove a
 benign same-identity memory path does not explain the result.
 """
 

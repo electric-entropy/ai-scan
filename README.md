@@ -133,6 +133,12 @@ packs, `py.typed`, and version/license metadata via `importlib.resources`,
 constructs no transport, needs no target, and exits `0` with a concise
 health summary (`--json` for machine-readable output).
 
+**Named-host HTTPS limitation.** AI-Scan currently fails closed for named-host
+HTTPS targets. Vetted-IP connection with preserved SNI and certificate hostname
+verification is not yet implemented, so ordinary hosted HTTPS endpoints are not
+a happy path today; use loopback/plain-HTTP fixtures for local release checks
+until that transport capability exists.
+
 **Optional isolated worker.** An opt-in local worker runs a bounded JSON request
 in a short-lived, hardened container (`Dockerfile.worker`): read-only rootfs,
 `--network none`, all capabilities dropped, non-root uid, tmpfs scratch, and
@@ -144,7 +150,7 @@ active-network semantics; egress stays disabled.
 
 ```bash
 # Point it at a target and it runs — no prompt, nothing to configure.
-ai-scan assess --target https://api.example.com/chat --out report.json
+ai-scan assess --target http://127.0.0.1:8080/chat --out report.json
 echo "exit code: $?"   # 0 clean / 3 confirmed / 4 inconclusive
 ```
 
@@ -263,8 +269,10 @@ permissions, per-job timeouts, and concurrency cancellation. Gates: a determinis
 credential scan, contract tests, the full suite, Ruff, strict Mypy, wheel/sdist
 builds, a fresh-wheel package-resource smoke check that also runs `ai-scan doctor`,
 a zero-runtime-dependency audit, CycloneDX SBOM generation/validation, a
-reproducible-build check (two builds compared by hash), and a hardened
-container-worker build/scan. The tag-gated release workflow
+reproducible-build check (two builds compared by hash), and a hardened worker
+protocol smoke that builds the image, verifies a non-root uid, and checks exact
+`ping` → `pong` behavior under `--network none`, `--read-only`,
+`--cap-drop ALL`, and `--security-opt no-new-privileges`. The tag-gated release workflow
 (`.github/workflows/package.yml`) re-runs every gate and verifies the tag equals
 the project version before uploading the built `dist/*` and SBOM as artifacts; it
 does not publish to any index and produces no signing/attestation/provenance. All

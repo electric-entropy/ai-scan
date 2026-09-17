@@ -10,11 +10,19 @@ AI-Scan is a local, CLI-first tool for LLM security assessment. Active scans run
 4. Keep intrusive capabilities separate from mode selection. Uploads, writes, tool actions, cross-identity tests, persistence, and resource-stress checks require explicit capability grants.
 5. Treat every request, retry, redirect attempt, control, confirmation, cleanup probe, discovery probe, upload, and read-back as a physical request for budget purposes.
 
+## Named-host HTTPS limitation
+
+Named-host HTTPS currently fails closed. AI-Scan does not yet implement vetted-IP
+connection while preserving SNI and certificate hostname verification, so docs
+and release checks should not present `https://example.test/...` as a usable
+happy path. Use local loopback/plain-HTTP fixtures unless and until that transport
+capability is implemented.
+
 ## Common commands
 
 ```bash
-ai-scan plan --target https://example.test/chat --mode reliable --out plan.json
-ai-scan run --target https://example.test/chat --plan plan.json --out report.json
+ai-scan plan --target http://127.0.0.1:8080/chat --mode reliable --out plan.json
+ai-scan run --target http://127.0.0.1:8080/chat --plan plan.json --out report.json
 ai-scan report --file report.json --format markdown
 ai-scan bundle validate --file evidence-bundle.json
 ai-scan bundle replay --file evidence-bundle.json
@@ -73,8 +81,13 @@ The supported release path is: (1) run the local gates above from a clean tree;
 (2) build artifacts (`python -m build`); (3) inspect wheel/sdist contents; (4)
 fresh-wheel install smoke; (5) the tag-gated `Package` workflow, which re-runs
 every gate — tests, ruff, mypy, credential scan, SBOM generation, reproducible
-build, worker image build/scan — and verifies the pushed tag equals the project
-version **before** uploading the built `dist/*` and SBOM as workflow artifacts.
+build, and hardened worker protocol smoke — and verifies the pushed tag equals
+the project version **before** uploading the built `dist/*` and SBOM as workflow
+artifacts.
 The workflow does **not** publish to any index on push; publishing is a separate,
 deliberate step. No artifact signing, attestation, or provenance is produced or
 claimed.
+The release and CI workflows also run a hardened worker protocol smoke: build the
+image, verify a non-root uid, then send the exact `worker-v1` ping request and
+require the exact pong result under `--network none`, `--read-only`,
+`--cap-drop ALL`, and `--security-opt no-new-privileges`.

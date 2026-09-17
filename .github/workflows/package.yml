@@ -110,7 +110,7 @@ jobs:
       - name: Reproducible build check
         run: python -m scripts.reproducible_build
 
-      - name: Container worker build and scan
+      - name: Container worker hardened protocol smoke
         run: |
           test -f Dockerfile.worker
           test -f .dockerignore
@@ -119,6 +119,9 @@ jobs:
           docker build -f Dockerfile.worker -t ai-scan-worker:release .
           uid="$(docker run --rm --entrypoint id ai-scan-worker:release -u)"
           test "$uid" != "0"
+          expected='{"protocol_version":"worker-v1","operation":"ping","payload":""}'
+          actual="$(printf '%s' "$expected" | docker run --rm --interactive --read-only --network none --cap-drop ALL --security-opt no-new-privileges --user 65532:65532 --workdir /work --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m --tmpfs /work:rw,noexec,nosuid,nodev,size=16m ai-scan-worker:release)"
+          test "$actual" = '{"output":"pong","protocol_version":"worker-v1","status":"ok"}'
 
       - name: Artifact contents listing
         run: |
