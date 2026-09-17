@@ -94,6 +94,28 @@ class BudgetLedger:
             and now - self._start > self.max_duration_seconds
         )
 
+    def remaining(self) -> float | None:
+        """Seconds left until the wall-clock deadline, or ``None`` if unbounded.
+
+        The deadline is a single monotonic absolute bound anchored at the first
+        reserved attempt (the run start). It is negative once the budget is
+        exhausted. Callers use it to bound resolution, connect, and response/
+        error-body I/O so no single blocking operation can overrun the run.
+        """
+        if self.max_duration_seconds is None:
+            return None
+        with self._lock:
+            start = self._start if self._start is not None else self.clock()
+            return self.max_duration_seconds - (self.clock() - start)
+
+    def check_deadline(self) -> None:
+        """Raise if the wall-clock deadline has passed (no partial credit)."""
+        remaining = self.remaining()
+        if remaining is not None and remaining <= 0:
+            raise BudgetExceededError(
+                f"time budget of {self.max_duration_seconds}s exceeded"
+            )
+
     @contextmanager
     def attempt(self, kind: AttemptKind) -> Iterator[None]:
         """Reserve one physical attempt of ``kind``, enforcing every budget.

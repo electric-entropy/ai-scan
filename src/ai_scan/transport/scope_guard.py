@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import ipaddress
 import socket
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -84,6 +85,7 @@ class ScopeGuard:
     allow_private: bool = False
     allowed_families: frozenset[int] = frozenset({4, 6})
     _pinned: dict[str, tuple[str, ...]] = field(default_factory=dict, repr=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def check(self, url: str) -> ResolvedEndpoint:
         """Validate ``url`` and its resolved IPs; return the pinned endpoint.
@@ -155,7 +157,12 @@ class ScopeGuard:
 
     def _check_rebinding(self, host: str, resolved: list[_IpAddress]) -> None:
         answer_key = tuple(sorted(ip.compressed for ip in resolved))
-        previous = self._pinned.get(host)
-        if previous is not None and previous != answer_key:
-            raise ScopeError("DNS rebinding detected: host resolution changed between attempts")
-        self._pinned[host] = answer_key
+        # The guard is shared for the whole transport lifetime, so the pin is
+        # read-modify-written under a lock to stay consistent under concurrency.
+        with self._lock:
+            previous = self._pinned.get(host)
+            if previous is not None and previous != answer_key:
+                raise ScopeError(
+                    "DNS rebinding detected: host resolution changed between attempts"
+                )
+            self._pinned[host] = answer_key

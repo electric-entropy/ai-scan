@@ -68,6 +68,7 @@ from ai_scan.transport import (
     TransportError,
     scrub_text,
 )
+from ai_scan.transport.http import reject_duplicate_json_keys
 
 EXIT_OK = 0
 EXIT_RUNTIME_ERROR = 1
@@ -653,16 +654,34 @@ def _load_body_template(args: argparse.Namespace) -> str:
             raise TransportError(
                 "request template must contain the '*' prompt marker."
             )
+        reject_duplicate_json_keys(template)
         return template
     return '{"input": "*"}'
 
 
 _DEFAULT_BUDGET = 128
 _DEFAULT_MIN_INTERVAL = 0.05
+# Legacy ``fingerprint``/``inject``/``assess`` commands predate plan-supplied
+# limits, but they must still have an absolute wall-clock ceiling.  Five minutes
+# preserves the historical command shape while preventing unbounded transport,
+# extraction, and classification work.
+_DEFAULT_MAX_DURATION_SECONDS = 300.0
 
 
 def _make_transport(controller: RequestController) -> Transport:
     return Transport(TransportConfig(), controller=controller)
+
+
+def _deadline_passed(controller: RequestController) -> bool:
+    """True when the run's absolute wall-clock deadline has already elapsed.
+
+    The transport bounds resolution/connect/body reads by this deadline, but
+    adapter *extraction* runs after the response returns. Checking here lets each
+    responder treat a result whose extraction crossed the deadline as unusable
+    (inconclusive) so post-deadline work can never confirm.
+    """
+    remaining = controller.ledger.remaining()
+    return remaining is not None and remaining <= 0
 
 
 def _build_generic_adapter(target: Target, *, method: str, body_template: str) -> Adapter:
@@ -736,8 +755,15 @@ def _run_plan_active(
             return ExchangeOutcome(body="", transport_ok=False)
         run_secrets.update(resp.known_secrets)
         evidence.append(resp.evidence())
+        body = adapter.extract(resp)
+        if _deadline_passed(controller):
+            # Extraction crossed the absolute deadline: this result is unusable
+            # (inconclusive) and must not be able to confirm.
+            return ExchangeOutcome(
+                body="", status=resp.status, transport_ok=False, attempts=resp.attempts
+            )
         return ExchangeOutcome(
-            body=adapter.extract(resp),
+            body=body,
             status=resp.status,
             redirected=resp.redirected,
             truncated=resp.truncated,
@@ -827,7 +853,9 @@ def _run_active(
     # A single controller enforces and counts every physical request (retries
     # included) across both engines, so budget and rate are unified.
     controller = RequestController(
-        max_requests=_DEFAULT_BUDGET, min_interval=_DEFAULT_MIN_INTERVAL
+        max_requests=_DEFAULT_BUDGET,
+        min_interval=_DEFAULT_MIN_INTERVAL,
+        max_duration_seconds=_DEFAULT_MAX_DURATION_SECONDS,
     )
     transport = _make_transport(controller)
     evidence: list[dict[str, object]] = []
@@ -854,9 +882,12 @@ def _run_active(
                 return ProbeExchange(probe.id, "", {}, status=0, transport_ok=False)
             run_secrets.update(resp.known_secrets)
             evidence.append(resp.evidence())
+            extracted = fingerprint_adapter.extract(resp)
+            if _deadline_passed(controller):
+                return ProbeExchange(probe.id, "", {}, status=0, transport_ok=False)
             return ProbeExchange(
                 probe.id,
-                fingerprint_adapter.extract(resp),
+                extracted,
                 resp.headers,
                 status=resp.status,
                 redirected=resp.redirected,
@@ -885,8 +916,13 @@ def _run_active(
                 return ExchangeOutcome(body="", transport_ok=False)
             run_secrets.update(resp.known_secrets)
             evidence.append(resp.evidence())
+            body = injection_adapter.extract(resp)
+            if _deadline_passed(controller):
+                return ExchangeOutcome(
+                    body="", status=resp.status, transport_ok=False, attempts=resp.attempts
+                )
             return ExchangeOutcome(
-                body=injection_adapter.extract(resp),
+                body=body,
                 status=resp.status,
                 redirected=resp.redirected,
                 truncated=resp.truncated,

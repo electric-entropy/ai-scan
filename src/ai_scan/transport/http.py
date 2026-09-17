@@ -24,6 +24,7 @@ where operator-controlled text lands.
 from __future__ import annotations
 
 import json
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -38,7 +39,7 @@ from ai_scan.transport._errors import (
     ScopeError,
     TransportError,
 )
-from ai_scan.transport.broker import RawExchange, RequestBroker, _NoRedirect
+from ai_scan.transport.broker import RawExchange, RequestBroker, build_scoped_opener
 from ai_scan.transport.budgets import (
     AttemptKind,
     BudgetLedger,
@@ -52,6 +53,7 @@ from ai_scan.transport.redaction import (
     redact_headers,
     redact_url,
     scrub_text,
+    scrubbed_key_map,
     sensitive_header_values,
     url_secret_values,
 )
@@ -296,6 +298,35 @@ def _encode_prompt(prompt: str, encoding: str) -> str:
     return prompt
 
 
+def reject_duplicate_json_keys(template: str) -> None:
+    """Reject a structured JSON body template that repeats a key (fail closed).
+
+    A duplicate-key JSON body sends an *earlier* value that ``json.loads``
+    (last-key-wins) then drops from the secret inventory, so a reflected earlier
+    credential could leak. This is the shared transport/adapter guard, applied
+    **before** any broker or request construction. A non-JSON (raw) template is
+    left untouched — raw mode is explicit and its bytes are sent verbatim.
+    """
+
+    def _no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        seen: set[str] = set()
+        for key, _value in pairs:
+            if key in seen:
+                raise ValueError(f"duplicate JSON key {key!r}")
+            seen.add(key)
+        return dict(pairs)
+
+    try:
+        json.loads(template, object_pairs_hook=_no_duplicates)
+    except ValueError as exc:
+        if "duplicate JSON key" in str(exc):
+            raise TransportError(
+                "request template has duplicate JSON keys; a structured template "
+                "must not repeat a key (use an explicit raw template instead)."
+            ) from exc
+        # Not valid JSON → an explicit raw template; nothing to check here.
+
+
 class Transport:
     """Sends templated requests within fixed safety bounds via the broker."""
 
@@ -319,7 +350,28 @@ class Transport:
         self._resolver = resolver
         self._allow_private = allow_private
         self._allowed_families = allowed_families
-        self._opener = urllib.request.build_opener(_NoRedirect)
+        self._opener = build_scoped_opener()
+        # One scope guard per target for the whole transport lifetime, so its
+        # DNS/rebinding pin survives across every send (a changed resolver answer
+        # between logical requests fails closed, not just within one send). The
+        # get-or-create must be atomic: without the lock two concurrent sends for
+        # the same target could each mint a guard with its own empty ``_pinned``,
+        # splitting the shared lifetime pin and defeating rebinding detection.
+        self._guards: dict[str, ScopeGuard] = {}
+        self._guards_lock = threading.Lock()
+
+    def _guard_for(self, target: Target) -> ScopeGuard:
+        with self._guards_lock:
+            guard = self._guards.get(target.url)
+            if guard is None:
+                guard = ScopeGuard(
+                    target=target,
+                    resolver=self._resolver,
+                    allow_private=self._allow_private,
+                    allowed_families=self._allowed_families,
+                )
+                self._guards[target.url] = guard
+            return guard
 
     def send(
         self,
@@ -370,6 +422,9 @@ class Transport:
         else:
             url = target.url
             template = body_template if body_template is not None else f'"{MARKER}"'
+            # Reject a duplicate-key structured template before any request is
+            # built or sent (a raw template is left untouched).
+            reject_duplicate_json_keys(template)
             body = _apply_marker(template, _encode_prompt(prompt, encoding))
             data = body.encode("utf-8")
             req_headers.setdefault("Content-Type", "application/json")
@@ -387,12 +442,7 @@ class Transport:
 
         broker = RequestBroker(
             ledger=self._ledger,
-            guard=ScopeGuard(
-                target=target,
-                resolver=self._resolver,
-                allow_private=self._allow_private,
-                allowed_families=self._allowed_families,
-            ),
+            guard=self._guard_for(target),
             timeout=self.config.timeout,
             max_response_bytes=self.config.max_response_bytes,
             opener=self._opener,
@@ -455,12 +505,7 @@ class Transport:
 
         broker = RequestBroker(
             ledger=self._ledger,
-            guard=ScopeGuard(
-                target=target,
-                resolver=self._resolver,
-                allow_private=self._allow_private,
-                allowed_families=self._allowed_families,
-            ),
+            guard=self._guard_for(target),
             timeout=self.config.timeout,
             max_response_bytes=self.config.max_response_bytes,
             opener=self._opener,
@@ -513,12 +558,16 @@ class Transport:
             location = scrub_text(redact_url(location), secret_values)
 
         body_text = scrub_text(payload.decode("utf-8", errors="replace"), secret_values)
-        # Redact response headers by name, then scrub *every* header value for
-        # reflected known secrets (an opaque credential echoed in an ordinary
-        # header must not survive).
+        # Redact response headers by name, then scrub *every* header value **and
+        # key** for reflected known secrets (an opaque credential echoed in an
+        # ordinary header value, or built into a header *name*, must not survive).
+        # Key disambiguation is order-independent so a scrubbed secret key can
+        # never silently overwrite an already-safe colliding header.
+        redacted_resp_headers = redact_headers(resp_headers)
+        key_map = scrubbed_key_map(list(redacted_resp_headers.keys()), secret_values)
         safe_resp_headers = {
-            key: scrub_text(value, secret_values)
-            for key, value in redact_headers(resp_headers).items()
+            key_map[key]: scrub_text(value, secret_values)
+            for key, value in redacted_resp_headers.items()
         }
         # A Location value carries secret-like query params even though the
         # header name itself is not sensitive; redact its URL in place.

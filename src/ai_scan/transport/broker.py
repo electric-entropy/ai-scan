@@ -23,11 +23,14 @@ import urllib.request
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 
-from ai_scan.transport._errors import ScopeError, TransportError
+from ai_scan.transport._errors import BudgetExceededError, ScopeError, TransportError
 from ai_scan.transport.budgets import AttemptKind, BudgetLedger
 from ai_scan.transport.scope_guard import ResolvedEndpoint, ScopeGuard
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+# Response-body read chunk (bytes); small enough that a slow-drip body is caught
+# by the wall-clock deadline check between chunks.
+_READ_CHUNK = 8192
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -35,6 +38,22 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, *_args: object, **_kwargs: object) -> None:
         return None
+
+
+def build_scoped_opener() -> urllib.request.OpenerDirector:
+    """Build the only opener the transport/broker may use.
+
+    Two safety properties are baked in and never left to ambient state:
+
+    * ``ProxyHandler({})`` — an **empty** proxy map disables urllib's default
+      environment-aware proxying, so an ambient ``http_proxy`` / ``HTTPS_PROXY``
+      (any case) can never divert a request away from the scope-vetted, pinned
+      destination or forward the target credential to a third party. Proxy
+      support, if ever wanted, must be an explicit transport feature with a
+      documented destination/trust contract, never inherited silently.
+    * :class:`_NoRedirect` — no 3xx is ever followed (scope fails closed).
+    """
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
 @dataclass
@@ -63,7 +82,7 @@ class RequestBroker:
         self._timeout = timeout
         self._max_response_bytes = max_response_bytes
         # Name-mangled: adapters/plugins holding a broker cannot reach the opener.
-        self.__opener = opener or urllib.request.build_opener(_NoRedirect)
+        self.__opener = opener or build_scoped_opener()
 
     @property
     def totals(self) -> dict[str, int]:
@@ -94,6 +113,9 @@ class RequestBroker:
             with self._ledger.attempt(kind):
                 # Budget is now held; scope is re-checked before any connection.
                 endpoint = self._guard.check(url)
+                # Resolution consumed real time; a slow resolver must not permit
+                # a connection to be opened after the run deadline has passed.
+                self._ledger.check_deadline()
                 return self._perform(endpoint, url, method, data, headers)
         except TransportError as exc:
             if exc.totals is None:
@@ -113,12 +135,13 @@ class RequestBroker:
         for key, value in req_headers.items():
             request.add_header(key, value)
 
+        timeout = self._connect_timeout()
         try:
-            raw = self.__opener.open(request, timeout=self._timeout)
+            raw = self.__opener.open(request, timeout=timeout)
             with contextlib.closing(raw):
                 status = raw.status
                 resp_headers = {k: v for k, v in raw.headers.items()}
-                payload = raw.read(self._max_response_bytes + 1)
+                payload = self._read_within_deadline(raw)
         except urllib.error.HTTPError as http_err:
             # Non-2xx (including our captured redirects) arrive here.
             with contextlib.closing(http_err):
@@ -126,8 +149,52 @@ class RequestBroker:
                 resp_headers = (
                     {k: v for k, v in http_err.headers.items()} if http_err.headers else {}
                 )
-                payload = http_err.read(self._max_response_bytes + 1)
+                payload = self._read_within_deadline(http_err)
+        # Keep the final state transition fail-closed even if a response object
+        # has unusual read semantics: expired bytes never become RawExchange.
+        self._ledger.check_deadline()
         return RawExchange(status=status, headers=resp_headers, payload=payload)
+
+    def _connect_timeout(self) -> float:
+        """Socket timeout for this attempt, clamped to the remaining deadline."""
+        remaining = self._ledger.remaining()
+        if remaining is None:
+            return self._timeout
+        if remaining <= 0:
+            raise BudgetExceededError("time budget exceeded before connect")
+        return min(self._timeout, remaining)
+
+    def _read_within_deadline(self, response: object) -> bytes:
+        """Read the body in chunks, bounded by both the byte and time budgets.
+
+        A slow-drip body can stay under both the per-read socket timeout and the
+        byte cap while overrunning the run's wall-clock deadline. Reading in
+        chunks and re-checking the deadline between them makes expired work fail
+        closed (``BudgetExceededError``) rather than complete as a usable 2xx.
+        """
+        limit = self._max_response_bytes + 1
+        if self._ledger.remaining() is None:
+            whole: bytes = response.read(limit)  # type: ignore[attr-defined]
+            return whole
+        # ``read1`` returns data from a single underlying recv, so a slow-drip
+        # body yields control between chunks (a plain ``read(n)`` would block for
+        # the full content-length). Fall back to bounded ``read`` when a response
+        # object (e.g. some error bodies) does not expose ``read1``.
+        read1 = getattr(response, "read1", None)
+        read = read1 if read1 is not None else response.read  # type: ignore[attr-defined]
+        chunks: list[bytes] = []
+        total = 0
+        while total < limit:
+            self._ledger.check_deadline()
+            chunk = read(min(_READ_CHUNK, limit - total))
+            # A blocking read can cross the absolute deadline.  Check after
+            # every read, including terminal EOF, before using its result.
+            self._ledger.check_deadline()
+            if not chunk:
+                break
+            chunks.append(chunk)
+            total += len(chunk)
+        return b"".join(chunks)
 
 
 def _target_authority(endpoint: ResolvedEndpoint) -> str:

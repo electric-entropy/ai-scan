@@ -22,8 +22,14 @@ from ai_scan.adapters.base import (
     extract_text,
 )
 from ai_scan.targets import Target
-from ai_scan.transport import ACTIVE_METHODS, HttpResponse, TransportConfig, scrub_text
-from ai_scan.transport.http import _apply_marker, _encode_prompt
+from ai_scan.transport import (
+    ACTIVE_METHODS,
+    HttpResponse,
+    TransportConfig,
+    TransportError,
+    scrub_text,
+)
+from ai_scan.transport.http import _apply_marker, _encode_prompt, reject_duplicate_json_keys
 
 _VALID_ENCODINGS = frozenset({"json", "url", "raw"})
 _DEFAULT_USER_AGENT = TransportConfig().user_agent
@@ -87,6 +93,12 @@ class GenericHttpAdapter:
             )
             if MARKER not in template:
                 raise AdapterConfigError("body template must contain the '*' prompt marker")
+            # Reject a duplicate-key structured template at construction, before
+            # any request is built (a raw template is left untouched).
+            try:
+                reject_duplicate_json_keys(template)
+            except TransportError as exc:
+                raise AdapterConfigError(str(exc)) from exc
 
     def capabilities(self) -> AdapterCapabilities:
         return CAPABILITIES

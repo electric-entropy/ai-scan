@@ -19,8 +19,10 @@ deterministic validation still works.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from collections import Counter
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
@@ -246,23 +248,65 @@ _AUTH_SCHEME_WORDS = frozenset(
 )
 
 
+_COOKIE_HEADER_KEYS = frozenset({"cookie", "set_cookie"})
+# Cookie *attributes* are structural, not credentials — never track their values
+# as secrets (tracking ``Path=/`` would scrub every ``/``).
+_COOKIE_ATTRS = frozenset(
+    {
+        "path",
+        "domain",
+        "expires",
+        "max-age",
+        "secure",
+        "httponly",
+        "samesite",
+        "version",
+        "comment",
+        "priority",
+    }
+)
+
+
+def _is_cookie_header(name: str) -> bool:
+    return "_".join(_key_tokens(name)) in _COOKIE_HEADER_KEYS
+
+
+def _cookie_secret_values(value: str) -> set[str]:
+    """Credential values from a ``Cookie`` header, by cookie syntax not whitespace."""
+    out: set[str] = set()
+    for pair in value.split(";"):
+        name, sep, cval = pair.strip().partition("=")
+        if not sep:
+            continue
+        if name.strip().lower() in _COOKIE_ATTRS:
+            continue
+        cval = cval.strip()
+        if cval and cval.lower() not in _AUTH_SCHEME_WORDS:
+            out.update(_value_variants(cval))
+    return out
+
+
 def sensitive_header_values(headers: dict[str, str]) -> frozenset[str]:
     """Sensitive request-header secret values, for body/response scrubbing.
 
-    Collects the full value *and* each of its whitespace-separated components —
-    regardless of length — so a scheme-prefixed credential (``Bearer <token>``,
-    ``Basic <b64>``) is caught even when the target reflects only the bare
-    token, and even when that token is short (``Bearer abc123`` → ``abc123``).
-    Known authentication-scheme keywords are excluded so the scheme word itself
-    is never treated as a secret.
+    Collects the full value *and* each credential component — regardless of
+    length — so a scheme-prefixed credential (``Bearer <token>``, ``Basic
+    <b64>``) is caught even when the target reflects only the bare token. A
+    ``Cookie`` header is split by cookie syntax (``name=value`` pairs), not
+    whitespace, so the bare cookie value is tracked (and cookie *attributes* are
+    not). Known authentication-scheme keywords are excluded so the scheme word
+    itself is never treated as a secret.
     """
     values: set[str] = set()
     for key, value in headers.items():
         if is_sensitive_header(key) and value:
             values.add(value)
-            for part in value.split():
-                if part and part.lower() not in _AUTH_SCHEME_WORDS:
-                    values.add(part)
+            if _is_cookie_header(key):
+                values.update(_cookie_secret_values(value))
+            else:
+                for part in value.split():
+                    if part and part.lower() not in _AUTH_SCHEME_WORDS:
+                        values.add(part)
     return frozenset(values)
 
 
@@ -310,11 +354,19 @@ def body_secret_values(
     values: set[str] = set()
 
     def _harvest_json() -> bool:
+        # Harvest during parsing via an object hook so that *every* occurrence of
+        # a duplicated credential key is collected — ``json.loads`` alone keeps
+        # only the last value, dropping an earlier secret from the inventory.
+        def _hook(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+            for key, val in pairs:
+                if isinstance(key, str) and _is_credential_key(key):
+                    _collect_leaf_strings(val, values)
+            return dict(pairs)
+
         try:
-            parsed = json.loads(text)
+            json.loads(text, object_pairs_hook=_hook)
         except (ValueError, TypeError):
             return False
-        _collect_structured_secrets(parsed, values)
         return True
 
     def _harvest_form() -> None:
@@ -331,19 +383,6 @@ def body_secret_values(
         if not _harvest_json():
             _harvest_form()
     return frozenset(v for v in values if v)
-
-
-def _collect_structured_secrets(node: Any, out: set[str]) -> None:
-    """Walk a parsed JSON structure, collecting values under credential keys."""
-    if isinstance(node, dict):
-        for key, value in node.items():
-            if isinstance(key, str) and _is_credential_key(key):
-                _collect_leaf_strings(value, out)
-            # Always recurse: a credential key may be nested deeper too.
-            _collect_structured_secrets(value, out)
-    elif isinstance(node, list):
-        for item in node:
-            _collect_structured_secrets(item, out)
 
 
 def _collect_leaf_strings(node: Any, out: set[str]) -> None:
@@ -385,26 +424,155 @@ def _matches_secret_pattern(text: str) -> bool:
     return any(p.search(text) for p in _SECRET_PATTERNS)
 
 
-def scrub_text(text: str, known_secrets: frozenset[str] = frozenset()) -> str:
+# Every simple JSON string escape (``\\"``, ``\\n`` …). ``\\uXXXX`` (and
+# surrogate pairs) are handled by the scanner below.
+_JSON_SIMPLE_ESCAPES = {
+    '"': '"',
+    "\\": "\\",
+    "/": "/",
+    "b": "\b",
+    "f": "\f",
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+}
+# Maximum JSON-string nesting depth and text size we will semantically
+# decode/redact. These bounds prevent hostile evidence from turning redaction
+# into an unbounded memory/CPU sink; oversized input fails closed.
+_JSON_NEST_CAP = 8
+_JSON_TEXT_SIZE_CAP = 1_048_576
+
+
+def _json_unescape_once(text: str) -> str:
+    """One pass of JSON string-escape decoding, combining surrogate pairs.
+
+    ``\\uD83D\\uDD11`` becomes the astral codepoint (🔑), not two lone
+    surrogates, so a secret containing non-BMP characters is still seen.
+    """
+    if "\\" not in text:
+        return text
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        ch = text[i]
+        if ch != "\\" or i + 1 >= n:
+            out.append(ch)
+            i += 1
+            continue
+        nxt = text[i + 1]
+        if nxt == "u" and i + 6 <= n:
+            try:
+                code = int(text[i + 2 : i + 6], 16)
+            except ValueError:
+                out.append(ch)
+                i += 1
+                continue
+            # High surrogate followed by a low surrogate → combine.
+            if 0xD800 <= code <= 0xDBFF and text[i + 6 : i + 8] == "\\u" and i + 12 <= n:
+                try:
+                    low = int(text[i + 8 : i + 12], 16)
+                except ValueError:
+                    low = 0
+                if 0xDC00 <= low <= 0xDFFF:
+                    combined = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)
+                    out.append(chr(combined))
+                    i += 12
+                    continue
+            out.append(chr(code))
+            i += 6
+            continue
+        if nxt in _JSON_SIMPLE_ESCAPES:
+            out.append(_JSON_SIMPLE_ESCAPES[nxt])
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def _json_unescape_fixed(text: str) -> tuple[str, bool]:
+    """Decode JSON string escapes to a fixed point (bounded).
+
+    Multiply-escaped input (``\\\\u004f`` → ``\\u004f`` → ``O``) is decoded
+    repeatedly until stable. Returns ``(decoded, suspicious)`` where
+    ``suspicious`` is True if it was still changing at the cap (treat as hostile).
+    """
+    current = text
+    for _ in range(_JSON_NEST_CAP):
+        nxt = _json_unescape_once(current)
+        if nxt == current:
+            return current, False
+        current = nxt
+    return current, True
+
+
+def _redact_json_embedded(
+    text: str, known_secrets: frozenset[str], depth: int
+) -> str | None:
+    """Redact secrets *inside* a JSON document, keeping the output valid JSON.
+
+    Parsing decodes every escape (surrogate pairs included), so ``_scrub``
+    removes the secret in all parsed occurrences — including nested JSON encoded
+    as a string value, via the ``depth``-bounded recursion through ``scrub_text``.
+    Re-serializing yields valid, secret-free JSON. Returns ``None`` when ``text``
+    is not a JSON document, so the caller falls back to whole-string redaction.
+    """
+    try:
+        parsed = json.loads(text)
+    except (ValueError, TypeError, RecursionError):
+        return None
+    scrubbed = _scrub(parsed, known_secrets, (), depth)
+    try:
+        return json.dumps(scrubbed, ensure_ascii=False)
+    except (ValueError, TypeError):  # pragma: no cover - scrubbed is JSON-safe
+        return None
+
+
+def scrub_text(
+    text: str, known_secrets: frozenset[str] = frozenset(), *, _depth: int = 0
+) -> str:
     """Redact credential literals and reflected known secrets from ``text``.
 
     A credential-format match redacts the whole string. Known reflected secrets
-    are replaced in place so surrounding (non-secret) evidence is preserved; but
-    if a known secret is present only once percent-encoding is peeled away — or
-    the string is encoded beyond the bounded cap (fail closed) — the whole
-    string is redacted.
+    are replaced in place so surrounding (non-secret) evidence is preserved. A
+    secret recoverable only after peeling percent-encoding, or JSON string
+    escaping (``\\uXXXX`` incl. surrogate pairs, simple escapes, and
+    multiply/nested-encoded JSON, all to a bounded fixed point), is redacted:
+    *inside* the JSON when ``text`` is a JSON document (so it stays valid), else
+    the whole string is redacted (fail closed). ``_depth`` bounds nested-JSON
+    recursion.
     """
+    if len(text) > _JSON_TEXT_SIZE_CAP:
+        return REDACTED
     decoded, suspicious = _decode_to_fixed_point(text)
     if suspicious:
         return REDACTED
     if _matches_secret_pattern(text) or (decoded != text and _matches_secret_pattern(decoded)):
         return REDACTED
+    secrets = sorted((s for s in known_secrets if s), key=len, reverse=True)
     result = text
-    for secret in sorted((s for s in known_secrets if s), key=len, reverse=True):
+    for secret in secrets:
         if secret in result:
             result = result.replace(secret, REDACTED)
         elif decoded != text and secret in decoded:
+            # Present only once percent-decoding is peeled away — fail closed.
             return REDACTED
+    # Any secret still recoverable from the (raw-redacted) string via a bounded
+    # fixed-point JSON unescape — mixed raw+escaped, surrogate pairs, and
+    # nested/double-encoded JSON — is redacted *inside* the JSON so the persisted
+    # body stays valid, falling back to whole-string redaction when the text is
+    # not a JSON document or nesting exceeds the cap.
+    residual, residual_suspicious = _json_unescape_fixed(result)
+    # Still-changing escape layers at the semantic cap are unresolved hostile
+    # input.  The known secret may be hidden beyond the partially decoded value,
+    # so visibility at this intermediate layer is not a safe acceptance test.
+    if residual_suspicious:
+        return REDACTED
+    if residual != result and any(secret in residual for secret in secrets):
+        if _depth >= _JSON_NEST_CAP:
+            return REDACTED
+        embedded = _redact_json_embedded(text, frozenset(secrets), _depth + 1)
+        return embedded if embedded is not None else REDACTED
     return result
 
 
@@ -429,53 +597,113 @@ def scrub_structure(value: Any, known_secrets: frozenset[str] = frozenset()) -> 
     return _scrub(value, frozenset(known_secrets), ())
 
 
-def _scrub(value: Any, known: frozenset[str], ancestors: tuple[int, ...]) -> Any:
+def _short_key_hash(key: str) -> str:
+    """A short, stable, order-independent disambiguator for a mapping key."""
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+
+
+def scrubbed_key_map(keys: list[str], known: frozenset[str]) -> dict[str, str]:
+    """Map each original mapping key to a scrubbed, collision-free output key.
+
+    A credential can hide in an untrusted key name (e.g. a reflected response
+    header ``X-<secret>``); the key text is scrubbed. Disambiguation is
+    **order-independent and deterministic**: whenever two or more original keys
+    would land on the same scrubbed name (including a scrubbed secret key
+    colliding with an already-safe key), *every* colliding original gets a stable
+    suffix derived from its own content — so no entry is ever silently dropped
+    or overwritten, regardless of iteration order.
+    """
+    if len(set(keys)) != len(keys):
+        raise RedactionError("duplicate source mapping keys cannot be disambiguated")
+
+    scrubbed = {key: scrub_text(key, known) for key in keys}
+    collisions = Counter(scrubbed.values())
+    candidates = {
+        key: (
+            f"{scrubbed[key]}#{_short_key_hash(key)}"
+            if collisions[scrubbed[key]] > 1
+            else scrubbed[key]
+        )
+        for key in keys
+    }
+
+    # A generated suffix can itself equal an existing scrubbed key, and bounded
+    # hashes can collide. Resolve every resulting collision deterministically by
+    # original-key sort order, repeating for adversarial collision chains. With
+    # N unique source keys, at most N rounds can absorb a finite chain; otherwise
+    # fail closed rather than permit a silent overwrite.
+    for _ in range(len(keys) + 1):
+        groups: dict[str, list[str]] = {}
+        for key, candidate in candidates.items():
+            groups.setdefault(candidate, []).append(key)
+        duplicate_groups = [group for group in groups.values() if len(group) > 1]
+        if not duplicate_groups:
+            return candidates
+        for group in duplicate_groups:
+            for rank, key in enumerate(sorted(group)):
+                candidates[key] = (
+                    f"{candidates[key]}#{_short_key_hash(key)}#{rank}"
+                )
+    raise RedactionError("mapping keys cannot be disambiguated safely")
+
+
+def _scrub_mapping(
+    value: dict[str, Any],
+    known: frozenset[str],
+    chain: tuple[int, ...],
+    depth: int,
+    *,
+    redact_by_name: bool,
+) -> dict[str, Any]:
+    for key in value:
+        if not isinstance(key, str):
+            raise RedactionError(f"non-string mapping key: {type(key).__name__}")
+    key_map = scrubbed_key_map(list(value.keys()), known)
+    out: dict[str, Any] = {}
+    for key, item in value.items():
+        safe_key = key_map[key]
+        if redact_by_name and _is_sensitive_field(key):
+            out[safe_key] = REDACTED
+        elif _is_url_field(key):
+            out[safe_key] = _redact_urls(item, known, chain, depth)
+        else:
+            out[safe_key] = (
+                _redact(item, known, chain, depth)
+                if redact_by_name
+                else _scrub(item, known, chain, depth)
+            )
+    return out
+
+
+def _scrub(value: Any, known: frozenset[str], ancestors: tuple[int, ...], depth: int = 0) -> Any:
     if value is None or isinstance(value, bool) or isinstance(value, (int, float)):
         return value
     if isinstance(value, str):
-        return scrub_text(value, known)
+        return scrub_text(value, known, _depth=depth)
     if isinstance(value, (dict, list, tuple)):
         vid = id(value)
         if vid in ancestors:
             raise RedactionError("cyclic structure cannot be scrubbed safely")
         chain = (*ancestors, vid)
         if isinstance(value, dict):
-            out: dict[str, Any] = {}
-            for key, item in value.items():
-                if not isinstance(key, str):
-                    raise RedactionError(f"non-string mapping key: {type(key).__name__}")
-                if _is_url_field(key):
-                    out[key] = _redact_urls(item, known, chain)
-                else:
-                    out[key] = _scrub(item, known, chain)
-            return out
-        return [_scrub(item, known, chain) for item in value]
+            return _scrub_mapping(value, known, chain, depth, redact_by_name=False)
+        return [_scrub(item, known, chain, depth) for item in value]
     raise RedactionError(f"unsupported value type for scrubbing: {type(value).__name__}")
 
 
-def _redact(value: Any, known: frozenset[str], ancestors: tuple[int, ...]) -> Any:
+def _redact(value: Any, known: frozenset[str], ancestors: tuple[int, ...], depth: int = 0) -> Any:
     if value is None or isinstance(value, bool) or isinstance(value, (int, float)):
         return value
     if isinstance(value, str):
-        return scrub_text(value, known)
+        return scrub_text(value, known, _depth=depth)
     if isinstance(value, (dict, list, tuple)):
         vid = id(value)
         if vid in ancestors:
             raise RedactionError("cyclic structure cannot be redacted safely")
         chain = (*ancestors, vid)
         if isinstance(value, dict):
-            out: dict[str, Any] = {}
-            for key, item in value.items():
-                if not isinstance(key, str):
-                    raise RedactionError(f"non-string mapping key: {type(key).__name__}")
-                if _is_sensitive_field(key):
-                    out[key] = REDACTED
-                elif _is_url_field(key):
-                    out[key] = _redact_urls(item, known, chain)
-                else:
-                    out[key] = _redact(item, known, chain)
-            return out
-        return [_redact(item, known, chain) for item in value]
+            return _scrub_mapping(value, known, chain, depth, redact_by_name=True)
+        return [_redact(item, known, chain, depth) for item in value]
     raise RedactionError(f"unsupported value type for redaction: {type(value).__name__}")
 
 
@@ -491,10 +719,12 @@ def _is_url_field(key: str) -> bool:
     return bool(tokens) and tokens[-1] in _URL_FIELD_SUFFIX
 
 
-def _redact_urls(value: Any, known: frozenset[str], ancestors: tuple[int, ...]) -> Any:
+def _redact_urls(
+    value: Any, known: frozenset[str], ancestors: tuple[int, ...], depth: int = 0
+) -> Any:
     """Redact a URL-bearing field: route strings through redact_url + scrub."""
     if isinstance(value, str):
-        return scrub_text(redact_url(value), known)
+        return scrub_text(redact_url(value), known, _depth=depth)
     if isinstance(value, list):
-        return [_redact_urls(item, known, ancestors) for item in value]
-    return _redact(value, known, ancestors)
+        return [_redact_urls(item, known, ancestors, depth) for item in value]
+    return _redact(value, known, ancestors, depth)
