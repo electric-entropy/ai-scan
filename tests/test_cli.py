@@ -11,7 +11,15 @@ import pytest
 import ai_scan
 from ai_scan import cli
 
-SUBCOMMANDS = ("fingerprint", "inject", "assess", "plan", "run", "supply-chain-audit")
+SUBCOMMANDS = (
+    "fingerprint",
+    "inject",
+    "assess",
+    "plan",
+    "run",
+    "supply-chain-audit",
+    "data-poisoning-audit",
+)
 
 
 def _run_module(*args: str) -> subprocess.CompletedProcess[str]:

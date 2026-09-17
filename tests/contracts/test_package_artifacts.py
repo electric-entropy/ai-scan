@@ -38,6 +38,7 @@ EXPECTED_DATA = [
     "owasp/llm-top10-2025-v1.json",
     "owasp/supply-chain-secure-v1.json",
     "owasp/supply-chain-vulnerable-v1.json",
+    "owasp/llm04-retrieval-protocol-v1.json",
     "reporting/templates/report.html",
 ]
 EXPECTED_SDIST_FILES = [

@@ -54,11 +54,15 @@ ai-scan replay           --bundle bundle.json --validate-only
 ai-scan validate-config  --kind KIND --file doc.json
 ai-scan doctor           [--json]
 ai-scan owasp-coverage   [--format summary|json]
+ai-scan supply-chain-audit    --manifest FILE [--format human|json]
+ai-scan data-poisoning-audit  --target URL [--format human|json]
 ```
 
 `bundle validate|replay`, the top-level `replay`, `report`, `baseline`,
-`validate-config`, `packs`, `adapters`, `doctor`, and `owasp-coverage` are all
-**offline** — they construct no transport and touch no network.
+`validate-config`, `packs`, `adapters`, `doctor`, `owasp-coverage`, and
+`supply-chain-audit` are all **offline** — they construct no transport and touch
+no network. `data-poisoning-audit` is active: it contacts only the exact
+operator-supplied `--target` URL through the hardened scope-safe transport.
 
 Active commands (`fingerprint`, `inject`, `assess`, `run`) run **unattended** —
 you point them at a `--target` and they run, so they can be launched and left to
@@ -155,6 +159,19 @@ non-symlink artifact manifest, performs no network access, constructs no
 transport, and never imports/loads/deserializes model artifacts. Registry checks,
 signatures/attestations, dataset contents, model behavior, artifact byte hashing,
 and runtime dependency resolution remain gaps.
+LLM04 has only partial active controlled retrieval-protocol coverage through
+`ai-scan data-poisoning-audit --target URL`: AI-Scan sends a fixed strict JSON
+operation sequence to one exact target path through the existing scope-safe
+transport; the independently running service owns ingestion state and retrieval
+behavior. Confirmation requires exact eligible retrieval content after poisoning,
+pre-poison absence, clean controls, namespace isolation, and verified cleanup.
+Metadata/envelope/error/explanation/request-echo marker appearances do not
+confirm. Model-weight poisoning, fine-tuning poisoning, production RAG,
+embeddings, feedback learning, and non-protocol target/model behavior remain
+gaps. A deadline, budget, transport, or cleanup-verification failure after an
+uncertain ingestion can leave the controlled poison item unresolved and requires
+explicit service-side or operator reconciliation; public output reports that
+state without exposing the target, item identifier, or marker.
 LLM06 and LLM07 pack mappings are capability-gated/unreachable without a public
 capability selector and do not count as active end-to-end CLI coverage. Matrix identifiers
 for remediation/report/SARIF are reserved contract identifiers for future

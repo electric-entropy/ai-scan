@@ -64,9 +64,11 @@ def test_current_state_is_honest_about_active_end_to_end_coverage() -> None:
     assert categories["LLM01"].current_active_cli_coverage is True
     assert categories["LLM02"].current_active_cli_coverage is True
     assert categories["LLM03"].current_active_cli_coverage is True
+    assert categories["LLM04"].current_active_cli_coverage is True
     assert categories["LLM03"].scaffolding_only is False
     assert categories["LLM02"].scaffolding_only is False
-    inactive_ids = ("LLM04", "LLM05", "LLM06", "LLM07", "LLM08", "LLM09", "LLM10")
+    assert categories["LLM04"].scaffolding_only is False
+    inactive_ids = ("LLM05", "LLM06", "LLM07", "LLM08", "LLM09", "LLM10")
     for category_id in inactive_ids:
         category = categories[category_id]
         assert category.current_active_cli_coverage is False
@@ -106,7 +108,7 @@ def test_reliable_and_kitchen_sink_breadth_differ_without_full_claims() -> None:
     summary = coverage_summary(matrix)
     assert summary["categories_total"] == 10
     assert summary["full_coverage_claim_allowed"] is False
-    assert summary["active_end_to_end_categories"] == 3
+    assert summary["active_end_to_end_categories"] == 4
     assert summary["active_end_to_end_categories"] < summary["categories_total"]
 
 
@@ -207,6 +209,36 @@ def test_llm03_active_claim_is_limited_to_offline_manifest_cli() -> None:
     assert llm03.mode_breadth.reliable == (
         "supply-chain-audit: bounded offline manifest validation for declared model, "
         "dataset, plugin, and dependency provenance fields",
+    )
+
+
+def test_llm04_active_claim_is_limited_to_external_retrieval_protocol_cli() -> None:
+    matrix = load_coverage_matrix()
+    llm04 = next(c for c in matrix.categories if c.id == "LLM04")
+
+    assert llm04.current_active_cli_coverage is True
+    assert llm04.scaffolding_only is False
+    assert "finding" in llm04.allowed_outcomes
+    assert "partial active LLM04 controlled retrieval-poisoning protocol" in (
+        llm04.active_coverage_source
+    )
+    assert "exact --target URL" in llm04.active_coverage_source
+    assert "scope-safe transport" in llm04.active_coverage_source
+    assert "independently running service implements state" in llm04.active_coverage_source
+    limitations = " ".join(llm04.known_limitations).lower()
+    assert "explicit service-side or operator reconciliation" in limitations
+    for gap in (
+        "model-weight poisoning",
+        "fine-tuning poisoning",
+        "production rag",
+        "embeddings",
+        "real target/model behavior beyond the controlled protocol",
+    ):
+        assert gap in limitations
+    assert llm04.mode_breadth.reliable == (
+        "data-poisoning-audit: active fixed HTTP retrieval fixture protocol with "
+        "scanner-generated marker, strict operation order, clean controls, namespace "
+        "isolation, and verified cleanup",
     )
 
 
@@ -331,7 +363,7 @@ def test_duplicate_json_keys_are_rejected() -> None:
 
 def test_contradictory_active_or_full_states_are_rejected() -> None:
     def unsupported_marked_active(doc: dict[str, object]) -> None:
-        cat = doc["categories"][3]  # LLM04 data and model poisoning
+        cat = doc["categories"][4]  # LLM05 improper output handling
         cat["current_active_cli_coverage"] = True
 
     def full_claim_from_partial(doc: dict[str, object]) -> None:
@@ -339,7 +371,7 @@ def test_contradictory_active_or_full_states_are_rejected() -> None:
         cat["full_coverage_claim_allowed"] = True
 
     def finding_without_active_coverage(doc: dict[str, object]) -> None:
-        cat = doc["categories"][3]
+        cat = doc["categories"][4]
         cat["allowed_outcomes"] = ["finding", "tested"]
 
     for mutator in (

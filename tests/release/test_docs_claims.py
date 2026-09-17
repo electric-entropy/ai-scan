@@ -115,9 +115,16 @@ def test_owasp_docs_describe_current_mode_breadth_and_limits_truthfully() -> Non
     }
     assert len(kitchen_sink.cases) > len(reliable.cases)
     assert reliable.limits != kitchen_sink.limits
-    assert "active llm01, llm02, and partial offline-manifest llm03 coverage only" in normalized
+    assert (
+        "active llm01, llm02, partial offline-manifest llm03, and partial active "
+        "controlled-retrieval-protocol llm04 coverage only"
+    ) in normalized
     assert "supply-chain-audit --manifest file" in normalized
+    assert "data-poisoning-audit --target url" in normalized
     assert "never imports, deserializes, loads, hashes, or executes model artifacts" in normalized
+    assert "external service owns state and decides retrieval behavior" in normalized
+    assert "model-weight poisoning" in normalized and "fine-tuning poisoning" in normalized
+    assert "explicit service-side or operator reconciliation" in normalized
     assert "registry lookups" in normalized and "runtime dependency loading" in normalized
     assert "prompt-disclosure-reliable" in normalized
     assert "indirect injection and true multi-turn coverage remain unsupported" in normalized
@@ -128,6 +135,12 @@ def test_owasp_docs_describe_current_mode_breadth_and_limits_truthfully() -> Non
     assert "differ only in scenario breadth" not in normalized
     assert "never change budgets" not in normalized
     assert "budgets are identical" not in normalized
+
+
+def test_llm04_docs_disclose_unresolved_external_state_limit() -> None:
+    required = "explicit service-side or operator reconciliation"
+    for path in (_README, _OWASP_COVERAGE):
+        assert required in " ".join(_text(path).lower().split())
 
 
 _CHANGELOG = _REPO_ROOT / "CHANGELOG.md"

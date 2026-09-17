@@ -169,11 +169,11 @@
         "Declared SHA-256 values are shape-checked but artifact bytes are not fetched or hashed by this command"
       ],
       "mode_breadth": {
-        "reliable": [
-          "supply-chain-audit: bounded offline manifest validation for declared model, dataset, plugin, and dependency provenance fields"
-        ],
         "kitchen_sink": [
           "same current offline manifest assessment as Reliable; no broader live supply-chain, registry, signature, or runtime dependency-resolution coverage is claimed"
+        ],
+        "reliable": [
+          "supply-chain-audit: bounded offline manifest validation for declared model, dataset, plugin, and dependency provenance fields"
         ]
       },
       "name": "Supply Chain",
@@ -221,43 +221,45 @@
       ]
     },
     {
-      "active_coverage_source": "rag-isolation prompt overlap exists, but poisoning ingestion is not current active end-to-end coverage",
+      "active_coverage_source": "public data-poisoning-audit CLI executes a partial active LLM04 controlled retrieval-poisoning protocol against an explicitly supplied exact --target URL: the independently running service implements state and retrieval behavior while AI-Scan sends a fixed strict JSON operation sequence through the scope-safe transport and confirms only from exact eligible retrieval.content after controls and verified cleanup.",
       "allowed_outcomes": [
-        "not_tested",
+        "tested",
+        "finding",
         "blocked",
         "inconclusive",
         "not_applicable"
       ],
       "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
-      "current_active_cli_coverage": false,
+      "current_active_cli_coverage": true,
       "deterministic_evidence": [
-        "Identity-bound poisoned item changes retrieval/model behavior and clean controls remain unaffected"
+        "Exact generated poison marker appears as the complete eligible retrieval.content from an independently running controlled HTTP fixture service only after poison ingestion, with pre-poison absence, clean query control, namespace isolation, strict protocol identity, and verified cleanup absence"
       ],
       "full_coverage_claim_allowed": false,
       "id": "LLM04",
       "known_limitations": [
-        "Phase 2B work required before active end-to-end coverage",
-        "Prompt/template overlap or library scaffolding is not counted as active coverage",
-        "unsupported by current CLI as a finding-producing category"
+        "Partial active controlled retrieval fixture protocol only; no full LLM04 coverage claim is allowed",
+        "Data/retrieval poisoning protocol only: model-weight poisoning, fine-tuning poisoning, production RAG, embeddings, feedback learning, and real target/model behavior beyond the controlled protocol remain out of scope",
+        "Metadata/envelope/error/explanation/request-echo appearances, prefixed/suffixed marker text, dirty controls, namespace crossover, malformed evidence, reordered/replayed/wrong-identity responses, or unverified cleanup cannot confirm",
+        "A deadline, budget, transport, or cleanup-verification failure after uncertain ingestion can leave the controlled poison item unresolved and requires explicit service-side or operator reconciliation"
       ],
       "mode_breadth": {
         "kitchen_sink": [
-          "planned dataset/fine-tuning/model provenance poisoning variants"
+          "same current active controlled retrieval fixture protocol as Reliable; no broader dataset/fine-tuning/model-weight/embedding poisoning coverage is claimed"
         ],
         "reliable": [
-          "planned controlled RAG/memory poisoning fixtures"
+          "data-poisoning-audit: active fixed HTTP retrieval fixture protocol with scanner-generated marker, strict operation order, clean controls, namespace isolation, and verified cleanup"
         ]
       },
       "name": "Data and Model Poisoning",
       "not_applicable_when": [
         "No ingestion or retrieval/update path is exposed"
       ],
-      "phase_2b_planned": true,
+      "phase_2b_planned": false,
       "prerequisites": [
-        "Operator can insert and later query controlled poisoned content in a local fixture"
+        "Operator supplies an explicit exact --target URL for an independently running controlled service implementing ai-scan-llm04-retrieval-v1"
       ],
       "required_controls": [
-        "Clean corpus/memory controls and absence checks"
+        "Strict protocol controls reject malformed, duplicate-key, unknown-field, wrong trial/op identity, replayed/reordered, non-2xx, redirect, truncated, dirty-control, namespace-crossover, and cleanup-failure evidence before confirmation"
       ],
       "reserved_remediation_id": "ai-scan.owasp.LLM04.remediation",
       "reserved_report_ids": [
@@ -265,31 +267,31 @@
         "ai-scan.owasp.LLM04.evidence"
       ],
       "reserved_sarif_rule_id": "ai-scan.owasp.LLM04.rule",
-      "scaffolding_only": true,
+      "scaffolding_only": false,
       "supported_scenarios": [
         {
-          "active_cli": false,
+          "active_cli": true,
           "controls": [
-            "Clean corpus/memory controls and absence checks"
+            "Exact target/path scope through hardened transport; fixed operation order; no selectable engine; pre-poison absence, clean-query, namespace-isolation, and cleanup-verification controls must pass"
           ],
-          "evidence": "Identity-bound poisoned item changes retrieval/model behavior and clean controls remain unaffected",
-          "id": "scenario.llm04.reliable",
-          "name": "Reliable Data and Model Poisoning scenario slice",
-          "status": "not_tested"
+          "evidence": "data-poisoning-audit emits secret-free opaque refs/commitments when an external controlled service returns exact eligible retrieval.content containing the generated marker after poisoning and all controls pass",
+          "id": "scenario.llm04.external-retrieval-protocol",
+          "name": "Partial active Data Poisoning controlled retrieval protocol assessment",
+          "status": "tested"
         },
         {
           "active_cli": false,
           "controls": [
-            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
+            "Not implemented; matrix keeps gaps explicit so synthetic retrieval checks cannot imply model-weight, fine-tuning, production RAG, embedding, or live target assurance"
           ],
-          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
-          "id": "scenario.llm04.kitchen-sink",
-          "name": "Kitchen Sink Data and Model Poisoning broader scenario slice",
+          "evidence": "Model-weight poisoning, fine-tuning poisoning, production RAG, embeddings, feedback learning, and non-protocol target/model behavior remain gaps",
+          "id": "scenario.llm04.model-training-gaps",
+          "name": "Model-weight, training, embedding, and production RAG poisoning gaps",
           "status": "not_tested"
         }
       ],
       "target_capabilities": [
-        "Controlled ingestion path for RAG corpus, memory, feedback, dataset, or model-update input"
+        "Controlled HTTP service implementing ai-scan-llm04-retrieval-v1 at one exact target path"
       ]
     },
     {
@@ -725,6 +727,7 @@
       ]
     }
   ],
+  "content_sha256": "2cc3a285a625c10b373480f378353548668b7cd615f5cd9fb4907166acaed04e",
   "coverage_arithmetic": {
     "aggregate_full_coverage_claim_allowed": false,
     "blocked_inconclusive_not_tested_do_not_count_as_tested": true,
@@ -736,6 +739,5 @@
   "matrix_version": "1.1.0",
   "schema_version": "owasp-llm-coverage-v1",
   "standard": "OWASP Top 10 for LLM Applications",
-  "standard_year": 2025,
-  "content_sha256": "118e9f04884aa1d9c421b25ea932a3524f18a7b9df8962a92cc01f662baf0a81"
+  "standard_year": 2025
 }

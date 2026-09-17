@@ -23,6 +23,22 @@ from ai_scan.adapters import Adapter, AdapterError, ExtractionError, GenericHttp
 from ai_scan.adapters.registry import AdapterRegistry, default_registry
 from ai_scan.core.config import SUPPORTED_SCHEMAS, load_document, load_json_strict
 from ai_scan.core.errors import ConfigError
+from ai_scan.data_poisoning import (
+    MIN_PHYSICAL_REQUESTS,
+    DataPoisoningProtocolError,
+    load_packaged_protocol_resource,
+    load_protocol_resource_text,
+    target_is_ip_literal,
+)
+from ai_scan.data_poisoning import (
+    assess_target as assess_data_poisoning_target,
+)
+from ai_scan.data_poisoning import (
+    render_human as render_data_poisoning_human,
+)
+from ai_scan.data_poisoning import (
+    render_json as render_data_poisoning_json,
+)
 from ai_scan.evidence_graph import BundleError, ReplayError, load_bundle, replay_bundle
 from ai_scan.fingerprint import DEFAULT_PROBES, ProbeExchange, run_fingerprint
 from ai_scan.injection import (
@@ -300,6 +316,47 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format.",
     )
 
+    p_data_poisoning = subparsers.add_parser(
+        "data-poisoning-audit",
+        help=(
+            "Run an active OWASP LLM04 partial assessment against a target "
+            "implementing the fixed HTTP retrieval fixture protocol."
+        ),
+        description=(
+            "Run an active OWASP LLM04 partial assessment against a target "
+            "implementing the fixed HTTP retrieval fixture protocol."
+        ),
+    )
+    p_data_poisoning.add_argument(
+        "--target",
+        required=True,
+        help="Exact HTTP(S) URL for the fixed HTTP retrieval fixture protocol endpoint.",
+    )
+    p_data_poisoning.add_argument(
+        "--max-requests",
+        type=int,
+        default=16,
+        help="Hard physical request budget for the protocol run.",
+    )
+    p_data_poisoning.add_argument(
+        "--timeout",
+        type=float,
+        default=15.0,
+        help="Per-request connect/read timeout in seconds.",
+    )
+    p_data_poisoning.add_argument(
+        "--max-duration",
+        type=float,
+        default=120.0,
+        help="Absolute wall-clock duration budget in seconds.",
+    )
+    p_data_poisoning.add_argument(
+        "--format",
+        choices=["human", "json"],
+        default="human",
+        help="Output format.",
+    )
+
     return parser
 
 
@@ -345,6 +402,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_owasp_coverage(args)
     if args.command == "supply-chain-audit":
         return _cmd_supply_chain_audit(args)
+    if args.command == "data-poisoning-audit":
+        return _cmd_data_poisoning_audit(args)
 
     # Active, network-touching commands. Validate the exact target before any
     # transport is constructed. Requests are confined to this exact target.
@@ -699,6 +758,13 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             audit_manifest_text(text)
         return "2 valid"
 
+    def _llm04_data_poisoning_protocol() -> str:
+        text = root.joinpath("owasp/llm04-retrieval-protocol-v1.json").read_text(
+            encoding="utf-8"
+        )
+        load_protocol_resource_text(text)
+        return "valid"
+
     record("metadata", _metadata)
     record("py.typed", _py_typed)
     record("schemas", _schemas)
@@ -707,6 +773,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     record("report-template", _report_template)
     record("owasp-llm-coverage", _owasp_matrix)
     record("owasp-llm03-supply-chain-fixtures", _llm03_supply_chain_fixtures)
+    record("owasp-llm04-data-poisoning-protocol", _llm04_data_poisoning_protocol)
 
     healthy = all(bool(check["ok"]) for check in checks)
     if args.json:
@@ -746,6 +813,56 @@ def _cmd_supply_chain_audit(args: argparse.Namespace) -> int:
         print(render_supply_chain_human(result))
     if result.status == "finding":
         return EXIT_CONFIRMED_FINDING
+    if result.status == "inconclusive":
+        return EXIT_INCONCLUSIVE
+    return EXIT_OK
+
+
+def _cmd_data_poisoning_audit(args: argparse.Namespace) -> int:
+    """Run the active LLM04 external retrieval protocol through transport."""
+    try:
+        try:
+            target = normalize_target(args.target)
+        except TargetError:
+            print("invalid: llm04_target_invalid")
+            return EXIT_RUNTIME_ERROR
+        max_requests = args.max_requests
+        timeout = args.timeout
+        max_duration = args.max_duration
+        if isinstance(max_requests, bool) or not isinstance(max_requests, int) or max_requests <= 0:
+            raise ValueError("max-requests must be a positive integer")
+        if max_requests < MIN_PHYSICAL_REQUESTS:
+            raise ValueError("llm04_request_budget_too_small")
+        if not isinstance(timeout, (int, float)) or timeout <= 0:
+            raise ValueError("timeout must be positive")
+        if not isinstance(max_duration, (int, float)) or max_duration <= 0:
+            raise ValueError("max-duration must be positive")
+        load_packaged_protocol_resource()
+        controller = RequestController(
+            max_requests=max_requests,
+            min_interval=0.0,
+            max_duration_seconds=float(max_duration),
+            max_concurrency=1,
+        )
+        transport = _make_transport(
+            controller,
+            config=TransportConfig(
+                timeout=float(timeout), max_retries=0, max_requests=max_requests
+            ),
+            allow_private=target_is_ip_literal(target),
+        )
+        result = assess_data_poisoning_target(target, transport, controller)
+    except (TargetError, ValueError, DataPoisoningProtocolError) as exc:
+        print(f"invalid: {scrub_text(str(exc))}")
+        return EXIT_RUNTIME_ERROR
+    if args.format == "json":
+        print(render_data_poisoning_json(result))
+    else:
+        print(render_data_poisoning_human(result))
+    if result.status == "finding":
+        return EXIT_CONFIRMED_FINDING
+    if result.status == "blocked":
+        return EXIT_DENIED
     if result.status == "inconclusive":
         return EXIT_INCONCLUSIVE
     return EXIT_OK
@@ -822,8 +939,15 @@ def _load_synthetic_canary(path: str | None) -> str | None:
     return marker
 
 
-def _make_transport(controller: RequestController) -> Transport:
-    return Transport(TransportConfig(), controller=controller)
+def _make_transport(
+    controller: RequestController,
+    *,
+    config: TransportConfig | None = None,
+    allow_private: bool = False,
+) -> Transport:
+    return Transport(
+        config or TransportConfig(), controller=controller, allow_private=allow_private
+    )
 
 
 def _deadline_passed(controller: RequestController) -> bool:

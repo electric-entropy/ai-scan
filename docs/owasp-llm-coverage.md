@@ -20,7 +20,7 @@ Those reserved identifiers are not emitted by the current report or SARIF
 runtime surfaces; current JSON reports leave `remediation` and
 `framework_mappings` empty, and current SARIF rule IDs remain finding-family IDs.
 
-Current honest summary after Phase 2B3:
+Current honest summary after Phase 2B4:
 
 - LLM01:2025 Prompt Injection — partial current active CLI coverage through the
   public direct-injection packs. Reliable plans compile 12 cases from
@@ -71,9 +71,26 @@ Current honest summary after Phase 2B3:
   signatures/attestations, dataset-content inspection, model behavior, artifact
   byte hashing, transitive dependency resolution, and runtime dependency loading
   remain explicit gaps.
-- LLM04:2025 Data and Model Poisoning — no current end-to-end poisoning coverage;
-  prompt/template overlap and RAG-isolation prompts do not count without a
-  controlled ingestion and retrieval/update fixture.
+- LLM04:2025 Data and Model Poisoning — partial current active CLI coverage
+  through `ai-scan data-poisoning-audit --target URL`, an unattended active
+  controlled retrieval fixture protocol. AI-Scan sends a fixed strict JSON
+  sequence to one exact target path through the hardened transport: pre-poison
+  attack query, pre-poison clean query, poison ingest/update, post-poison attack
+  query, post-poison clean query, cross-namespace isolation query, cleanup, and
+  cleanup verification. The external service owns state and decides retrieval
+  behavior; there is no selectable `engine`, plugin, import, subprocess, or
+  scanner-authored retriever. Findings and inconclusive evidence are bound to
+  opaque refs and domain-separated commitments, not raw target/query/ID/response
+  values. This is data/retrieval poisoning protocol coverage only: model-weight
+  poisoning, fine-tuning poisoning, production RAG, embeddings, feedback
+  learning, and non-protocol target/model behavior remain explicit gaps.
+  Metadata/envelope/error/explanation/request-echo appearances, prefixed or
+  suffixed marker text, dirty controls, namespace crossover, malformed evidence,
+  reordered/replayed/wrong-identity responses, or unverified cleanup do not
+  confirm. A deadline, budget, transport, or cleanup-verification failure after
+  an uncertain ingestion can leave the controlled poison item unresolved and
+  requires explicit service-side or operator reconciliation. Public output uses
+  fixed nonsecret wording and does not expose the target, item identifier, or marker.
 - LLM05:2025 Improper Output Handling — no current output-sink execution
   coverage; dangerous text alone is not deterministic sink evidence.
 - LLM06:2025 Excessive Agency — no current active public CLI coverage.
@@ -95,9 +112,10 @@ Current honest summary after Phase 2B3:
 
 Coverage arithmetic is conservative: the denominator is the ten OWASP categories;
 `not_applicable` is excluded and separately reported; `blocked`, `inconclusive`,
-and `not_tested` never increase tested coverage. Current public plans now have
-active LLM01, LLM02, and partial offline-manifest LLM03 coverage only, with
-additional bounded Kitchen Sink breadth in LLM01/LLM02. Modes may use different bounded operational limits;
+and `not_tested` never increase tested coverage. Current public coverage now has
+active LLM01, LLM02, partial offline-manifest LLM03, and partial active
+controlled-retrieval-protocol LLM04 coverage only, with additional bounded Kitchen Sink
+breadth in LLM01/LLM02. Modes may use different bounded operational limits;
 both remain subject to scope,
 request/rate/concurrency/duration ceilings, redaction, cleanup, evidence, and
 confirmed-semantics safety controls.

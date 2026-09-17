@@ -23,6 +23,7 @@ where operator-controlled text lands.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
@@ -211,6 +212,9 @@ class HttpResponse:
         request_line: ``{method, url}`` of the request (URL secret-redacted).
         request_headers: Request headers with sensitive values redacted.
         attempts: Physical attempts made for this request (>= 1).
+        raw_body_digest: SHA-256 of the exact bounded response bytes before
+            decoding or redaction; retained only as opaque commitment input.
+        raw_body_length: Length of those exact bounded response bytes.
         ok: Whether a usable 2xx response was obtained (not redirect/error/
             truncated).
     """
@@ -225,6 +229,8 @@ class HttpResponse:
     request_headers: dict[str, str] = field(default_factory=dict)
     attempts: int = 1
     known_secrets: frozenset[str] = field(default_factory=frozenset)
+    raw_body_digest: str | None = None
+    raw_body_length: int | None = None
 
     @property
     def ok(self) -> bool:
@@ -471,7 +477,13 @@ class Transport:
             f"{attempts} attempt(s): {_safe_reason(last_error)}"
         )
 
-    def send_prepared(self, target: Target, prepared: _Prepared) -> HttpResponse:
+    def send_prepared(
+        self,
+        target: Target,
+        prepared: _Prepared,
+        *,
+        attempt_kind: AttemptKind = AttemptKind.INITIAL,
+    ) -> HttpResponse:
         """Send an adapter-prepared request through the same broker pipeline.
 
         The adapter has already performed marker insertion and encoding; this
@@ -515,7 +527,7 @@ class Transport:
         attempts = 0
         for _attempt in range(self.config.max_retries + 1):
             attempts += 1
-            kind = AttemptKind.INITIAL if attempts == 1 else AttemptKind.RETRY
+            kind = attempt_kind if attempts == 1 else AttemptKind.RETRY
             try:
                 raw = broker.fetch(
                     url=prepared.url,
@@ -586,6 +598,8 @@ class Transport:
             request_headers=redacted,
             attempts=attempts,
             known_secrets=secret_values,
+            raw_body_digest=hashlib.sha256(payload).hexdigest(),
+            raw_body_length=len(payload),
         )
 
     def _perform(self, *args: Any, **kwargs: Any) -> Any:

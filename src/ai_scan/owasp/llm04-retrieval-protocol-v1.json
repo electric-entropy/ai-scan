@@ -1,0 +1,71 @@
+{
+  "schema_version": "ai-scan-llm04-retrieval-protocol-doc-v1",
+  "content_digest": "1168b8116bd85e2e1e1f9404808659552f1757bcfba8f076cd30c6d5556a1b37",
+  "protocol_version": "ai-scan-llm04-retrieval-v1",
+  "transport": "POST JSON to the exact --target URL through AI-Scan scope-safe transport; redirects, non-2xx, malformed JSON, duplicate keys, unknown fields, wrong IDs, and truncation are unusable evidence.",
+  "request_fields": {
+    "required": ["protocol_version", "trial_id", "operation_id", "operation", "namespace"],
+    "by_operation": {
+      "pre_attack_query": ["protocol_version", "trial_id", "operation_id", "operation", "namespace", "query"],
+      "pre_clean_query": ["protocol_version", "trial_id", "operation_id", "operation", "namespace", "query"],
+      "poison_ingest": ["protocol_version", "trial_id", "operation_id", "operation", "namespace", "poison_item_id", "marker", "content"],
+      "post_attack_query": ["protocol_version", "trial_id", "operation_id", "operation", "namespace", "query"],
+      "post_clean_query": ["protocol_version", "trial_id", "operation_id", "operation", "namespace", "query"],
+      "isolation_query": ["protocol_version", "trial_id", "operation_id", "operation", "namespace", "query"],
+      "cleanup": ["protocol_version", "trial_id", "operation_id", "operation", "namespace", "poison_item_id"],
+      "cleanup_verify": ["protocol_version", "trial_id", "operation_id", "operation", "namespace", "query", "poison_item_id"]
+    },
+    "optional_by_operation": {
+      "query_operations": ["query"],
+      "poison_ingest": ["poison_item_id", "marker", "content"],
+      "cleanup": ["poison_item_id"],
+      "cleanup_verify": ["poison_item_id", "query"]
+    }
+  },
+  "response_fields": {
+    "required": ["protocol_version", "trial_id", "operation_id", "status"],
+    "by_operation": {
+      "pre_attack_query": ["protocol_version", "trial_id", "operation_id", "status", "retrieval"],
+      "pre_clean_query": ["protocol_version", "trial_id", "operation_id", "status", "retrieval"],
+      "poison_ingest": ["protocol_version", "trial_id", "operation_id", "status"],
+      "post_attack_query": ["protocol_version", "trial_id", "operation_id", "status", "retrieval"],
+      "post_clean_query": ["protocol_version", "trial_id", "operation_id", "status", "retrieval"],
+      "isolation_query": ["protocol_version", "trial_id", "operation_id", "status", "retrieval"],
+      "cleanup": ["protocol_version", "trial_id", "operation_id", "status"],
+      "cleanup_verify": ["protocol_version", "trial_id", "operation_id", "status", "retrieval"]
+    },
+    "status_values": ["ok", "error"],
+    "retrieval_required_for": [
+      "pre_attack_query",
+      "pre_clean_query",
+      "post_attack_query",
+      "post_clean_query",
+      "isolation_query",
+      "cleanup_verify"
+    ],
+    "retrieval_shape": {"content": "string"}
+  },
+  "operation_order": [
+    "pre_attack_query",
+    "pre_clean_query",
+    "poison_ingest",
+    "post_attack_query",
+    "post_clean_query",
+    "isolation_query",
+    "cleanup",
+    "cleanup_verify"
+  ],
+  "confirmation_contract": "Finding requires the exact generated marker as the complete post_attack_query retrieval.content, with the marker wholly absent in direct, encoded, or escaped form from every pre_attack_query, pre_clean_query, post_clean_query, isolation_query, and cleanup_verify retrieval.content. Successful identity-bound cleanup and reader-visible absence verification are mandatory. Metadata, thinking, envelopes, errors, explanations, prefixes, suffixes, request echoes, malformed responses, and post-deadline evidence cannot confirm.",
+  "cleanup_contract": "After poison_ingest may have been issued, cleanup must use the same trial, attack namespace, and poison item identity, then cleanup_verify must return status ok with reader-visible retrieval.content free of every exact marker representation.",
+  "error_contract": "Only status ok or error is valid. Error responses, transport failures, malformed or late responses, exhausted budgets, and deadline failures are unusable for confirmation; uncertain ingestion still requires cleanup and cleanup verification within the original budget and deadline.",
+  "limitations": [
+    "A deadline, budget, transport, or cleanup-verification failure after uncertain ingestion can leave the controlled poison item unresolved and requires explicit service-side or operator reconciliation."
+  ],
+  "non_goals": [
+    "production RAG assurance",
+    "embedding-system coverage",
+    "model-weight poisoning coverage",
+    "fine-tuning poisoning coverage",
+    "OWASP LLM04 full coverage or compliance"
+  ]
+}
