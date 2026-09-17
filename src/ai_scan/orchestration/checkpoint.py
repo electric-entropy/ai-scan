@@ -17,7 +17,7 @@ import os
 import re
 import tempfile
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from ai_scan.core.config import load_json_strict
 from ai_scan.core.errors import ConfigError
@@ -34,6 +34,8 @@ _ALLOWED_FIELDS = frozenset(
         "canary",
         "completed",
         "control_results",
+        "progress",
+        "in_flight",
         "digest",
     }
 )
@@ -87,6 +89,11 @@ class Checkpoint:
     # The run's synthetic canary (not a secret), stored so a resumed run and a
     # plan-binding load can re-derive each case's rendered prompt.
     canary: str = ""
+    # M3: per-case in-progress trials (so resume never repeats a completed trial)
+    # and the single write-ahead attempt intent whose outcome was not yet recorded
+    # (an issued-but-interrupted attempt — already counted, never reissued).
+    progress: dict[str, dict[str, Any]] = field(default_factory=dict)
+    in_flight: dict[str, str] | None = None
 
     def to_body(self) -> dict[str, Any]:
         return {
@@ -98,6 +105,8 @@ class Checkpoint:
             # Sort for a stable, digestable, diff-friendly representation.
             "completed": {k: self.completed[k] for k in sorted(self.completed)},
             "control_results": {k: self.control_results[k] for k in sorted(self.control_results)},
+            "progress": {k: self.progress[k] for k in sorted(self.progress)},
+            "in_flight": self.in_flight,
         }
 
 
@@ -185,6 +194,8 @@ def load_checkpoint(
             raise CheckpointError("canary must be a string")
         completed = _completed(data["completed"])
         control_results = _control_results(data["control_results"])
+        progress = _progress(data.get("progress", {}))
+        in_flight = _in_flight(data.get("in_flight"))
         checkpoint = Checkpoint(
             plan_digest=_require_str(data["plan_digest"], "plan_digest"),
             state=state,
@@ -192,6 +203,8 @@ def load_checkpoint(
             completed=completed,
             control_results=control_results,
             canary=canary,
+            progress=progress,
+            in_flight=in_flight,
         )
     except (KeyError, TypeError, ValueError, CheckpointError) as exc:
         raise CheckpointError("malformed checkpoint") from exc
@@ -255,17 +268,61 @@ def _bind_completed_to_plan(checkpoint: Checkpoint, plan: object) -> None:
                 trials=record["trials"],
             )
         )
-    if not evidence:
-        return
-    try:
-        verified = verify_records(plan, resolve_plan_packs(plan), canary, evidence)  # type: ignore[arg-type]
-    except EvidenceError as exc:
-        raise CheckpointError(f"completed record evidence is invalid: {exc}") from exc
-    for family, result in verified.control_results.items():
-        if checkpoint.control_results.get(family) != result:
-            raise CheckpointError("control results do not match the persisted control evidence")
-    if checkpoint.request_count < verified.physical_request_count:
+    completed_physical = 0
+    if evidence:
+        try:
+            verified = verify_records(
+                plan, resolve_plan_packs(plan), canary, evidence  # type: ignore[arg-type]
+            )
+        except EvidenceError as exc:
+            raise CheckpointError(f"completed record evidence is invalid: {exc}") from exc
+        for family, result in verified.control_results.items():
+            if checkpoint.control_results.get(family) != result:
+                raise CheckpointError(
+                    "control results do not match the persisted control evidence"
+                )
+        completed_physical = verified.physical_request_count
+
+    # M3: bind per-case progress + the in-flight attempt to the plan, and require
+    # the cumulative physical count to cover every persisted attempt (no reset /
+    # undercount). progress trials are budget-bounded exactly like completed ones.
+    from ai_scan.orchestration.evidence import rendered_prompt, trial_ceiling, trials_from_list
+    from ai_scan.orchestration.planner import Plan
+
+    typed_plan = cast(Plan, plan)
+    budget = typed_plan.limits.max_physical_requests
+    progress_physical = 0
+    for case_id, record in checkpoint.progress.items():
+        case = plan_cases.get(case_id)
+        if case is None:
+            raise CheckpointError("progress record references a case not in the plan")
+        if record.get("kind") != case.kind or record.get("family") != case.family:
+            raise CheckpointError("progress record does not match its plan case")
+        if record.get("prompt") != rendered_prompt(case, canary):
+            raise CheckpointError("progress record prompt is not plan-derived")
+        try:
+            trials = trials_from_list(record.get("trials"), trial_ceiling(typed_plan, case), budget)
+        except EvidenceError as exc:
+            raise CheckpointError(f"progress trial evidence is invalid: {exc}") from exc
+        progress_physical += sum(t.attempts for t in trials)
+    in_flight_physical = 0
+    if checkpoint.in_flight is not None:
+        inf = checkpoint.in_flight
+        case = plan_cases.get(inf["case_id"])
+        if case is None:
+            raise CheckpointError("in-flight attempt references a case not in the plan")
+        if (
+            inf.get("kind") != case.kind
+            or inf.get("family") != case.family
+            or inf.get("prompt") != rendered_prompt(case, canary)
+        ):
+            raise CheckpointError("in-flight attempt does not match its plan case")
+        in_flight_physical = 1
+    total_physical = completed_physical + progress_physical + in_flight_physical
+    if checkpoint.request_count < total_physical:
         raise CheckpointError("request_count is below the persisted physical trial attempts")
+    if checkpoint.request_count > budget:
+        raise CheckpointError("request_count exceeds the plan's physical request budget")
 
 
 def _derive_canary(completed: dict[str, dict[str, Any]], plan_cases: dict[str, Any]) -> str:
@@ -369,6 +426,50 @@ def _trials(value: object) -> list[dict[str, Any]]:
         return [trial_to_dict(trial_from_dict(item)) for item in value]
     except EvidenceError as exc:
         raise CheckpointError("completed record trial evidence is malformed") from exc
+
+
+def _progress(value: object) -> dict[str, dict[str, Any]]:
+    """Structurally validate per-case in-progress trials (plan binding re-derives)."""
+    from ai_scan.orchestration.evidence import EvidenceError, trial_from_dict, trial_to_dict
+
+    if not isinstance(value, dict):
+        raise CheckpointError("progress must be an object")
+    out: dict[str, dict[str, Any]] = {}
+    for case_id, record in value.items():
+        _require_str(case_id, "progress case_id")
+        if not isinstance(record, dict) or set(record) != {"kind", "family", "prompt", "trials"}:
+            raise CheckpointError("progress record has unknown or missing field(s)")
+        kind = _require_str(record["kind"], "kind")
+        if kind not in {"attack", "control"}:
+            raise CheckpointError("invalid progress kind")
+        family = _require_str(record["family"], "family")
+        prompt = _require_str(record["prompt"], "prompt")
+        raw_trials = record["trials"]
+        if not isinstance(raw_trials, list) or not raw_trials:
+            raise CheckpointError("progress record trials must be a non-empty list")
+        try:
+            trials = [trial_to_dict(trial_from_dict(item)) for item in raw_trials]
+        except EvidenceError as exc:
+            raise CheckpointError("progress record trial evidence is malformed") from exc
+        out[case_id] = {"kind": kind, "family": family, "prompt": prompt, "trials": trials}
+    return out
+
+
+def _in_flight(value: object) -> dict[str, str] | None:
+    """Validate the single write-ahead attempt intent (an issued, uncounted-outcome)."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {"case_id", "kind", "family", "prompt"}:
+        raise CheckpointError("in_flight has unknown or missing field(s)")
+    kind = _require_str(value["kind"], "kind")
+    if kind not in {"attack", "control"}:
+        raise CheckpointError("invalid in_flight kind")
+    return {
+        "case_id": _require_str(value["case_id"], "case_id"),
+        "kind": kind,
+        "family": _require_str(value["family"], "family"),
+        "prompt": _require_str(value["prompt"], "prompt"),
+    }
 
 
 def _control_results(value: object) -> dict[str, str]:

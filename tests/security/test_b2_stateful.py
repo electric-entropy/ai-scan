@@ -116,27 +116,28 @@ def test_no_cross_identity_leak_does_not_confirm() -> None:
 def test_cleanup_is_a_budgeted_responder_step() -> None:
     responder, _store, calls = _vulnerable()
     result = _run(responder)
-    # control + write + readback + cleanup = four budgeted physical steps.
-    assert result.physical_steps == 4
+    # control + write + readback + cleanup + verify = five budgeted physical steps
+    # (H3 adds a verification read so cleanup is confirmed by absence, not text).
+    assert result.physical_steps == 5
     assert calls["cleanup"] == 1
 
 
-def test_crash_after_write_resumes_without_duplicate_write() -> None:
+def test_crash_during_write_resumes_without_duplicate_write() -> None:
     responder, _store, calls = _vulnerable()
     ledger = StateLedger()
 
     def crashing(step: StatefulStep) -> ExchangeOutcome:
         out = responder(step)
-        if step.kind is StepKind.READBACK:
-            raise KeyboardInterrupt  # crash AFTER the write, during read-back
+        if step.kind is StepKind.WRITE:
+            raise KeyboardInterrupt  # crash right after the write lands
         return out
 
     with pytest.raises(KeyboardInterrupt):
         _run(crashing, ledger=ledger)
     assert calls["write"] == 1
-    assert ledger.phase("c1") == "written"
+    assert ledger.phase("c1") == "uncertain"  # write-ahead left an uncertain phase
 
-    # Resume with the same write-ahead ledger: the write must NOT be re-issued.
+    # Resume: the reconciliation read shows the write landed → adopt, never re-issue.
     result = _run(responder, ledger=ledger)
     assert calls["write"] == 1  # no duplicate side effect
     assert result.evidence.write_confirmed
@@ -159,7 +160,7 @@ def test_unusable_reconciliation_read_does_not_reissue_write() -> None:
     with pytest.raises(KeyboardInterrupt):
         _run(crashing, ledger=ledger)
     assert calls["write"] == 1
-    assert ledger.phase("c1") == "writing"
+    assert ledger.phase("c1") == "uncertain"
 
     # Resume, but every reconciliation/read is unusable (target unreachable).
     def unusable(step: StatefulStep) -> ExchangeOutcome:
@@ -168,7 +169,7 @@ def test_unusable_reconciliation_read_does_not_reissue_write() -> None:
     result = _run(unusable, ledger=ledger)
     assert calls["write"] == 1  # the side effect was NOT re-issued
     assert result.status is InjectionStatus.INCONCLUSIVE
-    assert ledger.phase("c1") == "writing"  # left unresolved for later reconciliation
+    assert ledger.phase("c1") == "uncertain"  # left unresolved for later reconciliation
 
 
 def test_write_ahead_state_survives_process_crash(tmp_path) -> None:
@@ -203,8 +204,8 @@ def test_write_ahead_state_survives_process_crash(tmp_path) -> None:
     # Simulate a fresh process: reload the ledger from disk (in-memory state gone).
     reloaded = StateLedger.from_dict(json.loads(ledger_path.read_text(encoding="utf-8")))
     # The write-ahead intent persisted, but the crash left it in the *uncertain*
-    # 'writing' phase — resume must reconcile idempotently, not blindly re-write.
-    assert reloaded.phase("c1") == "writing"
+    # phase — resume must reconcile idempotently, not blindly re-write.
+    assert reloaded.phase("c1") == "uncertain"
     run_stateful_case(
         case_id="c1", writer=Identity("alice"), reader=Identity("bob"),
         base_canary=_BASE, responder=responder, ledger=reloaded,

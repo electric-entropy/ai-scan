@@ -150,6 +150,12 @@ def run_plan(
                 control_results.get(key), derive_control(plan, trials, canary)
             )
     checkpoint.control_results = dict(control_results)
+    # M3: a prior in-flight attempt was physically issued (already counted) but its
+    # outcome was never recorded. Reconcile it as one uncertain, unusable trial —
+    # fail closed, never reissue — so resume neither re-counts nor repeats it.
+    _reconcile_in_flight(checkpoint, plan_cases)
+    _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
+
     findings: list[InjectionFinding] = [
         _finding_from_record(v) for v in checkpoint.completed.values() if v.get("kind") == "attack"
     ]
@@ -171,7 +177,7 @@ def run_plan(
                 continue
             outcomes = _run_trials(
                 case, responder, canary, min_control_trials,
-                checkpoint, plan, run_secrets,
+                checkpoint, plan, run_secrets, checkpoint_path,
             )
             if not outcomes:
                 coverage_gaps.append(f"{case.case_id}: control coverage incomplete")
@@ -190,6 +196,7 @@ def run_plan(
             checkpoint.completed[case.case_id] = _record_from_finding(
                 control_finding, kind="control"
             )
+            checkpoint.progress.pop(case.case_id, None)
             completed.add(case.case_id)
             _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
             if observer is not None:
@@ -203,7 +210,7 @@ def run_plan(
                 continue
             outcomes = _run_trials(
                 case, responder, canary, min_attack_trials,
-                checkpoint, plan, run_secrets,
+                checkpoint, plan, run_secrets, checkpoint_path,
             )
             if not outcomes:
                 coverage_gaps.append(f"{case.case_id}: budget exhausted")
@@ -215,6 +222,7 @@ def run_plan(
             )
             findings.append(finding)
             checkpoint.completed[case.case_id] = _record_from_finding(finding, kind="attack")
+            checkpoint.progress.pop(case.case_id, None)
             completed.add(case.case_id)
             _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
             if observer is not None:
@@ -287,6 +295,35 @@ def _send(case: PlannedCase, responder: Responder, canary: str) -> ExchangeOutco
     return responder(InjectionCase(case.family, case.template, rendered_prompt(case, canary)))
 
 
+def _intent(case: PlannedCase, canary: str) -> dict[str, str]:
+    return {
+        "case_id": case.case_id,
+        "kind": case.kind,
+        "family": case.family,
+        "prompt": rendered_prompt(case, canary),
+    }
+
+
+def _reconcile_in_flight(checkpoint: Checkpoint, plan_cases: dict[str, PlannedCase]) -> None:
+    """Turn a resumed in-flight attempt into one uncertain, unusable, spent trial.
+
+    The attempt was physically issued (and already counted) before the crash; its
+    outcome is unknown, so it is recorded fail-closed (never reissued, never
+    re-counted) and fills exactly one of its case's trial slots.
+    """
+    inf = checkpoint.in_flight
+    if inf is None:
+        return
+    case = plan_cases.get(inf["case_id"])
+    if case is not None:
+        record = checkpoint.progress.setdefault(
+            case.case_id,
+            {"kind": case.kind, "family": case.family, "prompt": inf["prompt"], "trials": []},
+        )
+        record["trials"].append(trial_to_dict(ExchangeOutcome(body="", transport_ok=False)))
+    checkpoint.in_flight = None
+
+
 def _run_trials(
     case: PlannedCase,
     responder: Responder,
@@ -295,16 +332,59 @@ def _run_trials(
     checkpoint: Checkpoint,
     plan: Plan,
     run_secrets: set[str],
+    checkpoint_path: str | None,
 ) -> list[ExchangeOutcome]:
-    """Run up to ``trials`` physical attempts for one case, each budgeted/counted."""
-    outcomes: list[ExchangeOutcome] = []
-    for _ in range(trials):
+    """Run up to ``trials`` physical attempts for one case, write-ahead accounted.
+
+    Each attempt's intent (and its budget cost) is persisted *before* the
+    responder call, so an attempt issued but interrupted before its outcome is
+    recorded is still counted (M3). Completed trials are persisted per case so a
+    resumed run continues rather than repeating them.
+    """
+    prior = checkpoint.progress.get(case.case_id)
+    outcomes: list[ExchangeOutcome] = (
+        [trial_from_dict(t) for t in prior["trials"]] if prior else []
+    )
+    while len(outcomes) < trials:
         if checkpoint.request_count >= plan.limits.max_physical_requests:
             break
+        remaining = plan.limits.max_physical_requests - checkpoint.request_count
+        # Write-ahead intent: persist the attempt and its cost BEFORE issuing it.
+        checkpoint.in_flight = _intent(case, canary)
+        checkpoint.request_count += 1
+        _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
         outcome = _send(case, responder, canary)
         run_secrets.update(outcome.known_secrets)
-        checkpoint.request_count += physical_attempts(outcome)
+        try:
+            attempts = physical_attempts(outcome)
+        except ValueError:
+            # The public responder boundary returned malformed retry accounting
+            # after one physical request was already issued. Fail closed: keep the
+            # write-ahead unit, discard the untrusted body, and exhaust the
+            # remaining run budget so resume cannot reissue the trial.
+            checkpoint.request_count = plan.limits.max_physical_requests
+            outcome = ExchangeOutcome(body="", transport_ok=False, attempts=1)
+        else:
+            if attempts > remaining:
+                # A broker/controller should prevent this. If it still happens,
+                # never persist a count or trial above the canonical plan budget,
+                # and never accept the over-budget response as evidence.
+                checkpoint.request_count = plan.limits.max_physical_requests
+                outcome = ExchangeOutcome(body="", transport_ok=False, attempts=remaining)
+            else:
+                # Account any retries the broker made beyond the write-ahead unit.
+                checkpoint.request_count += attempts - 1
+        checkpoint.in_flight = None
         outcomes.append(outcome)
+        checkpoint.progress[case.case_id] = {
+            "kind": case.kind,
+            "family": case.family,
+            "prompt": rendered_prompt(case, canary),
+            "trials": [trial_to_dict(o) for o in outcomes],
+        }
+        _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
+        if checkpoint.request_count >= plan.limits.max_physical_requests:
+            break
     return outcomes
 
 

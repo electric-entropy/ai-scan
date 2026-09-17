@@ -478,7 +478,9 @@ def physical_attempts(outcome: ExchangeOutcome) -> int:
     attempts = outcome.attempts
     if isinstance(attempts, bool) or not isinstance(attempts, int):
         raise ValueError("trial attempts must be an integer")
-    return max(1, attempts)
+    if attempts < 1:
+        raise ValueError("trial attempts must be positive")
+    return attempts
 
 
 def control_result(

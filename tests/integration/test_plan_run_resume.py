@@ -47,12 +47,13 @@ def test_plan_run_resume_same_findings_no_duplicate_state_change(tmp_path) -> No
 
     fresh = run_plan(plan, fresh_responder, canary=canary, goal="")
 
-    assert resumed.state is RunState.COMPLETED
-    assert [f.to_dict() for f in resumed.findings] == [f.to_dict() for f in fresh.findings]
-    # Resume never re-runs a completed case, and reaches the same physical total
-    # as a fresh run *except* for trials of the case that was in flight at the
-    # crash (per-case checkpoint granularity). Trial-level crash-safe accounting
-    # is a Phase B3 item; here resume does not under-run a fresh execution.
-    assert resumed.request_count >= fresh.request_count
+    # The issued-but-interrupted control attempt is accounted and reconciled as
+    # an unusable spent trial. That must not be re-issued to paper over the crash,
+    # so the resumed run honestly ends with a coverage gap rather than pretending
+    # to match a fresh uninterrupted run.
+    assert resumed.state is RunState.COMPLETED_WITH_GAPS
+    assert resumed.request_count == fresh.request_count
+    assert resumed.coverage_gaps
+    assert len(resumed.findings) == len(fresh.findings)
     final_checkpoint = load_checkpoint(str(checkpoint), expected_plan_digest=plan.digest)
     assert completed_before_resume <= set(final_checkpoint.completed)
