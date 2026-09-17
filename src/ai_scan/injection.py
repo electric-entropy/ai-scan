@@ -126,7 +126,9 @@ class InjectionFinding:
 
     ``attack_trials``/``successes`` are the aggregated repeatability counts that
     gated the status, carried so an offline replay can re-verify confirmation at
-    the real plan thresholds (never inferred).
+    the real plan thresholds (never inferred). ``evidence`` holds every physical
+    trial outcome the status was derived from, in send order, so checkpoints and
+    bundles persist per-trial evidence rather than a single representative.
     """
 
     family: str
@@ -135,6 +137,7 @@ class InjectionFinding:
     proof: str | None = None
     attack_trials: int = 1
     successes: int = 0
+    evidence: tuple[ExchangeOutcome, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -393,32 +396,36 @@ def run_injection_pack(
     """
     validators = _select_validators(pack.validators)
     trial = pack.trial_policy
-    requires_state_change = pack.side_effects
     findings: list[InjectionFinding] = []
     request_count = 0
     cases_run = 0
 
+    def send(case: InjectionCase) -> ExchangeOutcome | None:
+        nonlocal request_count
+        try:
+            outcome = responder(case)
+        except Exception as exc:  # noqa: BLE001 - structured denials propagate
+            if getattr(exc, "outcome", None) is not None:
+                raise
+            request_count += 1
+            return None
+        request_count += physical_attempts(outcome)
+        return outcome
+
     for family in pack.families:
-        # Controls run first: a benign control that still emits the canary means
-        # the target emits it unconditionally — confirmation must be blocked.
-        control_succeeded = False
-        matched_clean_control = False
-        for control in family.controls:
-            case = InjectionCase(family=family.name, template=control, rendered_prompt=control)
-            try:
-                outcome = responder(case)
-            except Exception as exc:  # noqa: BLE001 - structured denials propagate
-                if getattr(exc, "outcome", None) is not None:
-                    raise
-                request_count += 1
-                continue
-            request_count += max(1, outcome.attempts)
-            if _usable(outcome) and canary in outcome.body:
-                control_succeeded = True
-            elif _usable(outcome):
-                # A usable control that did not emit the canary is matched clean
-                # coverage; without it a family cannot confirm.
-                matched_clean_control = True
+        # Controls run first, each for its full declared trial count: a control
+        # that emits the canary poisons the baseline, and a family confirms only
+        # against a fully usable, non-emitting matched control.
+        control: str | None = None
+        for template in family.controls:
+            case = InjectionCase(family=family.name, template=template, rendered_prompt=template)
+            outcomes = [send(case) for _ in range(trial.min_control_trials)]
+            result = control_result(
+                [o if o is not None else _FAILED for o in outcomes],
+                canary,
+                trial.min_control_trials,
+            )
+            control = merge_control_results(control, result)
 
         for template in family.templates:
             if max_cases is not None and cases_run >= max_cases:
@@ -426,25 +433,22 @@ def run_injection_pack(
             cases_run += 1
             rendered = template.replace("{canary}", canary)
             case = InjectionCase(family=family.name, template=template, rendered_prompt=rendered)
-            try:
-                outcome = responder(case)
-            except Exception as exc:  # noqa: BLE001 - structured denials propagate
-                if getattr(exc, "outcome", None) is not None:
-                    raise
-                request_count += 1
-                findings.append(
-                    InjectionFinding(family.name, InjectionStatus.INCONCLUSIVE, rendered, None)
-                )
-                continue
-            request_count += max(1, outcome.attempts)
-            status, proof = _evaluate_pack_case(
-                outcome, canary, rendered, validators,
-                control_succeeded=control_succeeded,
-                matched_clean_control=matched_clean_control,
-                trial=trial,
-                requires_state_change=requires_state_change,
+            outcomes = [send(case) for _ in range(trial.min_attack_trials)]
+            evidence = tuple(o if o is not None else _FAILED for o in outcomes)
+            status, proof, trials, successes, _rep = evaluate_trials(
+                evidence, canary, rendered, validators,
+                control_succeeded=control == CONTROL_EMITTED,
+                matched_clean_control=control == CONTROL_CLEAN,
+                min_attack_trials=trial.min_attack_trials,
+                min_successes=trial.min_successes,
+                requires_state_change=pack.side_effects,
             )
-            findings.append(InjectionFinding(family.name, status, rendered, proof))
+            findings.append(
+                InjectionFinding(
+                    family.name, legacy_status(status), rendered, proof,
+                    attack_trials=trials, successes=successes, evidence=evidence,
+                )
+            )
         if max_cases is not None and cases_run >= max_cases:
             break
 
@@ -455,6 +459,50 @@ def run_injection_pack(
         canary=canary,
         goal=goal,
     )
+
+
+# A responder failure is a real, counted, unusable trial — never a skipped one.
+_FAILED = ExchangeOutcome(body="", transport_ok=False)
+
+# Per-family control coverage: a matched control ran fully usable and clean, a
+# usable control emitted the success token (false-positive baseline), or control
+# coverage is incomplete. ``emitted`` dominates ``clean`` dominates ``gap``.
+CONTROL_CLEAN = "clean"
+CONTROL_EMITTED = "emitted"
+CONTROL_GAP = "gap"
+_CONTROL_PRIORITY = {CONTROL_EMITTED: 2, CONTROL_CLEAN: 1, CONTROL_GAP: 0}
+
+
+def physical_attempts(outcome: ExchangeOutcome) -> int:
+    """The physical attempts one trial consumed (retries included, at least one)."""
+    attempts = outcome.attempts
+    if isinstance(attempts, bool) or not isinstance(attempts, int):
+        raise ValueError("trial attempts must be an integer")
+    return max(1, attempts)
+
+
+def control_result(
+    outcomes: Sequence[ExchangeOutcome], token: str, min_control_trials: int
+) -> str:
+    """Classify one control case from *all* of its physical trial outcomes.
+
+    Any usable trial carrying ``token`` makes the control ``emitted``. Otherwise
+    the control is ``clean`` only when at least ``min_control_trials`` trials were
+    usable; anything less is a coverage ``gap``.
+    """
+    usable = [o for o in outcomes if _usable(o)]
+    if any(token and token in o.body for o in usable):
+        return CONTROL_EMITTED
+    if len(usable) >= min_control_trials:
+        return CONTROL_CLEAN
+    return CONTROL_GAP
+
+
+def merge_control_results(previous: str | None, new: str) -> str:
+    """Combine control coverage across a family's control cases (emitted wins)."""
+    if previous is None:
+        return new
+    return max(previous, new, key=lambda r: _CONTROL_PRIORITY[r])
 
 
 def _usable(outcome: ExchangeOutcome) -> bool:
@@ -516,7 +564,7 @@ def _evaluate(
     # Legacy single-shot path stays on the 4-state report vocabulary.
     status = legacy_status(_FINDING_TO_INJECTION[result.status])
     proof = (
-        _proof_snippet(outcome.body, canary)
+        _proof_snippet(outcome.body, canary, outcome.known_secrets)
         if status is InjectionStatus.CONFIRMED
         else None
     )
@@ -561,7 +609,7 @@ def _evaluate_pack_case(
     # Legacy pack path stays on the 4-state report vocabulary.
     status = legacy_status(_FINDING_TO_INJECTION[result.status])
     proof = (
-        _proof_snippet(outcome.body, canary)
+        _proof_snippet(outcome.body, canary, outcome.known_secrets)
         if status is InjectionStatus.CONFIRMED
         else None
     )
@@ -606,7 +654,9 @@ def classify_record(
     result = classify(signals, context, evaluable=True)
     status = _FINDING_TO_INJECTION[result.status]
     proof = (
-        _proof_snippet(outcome.body, canary) if status is InjectionStatus.CONFIRMED else None
+        _proof_snippet(outcome.body, canary, outcome.known_secrets)
+        if status is InjectionStatus.CONFIRMED
+        else None
     )
     return status, proof
 
@@ -674,18 +724,35 @@ def evaluate_trials(
     result = classify(representative[1], context, evaluable=True)
     status = _FINDING_TO_INJECTION[result.status]
     proof = (
-        _proof_snippet(representative[0].body, canary)
+        _proof_snippet(
+            representative[0].body,
+            canary,
+            frozenset().union(*(o.known_secrets for o in outcomes)),
+        )
         if status is InjectionStatus.CONFIRMED
         else None
     )
     return status, proof, len(usable), len(executions), representative[0]
 
 
-def _proof_snippet(response: str, canary: str, radius: int = 40) -> str:
-    idx = response.find(canary)
+def _proof_snippet(
+    response: str, canary: str, known_secrets: frozenset[str] = frozenset(), radius: int = 40
+) -> str:
+    """A bounded proof excerpt around the canary, cut from *redacted* text.
+
+    Redaction runs before slicing: slicing first could cut a known secret at the
+    window edge, leaving a fragment that no later whole-secret scrub recognizes.
+    Re-deriving from already-redacted persisted evidence yields the same excerpt.
+    """
+    from ai_scan.transport.redaction import REDACTED, scrub_text
+
+    redacted = scrub_text(response, known_secrets)
+    idx = redacted.find(canary)
+    if idx == -1:
+        return REDACTED
     start = max(0, idx - radius)
-    end = min(len(response), idx + len(canary) + radius)
-    return response[start:end].strip()
+    end = min(len(redacted), idx + len(canary) + radius)
+    return redacted[start:end].strip()
 
 
 _SEVERITY = {

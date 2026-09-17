@@ -57,23 +57,29 @@ def test_runner_rejects_plan_digest_mismatch_before_requests() -> None:
 
 def test_resume_does_not_repeat_completed_physical_attempt(tmp_path) -> None:
     plan = compile_plan(normalize_target("http://127.0.0.1:8000"), "reliable")
-    first_attack = plan.attack_cases()[0]
     checkpoint_path = tmp_path / "run.ckpt"
-    # A legacy checkpoint (no canary field) whose completed confirmation is
-    # *safety-valid*: enough trials/successes and a matched clean control, so it
-    # legitimately resumes without repeating physical attempts.
-    ckpt = Checkpoint(plan_digest=plan.digest, state=RunState.CONFIRMING.value, request_count=1)
-    ckpt.completed[first_attack.case_id] = {
-        "family": first_attack.family,
-        "status": "confirmed",
-        "prompt": first_attack.template.replace("{canary}", "AISCAN-X"),
-        "proof": "model output >> AISCAN-X << executed",
-        "kind": "attack",
-        "attack_trials": 3,
-        "successes": 3,
-    }
-    ckpt.control_results[f"{first_attack.pack_id}:{first_attack.family}"] = "clean"
-    write_checkpoint_atomic(str(checkpoint_path), ckpt)
+    # A real interrupted run: its completed confirmation is backed by persisted
+    # per-trial evidence and real matched clean controls, so it legitimately
+    # resumes without repeating physical attempts. Forged counts alone do not.
+    def executing(case):  # type: ignore[no-untyped-def]
+        emit = "{canary}" in case.template
+        return ExchangeOutcome("model output >> AISCAN-X << executed" if emit else "benign")
+
+    run_plan(plan, executing, canary="AISCAN-X", goal="", checkpoint_path=str(checkpoint_path))
+    data = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    attack_ids = [c.case_id for c in plan.attack_cases()]
+    first_attack = next(c for c in plan.attack_cases() if c.case_id in data["completed"])
+    for case_id in attack_ids:
+        if case_id != first_attack.case_id:
+            data["completed"].pop(case_id, None)
+    kept = sum(
+        t["attempts"] for record in data["completed"].values() for t in record["trials"]
+    )
+    data["request_count"] = kept
+    data["state"] = RunState.CONFIRMING.value
+    data.pop("digest")
+    data["digest"] = compute_digest(data)
+    checkpoint_path.write_text(json.dumps(data), encoding="utf-8")
     seen: list[str] = []
 
     def responder(case):  # type: ignore[no-untyped-def]
@@ -86,12 +92,12 @@ def test_resume_does_not_repeat_completed_physical_attempt(tmp_path) -> None:
 
     assert result.state is RunState.COMPLETED
     assert first_attack.template not in seen
-    # Repeated trials: controls run min_control_trials, attacks min_attack_trials;
-    # the pre-completed attack is not re-run. The prior request_count (1) is kept.
-    min_a, _, min_c = plan.trial_policy
-    controls = plan.control_cases()
+    assert any(f.status.value == "confirmed" for f in result.findings)
+    # Completed controls and the completed attack are not re-run; the remaining
+    # attacks run min_attack_trials each on top of the persisted request count.
+    min_a, _, _min_c = plan.trial_policy
     attacks = plan.attack_cases()
-    assert result.request_count == 1 + len(controls) * min_c + (len(attacks) - 1) * min_a
+    assert result.request_count == kept + (len(attacks) - 1) * min_a
 
 
 def test_control_canary_blocks_confirmation(tmp_path) -> None:

@@ -3,9 +3,11 @@
 State machine: ``planned → validated → running → confirming → cleaning_up →
 completed | completed_with_gaps | cancelled | failed``.
 
-Classification goes through the M7 confidence path (``_select_validators`` +
-``_evaluate_pack_case`` — the same single confirmation predicate used by
-``run_injection_pack``), so the runner never re-decides ``confirmed`` on its own.
+Classification goes through the shared evidence contract
+(:mod:`~ai_scan.orchestration.evidence`, over the M7 ``evaluate_trials``
+predicate) — the same derivation checkpoints, bundles and replay re-run over the
+persisted per-trial evidence — so the runner never re-decides ``confirmed`` on
+its own.
 Checkpoints are written after every physical attempt (so a resumed run never
 repeats one), budget exhaustion / scope denial become structured coverage gaps,
 and cancellation/error pass through a CLEANING_UP phase to a terminal state
@@ -23,14 +25,24 @@ from typing import Any
 
 from ai_scan.core.modes import resolve_policy
 from ai_scan.injection import (
+    CONTROL_GAP,
     ExchangeOutcome,
     InjectionCase,
     InjectionFinding,
     InjectionStatus,
-    _select_validators,
-    evaluate_trials,
+    merge_control_results,
+    physical_attempts,
 )
 from ai_scan.orchestration.checkpoint import Checkpoint, load_checkpoint, write_checkpoint_atomic
+from ai_scan.orchestration.evidence import (
+    CONTROL_STATUS,
+    derive_attack,
+    derive_control,
+    family_key,
+    rendered_prompt,
+    trial_from_dict,
+    trial_to_dict,
+)
 from ai_scan.orchestration.planner import Plan, PlanError, PlannedCase
 from ai_scan.orchestration.scheduler import schedule
 from ai_scan.packs import Pack, resolve_packs
@@ -122,11 +134,26 @@ def run_plan(
     checkpoint.state = RunState.VALIDATED.value
     _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
 
+    # Control coverage is re-derived from persisted control *evidence* only; a
+    # stored control result (or a legacy control record) without trials is never
+    # trusted — those controls are re-run for real before any attack.
+    for case_id, record in list(checkpoint.completed.items()):
+        if record.get("kind") == "control" and "trials" not in record:
+            del checkpoint.completed[case_id]
+    control_results: dict[str, str] = {}
+    plan_cases = {c.case_id: c for c in plan.cases}
+    for case_id, record in checkpoint.completed.items():
+        if record.get("kind") == "control":
+            trials = [trial_from_dict(t) for t in record["trials"]]
+            key = family_key(plan_cases[case_id])
+            control_results[key] = merge_control_results(
+                control_results.get(key), derive_control(plan, trials, canary)
+            )
+    checkpoint.control_results = dict(control_results)
     findings: list[InjectionFinding] = [
         _finding_from_record(v) for v in checkpoint.completed.values() if v.get("kind") == "attack"
     ]
     completed = set(checkpoint.completed)
-    control_results = dict(checkpoint.control_results)
     coverage_gaps: list[str] = []
 
     try:
@@ -146,34 +173,27 @@ def run_plan(
                 case, responder, canary, min_control_trials,
                 checkpoint, plan, run_secrets,
             )
-            usable = [o for o in outcomes if _usable(o)]
-            emitted = any(canary in o.body for o in usable)
-            family = _family_key(case)
-            if emitted:
-                result, status = "emitted", InjectionStatus.SUSPECTED
-            elif len(usable) >= min_control_trials:
-                result, status = "clean", InjectionStatus.NOT_OBSERVED
-            else:
-                result, status = "gap", InjectionStatus.INCONCLUSIVE
+            if not outcomes:
                 coverage_gaps.append(f"{case.case_id}: control coverage incomplete")
-            control_results[family] = _merge_control(control_results.get(family), result)
-            checkpoint.control_results = control_results
-            checkpoint.completed[case.case_id] = {
-                "family": case.family,
-                "status": status.value,
-                "prompt": case.template,
-                "proof": None,
-                "kind": "control",
-                "attack_trials": 0,
-                "successes": 0,
-            }
+                continue
+            result = derive_control(plan, outcomes, canary)
+            status = CONTROL_STATUS[result]
+            if result == CONTROL_GAP:
+                coverage_gaps.append(f"{case.case_id}: control coverage incomplete")
+            family = family_key(case)
+            control_results[family] = merge_control_results(control_results.get(family), result)
+            checkpoint.control_results = dict(control_results)
+            control_finding = InjectionFinding(
+                case.family, status, case.template, None,
+                attack_trials=0, successes=0, evidence=tuple(outcomes),
+            )
+            checkpoint.completed[case.case_id] = _record_from_finding(
+                control_finding, kind="control"
+            )
             completed.add(case.case_id)
             _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
-            if observer is not None and outcomes:
-                observer(
-                    case, outcomes[-1],
-                    InjectionFinding(case.family, status, case.template, None),
-                )
+            if observer is not None:
+                observer(case, outcomes[-1], control_finding)
 
         checkpoint.state = RunState.CONFIRMING.value
         _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
@@ -188,13 +208,10 @@ def run_plan(
             if not outcomes:
                 coverage_gaps.append(f"{case.case_id}: budget exhausted")
                 continue
-            control = control_results.get(_family_key(case))
             finding, representative = _classify_case(
-                case, outcomes, canary,
+                plan, case, outcomes, canary,
                 pack=packs[case.pack_id],
-                trial_policy=plan.trial_policy,
-                control_succeeded=control == "emitted",
-                matched_clean_control=control == "clean",
+                control=control_results.get(family_key(case)),
             )
             findings.append(finding)
             checkpoint.completed[case.case_id] = _record_from_finding(finding, kind="attack")
@@ -238,10 +255,6 @@ def _run_cleanup(
     _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
 
 
-def _family_key(case: PlannedCase) -> str:
-    return f"{case.pack_id}:{case.family}"
-
-
 def _resolve_plan_packs(plan: Plan) -> dict[str, Pack]:
     try:
         policy = resolve_policy(plan.mode)
@@ -271,27 +284,7 @@ def _persist(
 
 
 def _send(case: PlannedCase, responder: Responder, canary: str) -> ExchangeOutcome:
-    prompt = case.template.replace("{canary}", canary)
-    return responder(InjectionCase(case.family, case.template, prompt))
-
-
-def _usable(outcome: ExchangeOutcome) -> bool:
-    return (
-        outcome.transport_ok
-        and not outcome.redirected
-        and outcome.status < 400
-        and not outcome.truncated
-    )
-
-
-_CONTROL_PRIORITY = {"emitted": 2, "clean": 1, "gap": 0}
-
-
-def _merge_control(previous: str | None, new: str) -> str:
-    """Combine control coverage across a family's control cases (emitted wins)."""
-    if previous is None:
-        return new
-    return max(previous, new, key=lambda r: _CONTROL_PRIORITY[r])
+    return responder(InjectionCase(case.family, case.template, rendered_prompt(case, canary)))
 
 
 def _run_trials(
@@ -310,39 +303,31 @@ def _run_trials(
             break
         outcome = _send(case, responder, canary)
         run_secrets.update(outcome.known_secrets)
-        checkpoint.request_count += max(1, outcome.attempts)
+        checkpoint.request_count += physical_attempts(outcome)
         outcomes.append(outcome)
     return outcomes
 
 
 def _classify_case(
+    plan: Plan,
     case: PlannedCase,
     outcomes: list[ExchangeOutcome],
     canary: str,
     *,
     pack: Pack,
-    trial_policy: tuple[int, int, int],
-    control_succeeded: bool,
-    matched_clean_control: bool,
+    control: str | None,
 ) -> tuple[InjectionFinding, ExchangeOutcome]:
-    """Classify one attack case's repeated trials through the M7 predicate.
+    """Classify one attack case's repeated trials through the evidence contract.
 
     Uses the resolved *plan* trial policy (not weaker pack-local values) and
     requires a matched clean control to reach ``confirmed``. Returns the finding
-    (carrying its repeatability counts) plus the representative outcome to persist.
+    (carrying its counts and every trial outcome) plus the representative outcome.
     """
-    rendered = case.template.replace("{canary}", canary)
-    validators = _select_validators(pack.validators)
-    status, proof, trials, successes, representative = evaluate_trials(
-        outcomes, canary, rendered, validators,
-        control_succeeded=control_succeeded,
-        matched_clean_control=matched_clean_control,
-        min_attack_trials=trial_policy[0],
-        min_successes=trial_policy[1],
-        requires_state_change=pack.side_effects,
-    )
+    derived, representative = derive_attack(plan, case, pack, outcomes, canary, control)
     finding = InjectionFinding(
-        case.family, status, rendered, proof, attack_trials=trials, successes=successes
+        case.family, derived.status, rendered_prompt(case, canary), derived.proof,
+        attack_trials=derived.attack_trials, successes=derived.successes,
+        evidence=tuple(outcomes),
     )
     return finding, representative if representative is not None else outcomes[-1]
 
@@ -354,10 +339,11 @@ def _record_from_finding(finding: InjectionFinding, *, kind: str) -> dict[str, A
         "prompt": finding.prompt,
         "proof": finding.proof,
         "kind": kind,
-        # Trial counts let a plan-bound load re-derive whether a 'confirmed'
-        # status is even possible (repeatability), rejecting a forged status flip.
+        # Trial counts plus every persisted physical trial let a plan-bound load
+        # re-derive the status through the shared evidence contract.
         "attack_trials": finding.attack_trials,
         "successes": finding.successes,
+        "trials": [trial_to_dict(o) for o in finding.evidence],
     }
 
 
@@ -369,6 +355,7 @@ def _finding_from_record(record: dict[str, Any]) -> InjectionFinding:
         proof=None if record.get("proof") is None else str(record["proof"]),
         attack_trials=int(record.get("attack_trials", 1)),
         successes=int(record.get("successes", 0)),
+        evidence=tuple(trial_from_dict(t) for t in record.get("trials", ())),
     )
 
 

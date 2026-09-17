@@ -58,7 +58,7 @@ def test_unredacted_secret_in_bundle_rejected() -> None:
     doc = json.loads(sample_bundle_text())
     # Slip a credential-format secret into a record body, then re-digest.
     leak = "leak ghp_abcdefghijklmnopqrstuvwxyz0123"  # pragma: allowlist secret
-    doc["records"][0]["response"]["body"] = leak
+    doc["records"][0]["trials"][0]["body"] = leak
     with pytest.raises(BundleError):
         load_bundle(json.dumps(redigest(doc)))
 

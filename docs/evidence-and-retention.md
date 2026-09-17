@@ -25,6 +25,30 @@ reproduces the classification from the stored redacted evidence, and it
 constructs **no transport** and makes no network call. It is offline validation
 and reproduction — never a re-run against a target.
 
+## One evidence contract (live, checkpoint, bundle, replay)
+
+Live runs, checkpoint resume, bundle load, and replay all classify through the
+same contract (`ai_scan.orchestration.evidence`). Every completed case persists
+**every physical trial** (redacted body, HTTP status, redirect/truncation/transport
+flags, and physical attempts), and its status, proof, usable-trial and success
+counts are re-derived from those trials at the canonical plan's thresholds:
+
+- an attack confirms only with enough usable trials and successes, and only
+  against its family's **matched clean controls** re-derived from the controls'
+  own persisted trials (a stored `clean` without control evidence is never trusted);
+- the physical request count is the sum of persisted trial attempts (bundle:
+  equal; checkpoint: at least);
+- records are bound to the verified plan (case id, pack, family, kind, rendered
+  prompt), and bundles require the canonical policy-derived plan for their exact
+  target, so a re-digested plan with weakened thresholds is rejected.
+
+An exact final-token response (the bare canary) is therefore a valid confirmation
+only when that full per-trial evidence is present; a single body, claimed counts,
+or a legacy record without trials never confirms. Bundles are schema version 2;
+version 1 bundles (one representative response per case) are rejected. Replay
+accepts JSON text, UTF-8 bytes, or an in-memory `Bundle`, which is an immutable
+JSON snapshot that is always fully re-verified.
+
 ## Redaction boundary
 
 Secrets must be scrubbed before persistence, report generation, checkpointing, exception construction, and bundle export. Redaction covers sensitive header names, token-like custom fields, query parameters, redirect locations, nested JSON/form/tool structures, model messages, known transport-secret values, and reflected body content.

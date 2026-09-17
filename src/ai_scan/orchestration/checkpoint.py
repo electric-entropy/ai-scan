@@ -59,11 +59,15 @@ _VALID_STATUSES = frozenset(
 # Per-family control coverage: a usable clean control ran, a control emitted the
 # canary (false-positive baseline), or control coverage is a gap.
 _VALID_CONTROL_RESULTS = frozenset({"clean", "emitted", "gap"})
-# Each completed record is closed-schema: exactly the new 7-field shape, or the
-# legacy baseline 5-field shape (migrated on load). Anything else is rejected.
-_ALLOWED_RECORD_FIELDS = frozenset(
+# Each completed record is closed-schema: the evidence shape (with persisted
+# per-trial ``trials``), or a legacy shape without trials — the pre-evidence
+# 7-field record or the baseline 5-field record. Legacy records carry no
+# re-derivable evidence, so they can never be ``confirmed`` and a legacy
+# control never counts as control coverage. Anything else is rejected.
+_COUNTED_RECORD_FIELDS = frozenset(
     {"family", "status", "prompt", "proof", "kind", "attack_trials", "successes"}
 )
+_EVIDENCE_RECORD_FIELDS = _COUNTED_RECORD_FIELDS | {"trials"}
 _LEGACY_RECORD_FIELDS = frozenset({"family", "status", "prompt", "proof", "kind"})
 
 
@@ -144,8 +148,9 @@ def load_checkpoint(
     closed top-level field set rejects unknown fields (even when re-digested).
     When ``plan`` is supplied, every completed record is **bound to the verified
     plan**: its case must exist in the plan with a matching family/kind/rendered
-    prompt, and a ``confirmed`` record must carry canary-bearing proof — so a
-    re-digested forged record is rejected rather than trusted or skipped.
+    prompt, and its status must re-derive from its persisted trials under the
+    shared evidence contract — so a re-digested forged record is rejected rather
+    than trusted or skipped.
     """
     try:
         with open(path, encoding="utf-8") as handle:
@@ -200,16 +205,28 @@ def _bind_completed_to_plan(checkpoint: Checkpoint, plan: object) -> None:
 
     Each record's case must exist in the plan with a matching family/kind and the
     exact rendered prompt (template rendered with the checkpoint's canary for an
-    attack, the bare template for a control). A ``confirmed`` record must carry
-    proof that contains that canary. This rejects re-digested forged records
-    (unknown case, altered family/kind/prompt, or a fabricated confirmation)
-    rather than trusting or skipping them.
+    attack, the bare template for a control). Every evidence-bearing record is
+    then re-derived from its persisted trials through the shared evidence
+    contract (:func:`~ai_scan.orchestration.evidence.verify_records`): status,
+    proof, trial and success counts, and per-family control coverage must all
+    match, and the physical request count must cover the persisted attempts. A
+    legacy record without trials can never be ``confirmed``.
     """
+    from ai_scan.orchestration.evidence import (
+        CaseEvidence,
+        EvidenceError,
+        resolve_plan_packs,
+        verify_records,
+    )
+
     plan_cases = {c.case_id: c for c in plan.cases}  # type: ignore[attr-defined]
     # Prefer the stored canary; fall back to deriving it from the completed
     # records themselves so a legacy checkpoint (written before the canary field)
     # still binds and resumes rather than being rejected as non-plan-derived.
     canary = checkpoint.canary or _derive_canary(checkpoint.completed, plan_cases)
+    if checkpoint.request_count > plan.limits.max_physical_requests:  # type: ignore[attr-defined]
+        raise CheckpointError("request_count exceeds the plan's physical request budget")
+    evidence: list[CaseEvidence] = []
     for case_id, record in checkpoint.completed.items():
         case = plan_cases.get(case_id)
         if case is None:
@@ -221,53 +238,34 @@ def _bind_completed_to_plan(checkpoint: Checkpoint, plan: object) -> None:
         )
         if record.get("prompt") != expected:
             raise CheckpointError("completed record prompt is not plan-derived")
-        if record.get("status") == "confirmed":
-            _reject_unsupported_confirmation(record, case, checkpoint, canary, plan)
-
-
-def _reject_unsupported_confirmation(
-    record: dict[str, Any], case: Any, checkpoint: Checkpoint, canary: str, plan: Any
-) -> None:
-    """Reject a ``confirmed`` record whose own evidence cannot support confirmation.
-
-    A confirmed status is re-derived from the record's trial counts against the
-    plan's resolved thresholds, the family's control coverage, and canary-bearing
-    proof. A re-digested status flip (e.g. a not-observed record relabeled
-    ``confirmed``) is rejected because its counts/control/proof do not justify it.
-    Note: the digest is tamper-evidence, not a signature (rule #12); a forgery
-    that fabricates fully self-consistent trial evidence is out of scope here and
-    is caught by the signed evidence bundle (C1).
-    """
-    from ai_scan.validation import Evidence, ExactCanaryValidator
-
-    min_attack, min_successes = int(plan.trial_policy[0]), int(plan.trial_policy[1])
-    family_key = f"{case.pack_id}:{case.family}"
-    proof = record.get("proof")
-    if (
-        int(record.get("attack_trials", 0)) < min_attack
-        or int(record.get("successes", 0)) < min_successes
-        or checkpoint.control_results.get(family_key) != "clean"
-        or not isinstance(proof, str)
-        or not canary
-        or canary not in proof
-    ):
-        raise CheckpointError("confirmed record is not supported by its trial/control evidence")
-    # The canary is public (it is in the rendered prompt/checkpoint), so a proof
-    # that is *only* the canary — or the canary with no surrounding response
-    # context — is not response-derived evidence of execution; it is trivially
-    # forgeable. Require the proof to carry genuine response context beyond the
-    # public canary string.
-    if not proof.replace(canary, "").strip():
-        raise CheckpointError("confirmed record proof is a bare/public canary, not execution")
-    # The proof must also show genuine, non-reflected canary execution: a proof
-    # that is the (public) rendered prompt echoed back is reflection/self-echo,
-    # which B1 classifies as 'suspected' — never a confirmation.
-    rendered = case.template.replace("{canary}", canary)
-    signal = ExactCanaryValidator().validate(
-        Evidence(response=proof, canary=canary, prompt=rendered, evaluable=True)
-    )
-    if not signal.fired or signal.reflection:
-        raise CheckpointError("confirmed record proof is reflection/self-echo, not execution")
+        if "trials" not in record:
+            if record.get("status") == "confirmed":
+                raise CheckpointError(
+                    "confirmed record carries no persisted trial evidence"
+                )
+            continue
+        evidence.append(
+            CaseEvidence(
+                case_id=case_id,
+                kind=str(record["kind"]),
+                status=str(record["status"]),
+                proof=record.get("proof"),
+                attack_trials=int(record["attack_trials"]),
+                successes=int(record["successes"]),
+                trials=record["trials"],
+            )
+        )
+    if not evidence:
+        return
+    try:
+        verified = verify_records(plan, resolve_plan_packs(plan), canary, evidence)  # type: ignore[arg-type]
+    except EvidenceError as exc:
+        raise CheckpointError(f"completed record evidence is invalid: {exc}") from exc
+    for family, result in verified.control_results.items():
+        if checkpoint.control_results.get(family) != result:
+            raise CheckpointError("control results do not match the persisted control evidence")
+    if checkpoint.request_count < verified.physical_request_count:
+        raise CheckpointError("request_count is below the persisted physical trial attempts")
 
 
 def _derive_canary(completed: dict[str, dict[str, Any]], plan_cases: dict[str, Any]) -> str:
@@ -321,9 +319,9 @@ def _completed(value: object) -> dict[str, dict[str, Any]]:
         if record_fields == _LEGACY_RECORD_FIELDS:
             # Legacy baseline record: no trial counts. Safe to trust as completed
             # for non-confirmed statuses; a legacy 'confirmed' has zero trial
-            # evidence and is therefore rejected by the confirmation re-derivation.
+            # evidence and is therefore rejected by plan binding.
             legacy = True
-        elif record_fields == _ALLOWED_RECORD_FIELDS:
+        elif record_fields in (_COUNTED_RECORD_FIELDS, _EVIDENCE_RECORD_FIELDS):
             legacy = False
         else:
             raise CheckpointError("completed record has unknown or missing field(s)")
@@ -346,7 +344,7 @@ def _completed(value: object) -> dict[str, dict[str, Any]]:
             successes = _require_int(raw_record["successes"], "successes", positive=False)
             if successes > attack_trials:
                 raise CheckpointError("completed record successes cannot exceed attack_trials")
-        out[case_id] = {
+        normalized: dict[str, Any] = {
             "family": family,
             "status": status,
             "prompt": prompt,
@@ -355,7 +353,22 @@ def _completed(value: object) -> dict[str, dict[str, Any]]:
             "attack_trials": attack_trials,
             "successes": successes,
         }
+        if "trials" in raw_record:
+            normalized["trials"] = _trials(raw_record["trials"])
+        out[case_id] = normalized
     return out
+
+
+def _trials(value: object) -> list[dict[str, Any]]:
+    """Structurally validate persisted trial evidence (plan binding re-derives it)."""
+    from ai_scan.orchestration.evidence import EvidenceError, trial_from_dict, trial_to_dict
+
+    if not isinstance(value, list) or not value:
+        raise CheckpointError("completed record trials must be a non-empty list")
+    try:
+        return [trial_to_dict(trial_from_dict(item)) for item in value]
+    except EvidenceError as exc:
+        raise CheckpointError("completed record trial evidence is malformed") from exc
 
 
 def _control_results(value: object) -> dict[str, str]:

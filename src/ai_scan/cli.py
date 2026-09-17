@@ -16,7 +16,7 @@ import json
 import sys
 from collections.abc import Callable, Sequence
 
-from ai_scan.adapters import Adapter, AdapterError, GenericHttpAdapter
+from ai_scan.adapters import Adapter, AdapterError, ExtractionError, GenericHttpAdapter
 from ai_scan.adapters.registry import AdapterRegistry, default_registry
 from ai_scan.core.config import SUPPORTED_SCHEMAS, load_document, load_json_strict
 from ai_scan.core.errors import ConfigError
@@ -755,7 +755,15 @@ def _run_plan_active(
             return ExchangeOutcome(body="", transport_ok=False)
         run_secrets.update(resp.known_secrets)
         evidence.append(resp.evidence())
-        body = adapter.extract(resp)
+        try:
+            body = adapter.extract(resp)
+        except ExtractionError:
+            # A provider error, request echo, truncated or unsupported shape is
+            # not model output: the exchange is unusable (inconclusive) evidence.
+            return ExchangeOutcome(
+                body="", status=resp.status, transport_ok=False, attempts=resp.attempts,
+                known_secrets=resp.known_secrets,
+            )
         if _deadline_passed(controller):
             # Extraction crossed the absolute deadline: this result is unusable
             # (inconclusive) and must not be able to confirm.

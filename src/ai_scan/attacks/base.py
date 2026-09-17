@@ -1,12 +1,12 @@
 """Attack plugin protocol and a harness that classifies through the M7 predicate.
 
 A plugin supplies attack + benign-control cases and the *success token* that
-confirms it; :func:`run_attack` sends them through a caller-supplied responder
-(a local fixture in tests — never an external target) and classifies each case
-with the single M7 confidence predicate (``_select_validators`` +
-``_evaluate_pack_case``). Malformed plugin metadata fails closed *before* any
-responder call, and a plugin error is re-raised as :class:`AttackError` with its
-message scrubbed of untrusted values.
+confirms it; :func:`run_attack` sends every declared physical trial through a
+caller-supplied responder (a local fixture in tests — never an external target)
+and classifies each case's real trial outcomes with the single M7 confidence
+predicate (``_select_validators`` + ``evaluate_trials``). Malformed plugin
+metadata fails closed *before* any responder call, and a plugin error is
+re-raised as :class:`AttackError` with its message scrubbed of untrusted values.
 """
 
 from __future__ import annotations
@@ -16,13 +16,19 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from ai_scan.core.models import DeterminismClass
+from ai_scan.core.modes import resolve_policy
 from ai_scan.injection import (
+    CONTROL_CLEAN,
+    CONTROL_EMITTED,
     ExchangeOutcome,
     InjectionFinding,
     InjectionStatus,
-    _evaluate_pack_case,
     _select_validators,
-    _usable,
+    control_result,
+    evaluate_trials,
+    legacy_status,
+    merge_control_results,
+    physical_attempts,
 )
 from ai_scan.packs.schema import TrialPolicy
 from ai_scan.transport import scrub_text
@@ -77,6 +83,7 @@ class AttackResult:
     """The findings of one attack-plugin run."""
 
     findings: tuple[InjectionFinding, ...]
+    request_count: int = 0
 
     @property
     def status(self) -> InjectionStatus:
@@ -177,6 +184,20 @@ def _validate_cases(cases: object) -> list[AttackCase]:
     return validated
 
 
+def effective_trial_policy(declared: TrialPolicy, mode: str) -> TrialPolicy:
+    """Tighten a plugin's declared trial policy to at least the resolved mode policy.
+
+    A plugin may demand more trials/successes/controls than its mode, never fewer:
+    a built-in ``1/1/1`` declaration runs as ``3/2/2`` under Reliable.
+    """
+    policy = resolve_policy(mode)
+    return TrialPolicy(
+        min_attack_trials=max(declared.min_attack_trials, policy.minimum_attack_trials),
+        min_successes=max(declared.min_successes, policy.minimum_successes),
+        min_control_trials=max(declared.min_control_trials, policy.minimum_control_trials),
+    )
+
+
 def run_attack(plugin: AttackPlugin, responder: Responder, ctx: AttackContext) -> AttackResult:
     """Run ``plugin`` against ``responder`` and classify via the M7 predicate."""
     if ctx.mode not in _VALID_MODES:
@@ -190,34 +211,51 @@ def run_attack(plugin: AttackPlugin, responder: Responder, ctx: AttackContext) -
 
     cases = _validate_cases(_guarded(lambda: list(plugin.build_cases(ctx)), "build_cases"))
 
-    # Track control emission and matched *clean* control coverage separately: a
-    # family with no usable clean control cannot confirm (not merely "no emission").
-    control_emitted: dict[str, bool] = {}
-    control_clean: dict[str, bool] = {}
+    policy = effective_trial_policy(plugin.trial_policy, ctx.mode)
+    request_count = 0
+
+    def send(case: AttackCase) -> ExchangeOutcome:
+        nonlocal request_count
+        outcome = responder(case)
+        if not isinstance(outcome, ExchangeOutcome):
+            raise AttackError("attack responder returned a non-ExchangeOutcome value")
+        request_count += physical_attempts(outcome)
+        return outcome
+
+    # Every control case runs its full declared trial count. Per-family coverage
+    # is tri-state: a usable emission poisons the baseline, and a family can
+    # confirm only against a matched control whose every trial was usable+clean.
+    controls: dict[str, str] = {}
     attack_cases: list[AttackCase] = []
     for case in cases:
         if case.kind == "control":
-            outcome = responder(case)
-            usable = _usable(outcome)
-            if usable and token in outcome.body:
-                control_emitted[case.family] = True
-            elif usable:
-                control_clean[case.family] = True
+            outcomes = [send(case) for _ in range(policy.min_control_trials)]
+            controls[case.family] = merge_control_results(
+                controls.get(case.family),
+                control_result(outcomes, token, policy.min_control_trials),
+            )
         else:
             attack_cases.append(case)
 
     findings: list[InjectionFinding] = []
     for case in attack_cases:
-        outcome = responder(case)
-        status, proof = _evaluate_pack_case(
-            outcome,
+        evidence = tuple(send(case) for _ in range(policy.min_attack_trials))
+        control = controls.get(case.family)
+        status, proof, trials, successes, _rep = evaluate_trials(
+            evidence,
             token,
             case.prompt,
             validators,
-            control_succeeded=control_emitted.get(case.family, False),
-            matched_clean_control=control_clean.get(case.family, False),
-            trial=plugin.trial_policy,
+            control_succeeded=control == CONTROL_EMITTED,
+            matched_clean_control=control == CONTROL_CLEAN,
+            min_attack_trials=policy.min_attack_trials,
+            min_successes=policy.min_successes,
             requires_state_change=plugin.side_effects,
         )
-        findings.append(InjectionFinding(case.family, status, case.prompt, proof))
-    return AttackResult(tuple(findings))
+        findings.append(
+            InjectionFinding(
+                case.family, legacy_status(status), case.prompt, proof,
+                attack_trials=trials, successes=successes, evidence=evidence,
+            )
+        )
+    return AttackResult(tuple(findings), request_count)

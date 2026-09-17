@@ -86,7 +86,7 @@ def test_replay_rejects_missing_response_for_finding() -> None:
     doc = json.loads(sample_bundle_text())
     for record in doc["records"]:
         if record["kind"] == "attack":
-            del record["response"]["body"]
+            del record["trials"][0]["body"]
             break
     with pytest.raises((BundleError, ReplayError)):
         replay_bundle(json.dumps(redigest(doc)))

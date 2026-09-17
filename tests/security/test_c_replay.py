@@ -159,14 +159,17 @@ def test_replay_cli_tampered_bundle_exits_nonzero_scrubbed(tmp_path, capsys) -> 
 
 
 def test_replay_rejects_bare_canary_confirmed_evidence(tmp_path) -> None:
-    # Re-digest a bundle whose confirmed record's response is only the bare public
-    # canary (no execution context): replay must fail closed.
+    # Re-digest a bundle whose confirmed record keeps its claimed 3/3 counts but
+    # whose persisted evidence is a single bare public canary: an exact-token
+    # confirmation needs every persisted trial, so replay must fail closed.
     path = _bundle_file(tmp_path)
 
     def mutate(data: dict) -> None:
         for record in data["records"]:
             if record["kind"] == "attack" and record["finding"]["status"] == "confirmed":
-                record["response"]["body"] = _CANARY  # bare public canary only
+                trial = dict(record["trials"][0], body=_CANARY)  # bare public canary only
+                data["request_count"] -= sum(t["attempts"] for t in record["trials"][1:])
+                record["trials"] = [trial]
                 break
 
     _redigest(path, mutate)

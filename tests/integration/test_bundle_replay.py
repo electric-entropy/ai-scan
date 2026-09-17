@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import dataclasses
-
 from ai_scan import cli
 from ai_scan.evidence_graph import BundleCollector, dump_bundle, replay_bundle
 from ai_scan.injection import ExchangeOutcome
 from ai_scan.orchestration import compile_plan, run_plan
-from ai_scan.orchestration.planner import load_plan, plan_to_dict
-from ai_scan.packs.signatures import compute_digest
 from ai_scan.targets import normalize_target
 
 CANARY = "AISCAN-INTEG0001"
@@ -41,25 +37,25 @@ def test_run_bundle_replay_reproduces_findings(tmp_path) -> None:
     assert any(s == "confirmed" for s in original.values())
 
 
-def test_budget_gaps_are_preserved_in_bundle_and_replay(tmp_path) -> None:
+def test_coverage_gaps_are_preserved_in_bundle_and_replay(tmp_path) -> None:
+    # Bundles bind the canonical plan, so gaps come from real run evidence (an
+    # unusable control trial) rather than a hand-tightened, re-digested plan.
     plan = _plan()
-    # Re-digest a small-budget variant so its digest matches its (modified)
-    # content — a Plan's digest is content-bound, so a bare dataclasses.replace
-    # would leave it stale.
-    doc = plan_to_dict(
-        dataclasses.replace(plan, limits=dataclasses.replace(plan.limits, max_physical_requests=6))
-    )
-    doc.pop("digest")
-    doc["digest"] = compute_digest(doc)
-    tight = load_plan(doc)
+
+    def gappy(case):  # type: ignore[no-untyped-def]
+        outcome = _confirming_responder(case)
+        if "{canary}" not in case.template:
+            return ExchangeOutcome(body=outcome.body, transport_ok=False)
+        return outcome
+
     collector = BundleCollector()
-    result = run_plan(tight, _confirming_responder, canary=CANARY, goal="g",
-                      observer=collector.observe)
-    assert result.coverage_gaps  # some attacks were skipped
-    bundle = collector.build(plan=tight, canary=CANARY, run_id="run-2",
+    result = run_plan(plan, gappy, canary=CANARY, goal="g", observer=collector.observe)
+    assert result.coverage_gaps  # control coverage was incomplete
+    bundle = collector.build(plan=plan, canary=CANARY, run_id="run-2",
                              coverage_gaps=result.coverage_gaps)
     replayed = replay_bundle(dump_bundle(bundle))
     assert replayed.coverage_gaps == tuple(result.coverage_gaps)
+    assert "confirmed" not in set(replayed.findings.values())
 
 
 def test_cli_bundle_validate_and_replay_are_offline(tmp_path, monkeypatch, capsys) -> None:

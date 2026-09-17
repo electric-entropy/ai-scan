@@ -25,7 +25,11 @@ TARGET = normalize_target("http://127.0.0.1:8080/v1/chat")
 _PROVIDERS = [
     (OpenAICompatibleAdapter, {"choices": [{"message": {"content": "OK"}}]}),
     (AnthropicAdapter, {"content": [{"text": "OK"}]}),
-    (GeminiAdapter, {"candidates": [{"content": {"parts": [{"text": "OK"}]}}]}),
+    (
+        GeminiAdapter,
+        {"candidates": [{"content": {"role": "model", "parts": [{"text": "OK"}]},
+                         "finishReason": "STOP"}]},
+    ),
     (OllamaAdapter, {"message": {"content": "OK"}}),
 ]
 
