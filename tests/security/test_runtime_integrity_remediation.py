@@ -32,7 +32,7 @@ def _plan():  # type: ignore[no-untyped-def]
 def _executing_outcome(case) -> ExchangeOutcome:  # type: ignore[no-untyped-def]
     match = re.search(r"AISCAN-[A-Z0-9_-]+", case.rendered_prompt)
     token = match.group(0) if match else _CANARY
-    body = f"executed result: {token}" if "{canary}" in case.template else "benign"
+    body = token if "{canary}" in case.template else "benign"
     return ExchangeOutcome(body=body, known_secrets=frozenset({token}))
 
 

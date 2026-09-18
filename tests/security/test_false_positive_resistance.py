@@ -79,7 +79,7 @@ def test_all_weak_signals_combined_still_do_not_confirm() -> None:
 
 
 def test_control_that_emits_canary_blocks_confirmation() -> None:
-    execution = ExactCanaryValidator().validate(_ev(f"result: {CANARY}"))
+    execution = ExactCanaryValidator().validate(_ev(CANARY))
     assert not execution.reflection
     # Clean control → confirms.
     assert _status([execution], GatingContext(control_succeeded=False)) is FindingStatus.CONFIRMED
@@ -94,7 +94,7 @@ def test_control_blocks_confirmation_helper() -> None:
 
 def test_genuine_execution_with_clean_control_confirms() -> None:
     # Positive control for the suite: a real, non-reflected execution confirms.
-    execution = ExactCanaryValidator().validate(_ev(f"done. {CANARY}"))
+    execution = ExactCanaryValidator().validate(_ev(CANARY))
     assert execution.method is DeterminismClass.DETERMINISTIC and not execution.reflection
     assert _status([execution]) is FindingStatus.CONFIRMED
 

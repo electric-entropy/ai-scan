@@ -32,9 +32,9 @@ from ai_scan.evidence_graph import (
     load_bundle,
     replay_bundle,
 )
-from ai_scan.injection import ExchangeOutcome, InjectionCase
+from ai_scan.injection import ExchangeOutcome, InjectionCase, _proof_snippet
 from ai_scan.orchestration import compile_plan
-from ai_scan.orchestration.checkpoint import PERSISTED_CANARY, CheckpointError, load_checkpoint
+from ai_scan.orchestration.checkpoint import CheckpointError, load_checkpoint
 from ai_scan.orchestration.evidence import (
     CaseEvidence,
     EvidenceError,
@@ -263,13 +263,18 @@ def test_boundary_spanning_secret_never_persists_in_checkpoint(tmp_path, side) -
         else:
             # Secret ends 30 chars before the canary: straddles the -40 window edge.
             body = "lead " + _SECRET + "y" * 29 + f" {token} done"
+        # Exercise the snippet boundary directly as well: this non-exact body
+        # no longer qualifies for a live confirmation proof.
+        snippet = _proof_snippet(body, token, frozenset({_SECRET}))
+        assert token in snippet
+        assert not any(fragment in snippet for fragment in _fragments(_SECRET))
         return ExchangeOutcome(body=body, known_secrets=frozenset({_SECRET}))
 
     collector = BundleCollector()
     live = run_plan(
         plan, responder, canary=_CANARY, checkpoint_path=path, observer=collector.observe
     )
-    assert any(f.status.value == "confirmed" for f in live.findings)
+    assert {f.status.value for f in live.findings} == {"suspected", "inconclusive"}
 
     on_disk = open(path, encoding="utf-8").read()  # noqa: SIM115
     leaked = sorted(f for f in _fragments(_SECRET) if f in on_disk)
@@ -278,10 +283,10 @@ def test_boundary_spanning_secret_never_persists_in_checkpoint(tmp_path, side) -
         assert finding.proof is None or not any(f in finding.proof for f in _fragments(_SECRET))
 
     restored = load_checkpoint(path, expected_plan_digest=plan.digest, plan=plan)
-    proofs = [r["proof"] for r in restored.completed.values() if r["status"] == "confirmed"]
-    assert proofs and all("AISCAN-EVIDENCE-" in p for p in proofs)
-    assert all(PERSISTED_CANARY not in p for p in proofs)
-    assert all(_CANARY not in p for p in proofs)
+    attacks = [r for r in restored.completed.values() if r["kind"] == "attack"]
+    assert attacks and all(r["status"] == "suspected" for r in attacks)
+    assert all(r["proof"] is None and r["successes"] == 0 for r in attacks)
+    assert _CANARY not in on_disk
 
     calls: list[str] = []
 

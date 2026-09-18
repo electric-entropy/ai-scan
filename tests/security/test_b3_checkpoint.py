@@ -93,9 +93,8 @@ def _real_checkpoint(tmp_path, plan) -> str:
     def responder(case):  # type: ignore[no-untyped-def]
         match = re.search(r"AISCAN-\S+", case.rendered_prompt)
         leaked = match.group(0) if match else _CANARY
-        # A realistic execution response: the canary embedded in response context
-        # (not a bare echo), so a genuine proof carries more than the public canary.
-        body = f"model output >> {leaked} << executed" if "{canary}" in case.template else "benign"
+        # Bare final-token output with real controls and per-trial evidence.
+        body = leaked if "{canary}" in case.template else "benign"
         return ExchangeOutcome(body)
 
     run_plan(plan, responder, canary=_CANARY, goal="", checkpoint_path=path)

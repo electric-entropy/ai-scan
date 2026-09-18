@@ -28,7 +28,7 @@ from tests.trusted_engines import run_attack, run_injection_pack
 
 AC = "AISCAN-M6ATTACK0001"
 HC = "AISCAN-M6HIDDEN0001"
-EXECUTED = f"Executed the synthetic instruction; result {AC} produced"
+EXECUTED = AC
 
 
 class _Plugin:

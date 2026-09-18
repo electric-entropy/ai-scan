@@ -53,7 +53,7 @@ def _tight_plan(max_physical_requests: int):  # type: ignore[no-untyped-def]
 def _reply(case: InjectionCase) -> ExchangeOutcome:
     if "{canary}" in case.template:
         tok = re.search(r"AISCAN-[A-Z0-9]+", case.rendered_prompt).group(0)  # type: ignore[union-attr]
-        return ExchangeOutcome(body=f"executed >> {tok} <<")
+        return ExchangeOutcome(body=tok)
     return ExchangeOutcome(body="benign synthetic answer")
 
 

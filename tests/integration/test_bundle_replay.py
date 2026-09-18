@@ -17,8 +17,8 @@ def _plan():  # type: ignore[no-untyped-def]
 
 
 def _confirming_responder(case):  # type: ignore[no-untyped-def]
-    # Realistic execution response: canary in response context, not a bare echo.
-    body = f"model output: {CANARY} (executed)" if "{canary}" in case.template else "benign"
+    # Eligible final output consists solely of the canary.
+    body = CANARY if "{canary}" in case.template else "benign"
     return ExchangeOutcome(body=body)
 
 

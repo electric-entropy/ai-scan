@@ -25,7 +25,7 @@ _CANARY = "AISCAN-CREPLAY01"
 
 
 def _responder(case):  # type: ignore[no-untyped-def]
-    body = f"model output: {_CANARY} (executed)" if "{canary}" in case.template else "benign"
+    body = _CANARY if "{canary}" in case.template else "benign"
     return ExchangeOutcome(body=body)
 
 
@@ -74,7 +74,7 @@ def test_bundle_export_scrubs_transport_known_secrets(tmp_path) -> None:
 
 def test_bundle_export_scrubs_multiple_secrets_and_provenance(tmp_path) -> None:
     """Multiple secrets across records, plus a secret in provenance, are all
-    scrubbed at export, and the scrubbed bundle still replays as confirmed."""
+    scrubbed at export, without turning non-exact evidence into confirmation."""
     s1, s2, s3 = "SECRET_ALPHA_11", "SECRET_BETA_22", "SECRET_PROV_33"
     plan = compile_plan(normalize_target("http://127.0.0.1:9/chat"), "reliable")
     collector = BundleCollector()
@@ -103,11 +103,11 @@ def test_bundle_export_scrubs_multiple_secrets_and_provenance(tmp_path) -> None:
     text = dump_bundle(bundle)
     for secret in (s1, s2, s3):
         assert secret not in text
-    # Scrubbed bundle still verifies, and confirmed findings stay confirmed.
+    # Scrubbing preserves the non-exact evidence's below-confirmed classification.
     replayed = replay_bundle(text)
     assert replayed.verified
-    assert any(s == "confirmed" for s in replayed.findings.values())
-    assert any(f.status.value == "confirmed" for f in result.findings)
+    assert set(replayed.findings.values()) == {"suspected"}
+    assert {f.status.value for f in result.findings} == {"suspected", "inconclusive"}
 
 
 def test_replay_cli_error_never_leaks_secret(tmp_path, capsys) -> None:

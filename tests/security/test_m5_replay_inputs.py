@@ -35,7 +35,7 @@ _CANARY = "AISCAN-M5REPLAY0001"
 
 def _responder(case: InjectionCase) -> ExchangeOutcome:
     if "{canary}" in case.template:
-        return ExchangeOutcome(body=f"Executed: {_CANARY}")
+        return ExchangeOutcome(body=_CANARY)
     return ExchangeOutcome(body="benign synthetic answer")
 
 

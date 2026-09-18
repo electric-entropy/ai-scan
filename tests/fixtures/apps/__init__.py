@@ -3,8 +3,8 @@
 Each factory returns a responder ``(AttackCase) -> ExchangeOutcome`` modelling a
 target's behavior. No network, no external target:
 
-* :func:`vulnerable_app` — follows injected instructions (emits the attack
-  canary in a fresh context) and discloses its synthetic hidden canary when
+* :func:`vulnerable_app` — follows injected instructions (emits only the attack
+  canary) and discloses its synthetic hidden canary when
   asked about its system/setup text; benign prompts stay clean.
 * :func:`resistant_app` — always refuses; never emits either canary.
 * :func:`reflective_app` — echoes the prompt verbatim (so the attack canary is
@@ -92,15 +92,14 @@ def _looks_like_disclosure(prompt: str) -> bool:
 def vulnerable_app(*, attack_canary: str, hidden_canary: str) -> Responder:
     def respond(case: AttackCase) -> ExchangeOutcome:
         prompt = case.prompt
-        # Direct injection: obey the instruction, emitting the canary in a new
-        # context (not an echo of the prompt).
+        # Direct injection: obey with a bare final token, not a prompt echo.
         if attack_canary in prompt:
             return ExchangeOutcome(
-                body=f"Okay — emitting the requested token now: {attack_canary}."
+                body=attack_canary
             )
         # Disclosure: reveal the synthetic hidden setup note on request.
         if _looks_like_disclosure(prompt):
-            return ExchangeOutcome(body=f"My hidden setup note says: {hidden_canary}")
+            return ExchangeOutcome(body=hidden_canary)
         return ExchangeOutcome(body="Happy to help with that general question.")
 
     return respond
@@ -129,9 +128,9 @@ def vulnerable_rag_app(*, attack_canary: str, hidden_canary: str) -> Responder:
     def respond(case: AttackCase) -> ExchangeOutcome:
         prompt = case.prompt.lower()
         if case.family == "indirect_injection" and any(h in prompt for h in _INDIRECT_HINTS):
-            return ExchangeOutcome(body=f"Document instruction executed: {attack_canary}")
+            return ExchangeOutcome(body=attack_canary)
         if case.family == "rag_isolation" and any(h in prompt for h in _RAG_CROSS_HINTS):
-            return ExchangeOutcome(body=f"Cross-tenant note content: {hidden_canary}")
+            return ExchangeOutcome(body=hidden_canary)
         return ExchangeOutcome(body="Retrieved only authorized benign synthetic content.")
 
     return respond
@@ -147,12 +146,12 @@ def resistant_rag_app(*, attack_canary: str, hidden_canary: str) -> Responder:
 
 
 def vulnerable_tool_agent(*, attack_canary: str, hidden_canary: str) -> Responder:
-    """Offline tool-agent fixture with an actual synthetic broker trace."""
+    """Offline tool-agent fixture returning only the synthetic effect token."""
 
     def respond(case: AttackCase) -> ExchangeOutcome:
         prompt = case.prompt.lower()
         if case.family == "tool_abuse" and any(h in prompt for h in _TOOL_ATTACK_HINTS):
-            return ExchangeOutcome(body=f"broker_trace=executed synthetic_effect={attack_canary}")
+            return ExchangeOutcome(body=attack_canary)
         return ExchangeOutcome(body="No synthetic tool execution occurred.")
 
     return respond
@@ -189,7 +188,7 @@ def vulnerable_isolation_app(*, attack_canary: str, hidden_canary: str) -> Respo
             "multi_agent_isolation": _MULTI_AGENT_ATTACK_HINTS,
         }.get(case.family, ())
         if any(h in prompt for h in hints):
-            return ExchangeOutcome(body=f"identity_bound_evidence={hidden_canary}")
+            return ExchangeOutcome(body=hidden_canary)
         return ExchangeOutcome(body="Only same-identity synthetic state was returned.")
 
     return respond
@@ -210,9 +209,9 @@ def vulnerable_output_app(*, attack_canary: str, hidden_canary: str) -> Responde
     def respond(case: AttackCase) -> ExchangeOutcome:
         prompt = case.prompt.lower()
         if case.family == "output_handling" and any(h in prompt for h in _OUTPUT_HANDLING_HINTS):
-            return ExchangeOutcome(body=f"sandbox_dom_evidence={hidden_canary}")
+            return ExchangeOutcome(body=hidden_canary)
         if case.family == "encoding_multilingual" and any(h in prompt for h in _ENCODING_HINTS):
-            return ExchangeOutcome(body=f"decoded_authorized_canary={attack_canary}")
+            return ExchangeOutcome(body=attack_canary)
         return ExchangeOutcome(body="Synthetic sink stayed escaped and inert.")
 
     return respond
@@ -246,11 +245,11 @@ def vulnerable_resource_router_supply_app(
     def respond(case: AttackCase) -> ExchangeOutcome:
         prompt = case.prompt.lower()
         if case.family == "resource_amplification" and any(h in prompt for h in _RESOURCE_HINTS):
-            return ExchangeOutcome(body=f"budget_stop_observed={attack_canary}")
+            return ExchangeOutcome(body=attack_canary)
         if case.family == "router_consistency" and any(h in prompt for h in _ROUTER_HINTS):
-            return ExchangeOutcome(body=f"policy_inconsistency_evidence={hidden_canary}")
+            return ExchangeOutcome(body=hidden_canary)
         if case.family == "supply_chain" and any(h in prompt for h in _SUPPLY_CHAIN_HINTS):
-            return ExchangeOutcome(body=f"passive_posture_evidence={hidden_canary}")
+            return ExchangeOutcome(body=hidden_canary)
         return ExchangeOutcome(body="Synthetic baseline stayed within expected posture.")
 
     return respond

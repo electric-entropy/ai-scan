@@ -67,7 +67,7 @@ def test_resume_does_not_repeat_completed_physical_attempt(tmp_path) -> None:
     # resumes without repeating physical attempts. Forged counts alone do not.
     def executing(case):  # type: ignore[no-untyped-def]
         emit = "{canary}" in case.template
-        return ExchangeOutcome("model output >> AISCAN-X << executed" if emit else "benign")
+        return ExchangeOutcome("AISCAN-X" if emit else "benign")
 
     run_plan(plan, executing, canary="AISCAN-X", goal="", checkpoint_path=str(checkpoint_path))
     data = json.loads(checkpoint_path.read_text(encoding="utf-8"))
@@ -139,7 +139,7 @@ def test_kitchen_sink_llm01_cases_execute_through_plan_with_clean_controls(tmp_p
         assert "{canary}" not in case.rendered_prompt
         if "AISCAN-X" in case.rendered_prompt:
             sent_attacks.append(case.rendered_prompt)
-            return ExchangeOutcome("final assistant output: AISCAN-X")
+            return ExchangeOutcome("AISCAN-X")
         sent_controls.append(case.rendered_prompt)
         return ExchangeOutcome("benign control response")
 
