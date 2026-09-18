@@ -7,6 +7,7 @@ here rather than only in manual release checks.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import tarfile
@@ -42,6 +43,9 @@ EXPECTED_DATA = [
     "owasp/output-handling-manifest-v1.schema.json",
     "owasp/output-handling-secure-v1.json",
     "owasp/output-handling-vulnerable-v1.json",
+    "owasp/agency-manifest-v1.schema.json",
+    "owasp/agency-secure-v1.json",
+    "owasp/agency-vulnerable-v1.json",
     "reporting/templates/report.html",
 ]
 EXPECTED_SDIST_FILES = [
@@ -128,3 +132,28 @@ def test_fresh_wheel_import_version_matches_metadata(built_dists, tmp_path) -> N
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    executable = venv_dir / "bin" / "ai-scan"
+    for args in (("--help",), ("doctor", "--json"), ("owasp-coverage",)):
+        smoke = subprocess.run([str(executable), *args], capture_output=True, text=True)
+        assert smoke.returncode == 0, smoke.stdout + smoke.stderr
+    location = subprocess.run(
+        [str(python), "-c", "from importlib.resources import files; print(files('ai_scan.owasp'))"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    for name, code, status in (("secure", 0, "passed"), ("vulnerable", 3, "finding")):
+        smoke = subprocess.run(
+            [
+                str(executable),
+                "agency-audit",
+                "--manifest",
+                str(Path(location) / f"agency-{name}-v1.json"),
+                "--format",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert smoke.returncode == code, smoke.stdout + smoke.stderr
+        assert json.loads(smoke.stdout)["status"] == status

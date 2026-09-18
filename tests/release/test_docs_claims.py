@@ -117,12 +117,14 @@ def test_owasp_docs_describe_current_mode_breadth_and_limits_truthfully() -> Non
     assert reliable.limits != kitchen_sink.limits
     assert (
         "active llm01, llm02, partial offline-manifest llm03, and partial active "
-        "controlled-retrieval-protocol llm04, plus partial offline-declaration llm05 "
+        "controlled-retrieval-protocol llm04, plus partial offline-declaration llm05 and llm06 "
         "coverage only"
     ) in normalized
     assert "supply-chain-audit --manifest file" in normalized
     assert "data-poisoning-audit --target url" in normalized
     assert "output-handling-audit --manifest file" in normalized
+    assert "agency-audit --manifest file" in normalized
+    assert "6/10" in normalized
     assert "never imports, deserializes, loads, hashes, or executes model artifacts" in normalized
     assert "external service owns state and decides retrieval behavior" in normalized
     assert "model-weight poisoning" in normalized and "fine-tuning poisoning" in normalized
@@ -148,10 +150,10 @@ def test_owasp_docs_describe_current_mode_breadth_and_limits_truthfully() -> Non
     assert "budgets are identical" not in normalized
 
 
-def test_owasp_docs_current_summary_names_phase_2b5() -> None:
+def test_owasp_docs_current_summary_names_phase_2b6() -> None:
     text = _text(_OWASP_COVERAGE)
-    assert "Current honest summary after Phase 2B5:" in text
-    assert "Current honest summary after Phase 2B4:" not in text
+    assert "Current honest summary after Phase 2B6:" in text
+    assert "Current honest summary after Phase 2B5:" not in text
 
 
 def test_llm04_docs_disclose_unresolved_external_state_limit() -> None:

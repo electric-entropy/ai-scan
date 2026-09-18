@@ -1,0 +1,275 @@
+{
+  "$comment": "Structural schema only; agency semantic validation is mandatory.",
+  "$id": "https://electricentropy.com/schemas/ai-scan-agency-v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "limits": {
+      "additionalProperties": false,
+      "properties": {
+        "concurrency": {
+          "maximum": 256,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "delegation_depth": {
+          "maximum": 32,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "duration_seconds": {
+          "maximum": 86400,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "output_bytes": {
+          "maximum": 10000000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "recursion_depth": {
+          "maximum": 32,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "retries": {
+          "maximum": 16,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "side_effects": {
+          "maximum": 10000,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "steps": {
+          "maximum": 10000,
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "concurrency",
+        "delegation_depth",
+        "duration_seconds",
+        "output_bytes",
+        "recursion_depth",
+        "retries",
+        "side_effects",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": "ai-scan-agency-manifest-v1"
+    },
+    "tools": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "cleanup": {
+            "enum": [
+              "none",
+              "best_effort",
+              "deterministic_compensation"
+            ],
+            "type": "string"
+          },
+          "cleanup_verified": {
+            "type": "boolean"
+          },
+          "destination_boundary": {
+            "enum": [
+              "fixed",
+              "dynamic"
+            ],
+            "type": "string"
+          },
+          "destination_ref": {
+            "maxLength": 128,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}$",
+            "type": "string"
+          },
+          "error_isolation": {
+            "type": "boolean"
+          },
+          "event_identity": {
+            "enum": [
+              "opaque_sequence",
+              "raw_content",
+              "none"
+            ],
+            "type": "string"
+          },
+          "execution_identity": {
+            "enum": [
+              "dedicated_least_privilege",
+              "shared",
+              "privileged"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "maxLength": 128,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}$",
+            "type": "string"
+          },
+          "idempotency": {
+            "enum": [
+              "none",
+              "stable_operation_key",
+              "per_attempt_key"
+            ],
+            "type": "string"
+          },
+          "isolation": {
+            "enum": [
+              "none",
+              "process",
+              "container"
+            ],
+            "type": "string"
+          },
+          "least_functionality": {
+            "type": "boolean"
+          },
+          "max_calls": {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "object_boundary": {
+            "enum": [
+              "fixed",
+              "dynamic"
+            ],
+            "type": "string"
+          },
+          "object_ref": {
+            "maxLength": 128,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}$",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "read",
+              "update",
+              "delete",
+              "send"
+            ],
+            "type": "string"
+          },
+          "operation_commitment": {
+            "type": "boolean"
+          },
+          "output_to_action": {
+            "enum": [
+              "separated",
+              "direct"
+            ],
+            "type": "string"
+          },
+          "parameter_shape": {
+            "enum": [
+              "closed_typed",
+              "open"
+            ],
+            "type": "string"
+          },
+          "precondition": {
+            "type": "boolean"
+          },
+          "read_back": {
+            "type": "boolean"
+          },
+          "request_commitment": {
+            "type": "boolean"
+          },
+          "resource_ref": {
+            "maxLength": 128,
+            "minLength": 3,
+            "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}$",
+            "type": "string"
+          },
+          "resource_scope": {
+            "enum": [
+              "fixed",
+              "dynamic"
+            ],
+            "type": "string"
+          },
+          "response_schema": {
+            "enum": [
+              "closed_typed",
+              "open"
+            ],
+            "type": "string"
+          },
+          "result_commitment": {
+            "type": "boolean"
+          },
+          "result_trust": {
+            "enum": [
+              "untrusted",
+              "trusted"
+            ],
+            "type": "string"
+          },
+          "side_effecting": {
+            "type": "boolean"
+          },
+          "unresolved_state": {
+            "enum": [
+              "not_applicable",
+              "continue",
+              "halt_and_reconcile"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "cleanup",
+          "cleanup_verified",
+          "destination_boundary",
+          "destination_ref",
+          "error_isolation",
+          "event_identity",
+          "execution_identity",
+          "id",
+          "idempotency",
+          "isolation",
+          "least_functionality",
+          "max_calls",
+          "object_boundary",
+          "object_ref",
+          "operation",
+          "operation_commitment",
+          "output_to_action",
+          "parameter_shape",
+          "precondition",
+          "read_back",
+          "request_commitment",
+          "resource_ref",
+          "resource_scope",
+          "response_schema",
+          "result_commitment",
+          "result_trust",
+          "side_effecting",
+          "unresolved_state"
+        ],
+        "type": "object"
+      },
+      "maxItems": 2000,
+      "type": "array"
+    }
+  },
+  "required": [
+    "limits",
+    "schema_version",
+    "tools"
+  ],
+  "type": "object"
+}

@@ -20,7 +20,7 @@ Those reserved identifiers are not emitted by the current report or SARIF
 runtime surfaces; current JSON reports leave `remediation` and
 `framework_mappings` empty, and current SARIF rule IDs remain finding-family IDs.
 
-Current honest summary after Phase 2B5:
+Current honest summary after Phase 2B6:
 
 - LLM01:2025 Prompt Injection — partial current active CLI coverage through the
   public direct-injection packs. Reliable plans compile 12 cases from
@@ -106,10 +106,17 @@ Current honest summary after Phase 2B5:
   behavior. Runtime rendering and execution, browser behavior, database or
   process effects, prompt injection, and downstream implementation verification
   remain explicit gaps. This is not full LLM05 coverage.
-- LLM06:2025 Excessive Agency — no current active public CLI coverage.
-  Tool-abuse packs carry LLM06 mappings, but they are capability-gated and
-  unreachable through the current public `plan`/`run` path because there is no
-  capability selector in this phase.
+- LLM06:2025 Excessive Agency — partial offline declaration coverage through
+  `ai-scan agency-audit --manifest FILE`. Fixed rules assess tool inventory,
+  scope/parameters/boundaries, execution identity/isolation, finite autonomy,
+  idempotency/read-back/cleanup/unresolved state, result trust, and auditability.
+  Only the selected bounded regular non-symlink manifest is read; nothing declared
+  is executed, imported, deserialized, opened, fetched, or resolved.
+  “Declaration checks passed” means only that the declarations passed fixed checks.
+  No tool execution, permission enforcement, deployed identity, isolation, cleanup,
+  runtime behavior, or absence of excessive agency was verified. Prompt-only
+  tool-abuse packs do not establish LLM06 coverage. The [manifest contract](agency-audit.md)
+  specifies the strict schema, cross-field rules, bounds, and claim limitations.
 - LLM07:2025 System Prompt Leakage — no current active public CLI coverage.
   Tool-abuse/leakage mappings are capability-gated or prompt-overlap leads and
   are unreachable through the current public `plan`/`run` path without a
@@ -127,8 +134,9 @@ Coverage arithmetic is conservative: the denominator is the ten OWASP categories
 `not_applicable` is excluded and separately reported; `blocked`, `inconclusive`,
 and `not_tested` never increase tested coverage. Current public coverage now has
 active LLM01, LLM02, partial offline-manifest LLM03, and partial active
-controlled-retrieval-protocol LLM04, plus partial offline-declaration LLM05
+controlled-retrieval-protocol LLM04, plus partial offline-declaration LLM05 and LLM06
 coverage only, with additional bounded Kitchen Sink breadth in LLM01/LLM02.
+The active partial category count is exactly 6/10; this is not runtime coverage of six categories.
 Modes may use different bounded operational limits;
 both remain subject to scope,
 request/rate/concurrency/duration ceilings, redaction, cleanup, evidence, and

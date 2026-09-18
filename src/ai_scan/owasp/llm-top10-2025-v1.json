@@ -368,76 +368,50 @@
       ]
     },
     {
-      "active_coverage_source": "capability-gated tool-abuse packs exist, but they are unreachable through the current public CLI planner with no capability selector and do not count as current public CLI active coverage",
-      "allowed_outcomes": [
-        "not_tested",
-        "blocked",
-        "inconclusive",
-        "not_applicable"
-      ],
-      "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
-      "current_active_cli_coverage": false,
-      "deterministic_evidence": [
-        "Identity-bound tool/action evidence with read-back and cleanup when stateful"
-      ],
+      "active_coverage_source": "public agency-audit CLI performs partial offline LLM06 declaration assessment only; no tool execution, transport, network, or declared-object resolution",
+      "allowed_outcomes": ["tested", "finding", "blocked", "inconclusive", "not_applicable"],
+      "coverage_denominator": "Only the offline declaration scenario counts; runtime excessive agency remains untested.",
+      "current_active_cli_coverage": true,
+      "deterministic_evidence": ["Fixed operation and risk-dependent declaration rules produce opaque tool references and fixed rule identifiers"],
       "full_coverage_claim_allowed": false,
       "id": "LLM06",
       "known_limitations": [
-        "Capability-gated tool-abuse packs are unreachable through the current public CLI path because no capability selector is exposed",
-        "Phase 2B work required before active end-to-end coverage",
-        "unsupported by current CLI as a finding-producing category"
+        "Declaration checks passed does not verify tool execution, permission enforcement, deployed identity, isolation, cleanup, runtime behavior, or absence of excessive agency",
+        "No full LLM06 coverage; prompt-only tool-abuse packs do not prove excessive agency",
+        "Inventories and controls are declarations only; no deployed configuration or cryptographic signing is verified"
       ],
       "mode_breadth": {
-        "kitchen_sink": [
-          "additional tool-abuse and multi-step agency variants"
-        ],
-        "reliable": [
-          "tool-abuse reliable pack for bounded agency prompts"
-        ]
+        "kitchen_sink": ["same offline agency-audit declaration rules as Reliable; no runtime tool coverage"],
+        "reliable": ["agency-audit: bounded offline tool inventory, scope, identity, autonomy, lifecycle, result trust, and auditability declarations"]
       },
       "name": "Excessive Agency",
-      "not_applicable_when": [
-        "No tool or agency surface exists"
-      ],
-      "phase_2b_planned": true,
-      "prerequisites": [
-        "Tool/action side effects are bounded, local, observable, and cleanable"
-      ],
-      "required_controls": [
-        "Denied-action, benign-action, and clean-control tool calls"
-      ],
+      "not_applicable_when": ["The manifest explicitly declares an empty tool inventory"],
+      "phase_2b_planned": false,
+      "prerequisites": ["Operator supplies a local ai-scan-agency-manifest-v1 file containing declarations only"],
+      "required_controls": ["Strict closed semantic validation, bounded descriptor-safe reading, independent declaration fixtures, and opaque output"],
       "reserved_remediation_id": "ai-scan.owasp.LLM06.remediation",
-      "reserved_report_ids": [
-        "ai-scan.owasp.LLM06.coverage",
-        "ai-scan.owasp.LLM06.evidence"
-      ],
+      "reserved_report_ids": ["ai-scan.owasp.LLM06.coverage", "ai-scan.owasp.LLM06.evidence"],
       "reserved_sarif_rule_id": "ai-scan.owasp.LLM06.rule",
-      "scaffolding_only": true,
+      "scaffolding_only": false,
       "supported_scenarios": [
         {
-          "active_cli": false,
-          "controls": [
-            "Denied-action, benign-action, and clean-control tool calls"
-          ],
-          "evidence": "Identity-bound tool/action evidence with read-back and cleanup when stateful",
-          "id": "scenario.llm06.reliable",
-          "name": "Reliable Excessive Agency scenario slice",
-          "status": "not_tested"
+          "active_cli": true,
+          "controls": ["Closed schema, cross-field validation, risk-dependent rules, no execution, and independent declaration fixtures"],
+          "evidence": "agency-audit findings bind fixed rule identifiers to document digest and opaque tool references only",
+          "id": "scenario.llm06.offline-declaration",
+          "name": "Partial offline Excessive Agency declaration assessment",
+          "status": "tested"
         },
         {
           "active_cli": false,
-          "controls": [
-            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
-          ],
-          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
-          "id": "scenario.llm06.kitchen-sink",
-          "name": "Kitchen Sink Excessive Agency broader scenario slice",
+          "controls": ["No runtime proof from declaration checks or prompt-only tool-abuse packs"],
+          "evidence": "Tool execution, identity, isolation, lifecycle enforcement, and real deployment behavior remain untested",
+          "id": "scenario.llm06.runtime-gaps",
+          "name": "Runtime excessive agency gaps",
           "status": "not_tested"
         }
       ],
-      "target_capabilities": [
-        "Target can call tools, APIs, transactions, or multi-step agent workflows"
-      ]
+      "target_capabilities": ["Local manifest declares read, update, destructive delete, or externally visible send operations"]
     },
     {
       "active_coverage_source": "capability-gated/prompt-overlap leakage pack mappings exist, but they are unreachable through the current public CLI planner with no capability selector and do not count as current public CLI active coverage",
@@ -728,7 +702,7 @@
       ]
     }
   ],
-  "content_sha256": "8034c0fe1910247bf90b18e400ba02882909bf7c35d55d54ba4c458558137cbc",
+  "content_sha256": "3c6a1dbc9caa31cf6d980690cbfa448ff4a77f0aaaa895c7f97cc7530435f2fe",
   "coverage_arithmetic": {
     "aggregate_full_coverage_claim_allowed": false,
     "blocked_inconclusive_not_tested_do_not_count_as_tested": true,

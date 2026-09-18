@@ -19,6 +19,7 @@ import stat
 import sys
 from collections.abc import Callable, Sequence
 
+from ai_scan import agency
 from ai_scan.adapters import Adapter, AdapterError, ExtractionError, GenericHttpAdapter
 from ai_scan.adapters.registry import AdapterRegistry, default_registry
 from ai_scan.core.config import SUPPORTED_SCHEMAS, load_document, load_json_strict
@@ -341,6 +342,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format.",
     )
 
+    p_agency = subparsers.add_parser(
+        "agency-audit",
+        help="Offline partial LLM06 agent/tool declaration assessment (no execution or network).",
+        description="Offline declarations only; no tool execution or runtime safety verification.",
+    )
+    p_agency.add_argument("--manifest", required=True, help="Local declaration manifest JSON.")
+    p_agency.add_argument("--format", choices=["human", "json"], default="human")
+
     p_data_poisoning = subparsers.add_parser(
         "data-poisoning-audit",
         help=(
@@ -429,6 +438,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_supply_chain_audit(args)
     if args.command == "output-handling-audit":
         return _cmd_output_handling_audit(args)
+    if args.command == "agency-audit":
+        return _cmd_agency_audit(args)
     if args.command == "data-poisoning-audit":
         return _cmd_data_poisoning_audit(args)
 
@@ -813,6 +824,18 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             raise ValueError("LLM05 vulnerable fixture semantic mismatch")
         return "schema and 2 fixtures valid"
 
+    def _llm06_agency_resources() -> str:
+        agency.load_schema_text(agency.load_manifest_file(
+            str(root.joinpath("owasp/agency-manifest-v1.schema.json"))
+        ))
+        for name, expected in (("secure", "passed"), ("vulnerable", "finding")):
+            result = agency.audit_manifest_text(agency.load_manifest_file(
+                str(root.joinpath(f"owasp/agency-{name}-v1.json"))
+            ))
+            if result.status != expected:
+                raise ValueError("llm06_fixture_semantic_mismatch")
+        return "schema and 2 fixtures valid"
+
     record("metadata", _metadata)
     record("py.typed", _py_typed)
     record("schemas", _schemas)
@@ -823,6 +846,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     record("owasp-llm03-supply-chain-fixtures", _llm03_supply_chain_fixtures)
     record("owasp-llm04-data-poisoning-protocol", _llm04_data_poisoning_protocol)
     record("owasp-llm05-output-handling-resources", _llm05_output_handling_resources)
+    record("owasp-llm06-agency-resources", _llm06_agency_resources)
 
     healthy = all(bool(check["ok"]) for check in checks)
     if args.json:
@@ -865,6 +889,17 @@ def _cmd_supply_chain_audit(args: argparse.Namespace) -> int:
     if result.status == "inconclusive":
         return EXIT_INCONCLUSIVE
     return EXIT_OK
+
+
+def _cmd_agency_audit(args: argparse.Namespace) -> int:
+    """Assess declarations without constructing transport or resolving references."""
+    try:
+        result = agency.audit_manifest_file(args.manifest)
+    except agency.AgencyManifestError:
+        print("invalid: llm06_manifest_invalid")
+        return EXIT_RUNTIME_ERROR
+    print(agency.render_json(result) if args.format == "json" else agency.render_human(result))
+    return EXIT_CONFIRMED_FINDING if result.status == "finding" else EXIT_OK
 
 
 def _cmd_output_handling_audit(args: argparse.Namespace) -> int:

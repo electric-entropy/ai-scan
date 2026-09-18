@@ -181,7 +181,16 @@ payloads, or plugins. Declaration checks passed does not prove safe runtime
 behavior. Runtime rendering and execution, browser behavior, database or process
 effects, prompt injection, and downstream implementation verification remain
 gaps; no full LLM05 or OWASP compliance claim is made.
-LLM06 and LLM07 pack mappings are capability-gated/unreachable without a public
+LLM06 has partial offline declaration coverage through
+`ai-scan agency-audit --manifest FILE`. It assesses declared tool inventory,
+scope, least privilege, isolation, autonomy bounds, side-effect lifecycle,
+result trust, and auditability. Only the selected bounded manifest is opened;
+no tools or declared objects are executed or resolved. A clean outcome means
+“declaration checks passed” only. No tool execution, permission enforcement,
+deployed identity, isolation, cleanup, runtime behavior, or absence of excessive
+agency was verified. See [the manifest contract](docs/agency-audit.md).
+The active partial category count is 6/10, not full coverage or compliance.
+Prompt-only LLM06 tool-abuse packs and LLM07 pack mappings remain capability-gated/unreachable without a public
 capability selector and do not count as active end-to-end CLI coverage. Matrix identifiers
 for remediation/report/SARIF are reserved contract identifiers for future
 integration, not values emitted by the current report or SARIF renderers.

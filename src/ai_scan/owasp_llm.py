@@ -33,7 +33,7 @@ CATEGORY_NAMES_2025: dict[str, str] = {
 _ALLOWED_OUTCOMES = frozenset(
     {"tested", "not_tested", "blocked", "inconclusive", "finding", "not_applicable"}
 )
-_ACTIVE_CATEGORIES = frozenset({"LLM01", "LLM02", "LLM03", "LLM04", "LLM05"})
+_ACTIVE_CATEGORIES = frozenset({"LLM01", "LLM02", "LLM03", "LLM04", "LLM05", "LLM06"})
 # Phase 2A is a contract only. Even categories with current active coverage are
 # partial scenario coverage, so no category may claim full/comprehensive coverage.
 _FULL_CLAIM_ALLOWED = False

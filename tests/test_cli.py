@@ -20,6 +20,7 @@ SUBCOMMANDS = (
     "supply-chain-audit",
     "data-poisoning-audit",
     "output-handling-audit",
+    "agency-audit",
 )
 
 

@@ -57,12 +57,23 @@ Declaration checks passed does not prove safe runtime behavior. Runtime
 rendering and execution, browser behavior, database or process effects, prompt
 injection, and downstream implementation verification remain out of scope.
 
+`agency-audit --manifest FILE` is an **offline partial OWASP LLM06** declaration
+check. Add `--format json` for fixed rule/reason/remediation identifiers and opaque
+tool references. It never executes tools, opens declared objects, constructs
+transport, or reads stdin. A pass means “declaration checks passed” only; no tool
+execution, permission enforcement, deployed identity, isolation, cleanup, runtime
+behavior, or absence of excessive agency was verified. See [agency-audit](agency-audit.md)
+for the closed manifest contract and packaged examples.
+
 ## Interpreting outcomes
 
 - `confirmed` requires deterministic, controlled, reproducible evidence. Reflection, self-identification, heuristic similarity, and LLM judges cannot confirm by themselves.
 - `likely` and `suspected` are analyst leads, not vulnerabilities.
 - `blocked`, `inconclusive`, and `not_tested` are coverage gaps that must be retained in reports.
 - Exit code `3` is reserved for policy-triggering confirmed findings; runtime/configuration failures and safety-control denials (exit `2`) remain separate.
+  Offline declaration audits also use `3` for declaration findings, not runtime
+  confirmation; `agency-audit` uses `1` for an invalid manifest and `0` for passed
+  declaration checks or an empty (`not_applicable`) inventory.
 
 ## Release/local validation
 
