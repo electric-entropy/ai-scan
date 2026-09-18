@@ -1106,9 +1106,19 @@ def _run_plan_active(
         except TransportError as exc:
             if getattr(exc, "outcome", None) is not None:
                 raise
-            return ExchangeOutcome(body="", transport_ok=False)
+            return ExchangeOutcome(
+                body="",
+                transport_ok=False,
+                attempts=max(1, exc.attempts),
+                known_secrets=outcome_secrets(frozenset()),
+            )
         run_secrets.update(resp.known_secrets)
-        evidence.append(resp.evidence())
+        evidence.append(
+            resp.evidence(
+                known_secrets=outcome_secrets(resp.known_secrets),
+                redact_provider_text=plan.adapter in _JSON_PROVIDER_ADAPTERS,
+            )
+        )
         try:
             body = adapter.extract(resp)
         except ExtractionError:
@@ -1149,6 +1159,7 @@ def _run_plan_active(
         goal="planned run",
         checkpoint_path=getattr(args, "checkpoint", None),
         expected_plan_digest=plan.digest,
+        physical_request_count=controller,
     )
     budget = {
         "max_requests": controller.max_requests,
@@ -1249,7 +1260,14 @@ def _run_active(
                 # inconclusive probe outcome.
                 if getattr(exc, "outcome", None) is not None:
                     raise
-                return ProbeExchange(probe.id, "", {}, status=0, transport_ok=False)
+                return ProbeExchange(
+                    probe.id,
+                    "",
+                    {},
+                    status=0,
+                    transport_ok=False,
+                    attempts=max(1, exc.attempts),
+                )
             run_secrets.update(resp.known_secrets)
             evidence.append(resp.evidence())
             extracted = fingerprint_adapter.extract(resp)
@@ -1266,7 +1284,11 @@ def _run_active(
                 attempts=resp.attempts,
             )
 
-        fingerprint_result = run_fingerprint(DEFAULT_PROBES, probe_responder)
+        fingerprint_result = run_fingerprint(
+            DEFAULT_PROBES,
+            probe_responder,
+            physical_request_count=controller,
+        )
 
     if needs_injection:
         assert pack is not None  # resolved above, before transport construction
@@ -1283,7 +1305,9 @@ def _run_active(
                 # ordinary transport failures remain one inconclusive outcome.
                 if getattr(exc, "outcome", None) is not None:
                     raise
-                return ExchangeOutcome(body="", transport_ok=False)
+                return ExchangeOutcome(
+                    body="", transport_ok=False, attempts=max(1, exc.attempts)
+                )
             run_secrets.update(resp.known_secrets)
             evidence.append(resp.evidence())
             body = injection_adapter.extract(resp)
@@ -1305,6 +1329,7 @@ def _run_active(
             inject_responder,
             canary=canary,
             goal=getattr(args, "goal", "") or "assessment",
+            physical_request_count=controller,
         )
 
     budget = {"max_requests": controller.max_requests, "used": controller.count}

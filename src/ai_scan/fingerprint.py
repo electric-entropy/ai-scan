@@ -17,6 +17,10 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from ai_scan.core.accounting import PhysicalCounter
+from ai_scan.core.accounting import delta as ledger_delta
+from ai_scan.core.accounting import require as require_ledger
+from ai_scan.core.accounting import snapshot as snapshot_ledger
 from ai_scan.models import Candidate, Evidence, FingerprintResult, Marker, Probe
 
 # Weak header names that some deployments leak.
@@ -117,6 +121,7 @@ def run_fingerprint(
     min_score: float = 0.45,
     min_margin: float = 0.12,
     markers: tuple[Marker, ...] = _ALL_MARKERS,
+    physical_request_count: PhysicalCounter | None = None,
 ) -> FingerprintResult:
     """Run ``probes`` through ``responder`` and rank candidate model families.
 
@@ -138,6 +143,7 @@ def run_fingerprint(
         clears both thresholds; ``inconclusive`` is ``True`` when no usable
         response was obtained.
     """
+    require_ledger(physical_request_count)
     family_weight: dict[str, float] = defaultdict(float)
     family_evidence: dict[str, list[Evidence]] = defaultdict(list)
 
@@ -146,9 +152,19 @@ def run_fingerprint(
     request_count = 0
 
     for probe in probes:
-        exchange = responder(probe)
+        before = snapshot_ledger(physical_request_count)
+        try:
+            exchange = responder(probe)
+        except BaseException:
+            ledger_delta(before, physical_request_count)
+            raise
         attempted += 1
-        request_count += max(1, exchange.attempts)
+        consumed = ledger_delta(before, physical_request_count)
+        request_count += consumed
+        if consumed == 0:
+            # No physical request actually occurred, so this probe yields no
+            # usable signal regardless of what body the responder returned.
+            continue
         if not exchange.usable:
             continue
         usable += 1

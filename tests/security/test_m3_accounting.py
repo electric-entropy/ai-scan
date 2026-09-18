@@ -16,10 +16,11 @@ import re
 import pytest
 
 from ai_scan.injection import ExchangeOutcome, InjectionCase
-from ai_scan.orchestration import RunState, compile_plan, run_plan
+from ai_scan.orchestration import RunState, compile_plan
 from ai_scan.orchestration.checkpoint import CheckpointError, load_checkpoint
 from ai_scan.packs.signatures import compute_digest
 from ai_scan.targets import normalize_target
+from tests.trusted_engines import run_plan
 
 _URL = "http://127.0.0.1:8000/chat"
 _CANARY = "AISCAN-M3ACCT0001"
@@ -80,6 +81,25 @@ class _InterruptAt:
         return _reply(case)
 
 
+class _CountView:
+    def __init__(self, responder) -> None:  # type: ignore[no-untyped-def]
+        self._responder = responder
+
+    @property
+    def count(self) -> int:
+        return self._responder.calls
+
+
+def _run_trusted(plan, counter, *, checkpoint_path):  # type: ignore[no-untyped-def]
+    return run_plan(
+        plan,
+        counter,
+        canary=_CANARY,
+        checkpoint_path=str(checkpoint_path),
+        physical_request_count=_CountView(counter),
+    )
+
+
 # --- honest accounting on interruption ---------------------------------------------
 
 
@@ -87,7 +107,7 @@ def test_no_interruption_counts_every_physical_attempt(tmp_path) -> None:
     plan = _plan()
     path = tmp_path / "run.ckpt"
     counter = _InterruptAt(10**9)
-    result = run_plan(plan, counter, canary=_CANARY, checkpoint_path=str(path))
+    result = _run_trusted(plan, counter, checkpoint_path=path)
     assert result.request_count == counter.calls == _RELIABLE_REQUEST_COUNT
     assert _load(path)["request_count"] == _RELIABLE_REQUEST_COUNT
 
@@ -102,7 +122,7 @@ def test_interrupt_on_second_control_is_counted_not_undercounted(tmp_path) -> No
     interrupt_call = control_trials + 1  # first attempt of the SECOND control case
     counter = _InterruptAt(interrupt_call)
 
-    result = run_plan(plan, counter, canary=_CANARY, checkpoint_path=str(path))
+    result = _run_trusted(plan, counter, checkpoint_path=path)
     assert result.state is RunState.CANCELLED
     assert counter.calls == interrupt_call
     # Honest equality: returned == persisted == actually-issued attempts.
@@ -120,14 +140,17 @@ def test_intent_persisted_before_responder_call(tmp_path) -> None:
 
         def __call__(self, case: InjectionCase) -> ExchangeOutcome:
             self.calls += 1
-            # Before this outcome exists, the attempt's intent+cost is already on disk.
+            # Intent is durable before the trusted ledger reports acquisition.
             assert path.exists()
-            assert _load(path)["request_count"] >= self.calls
+            persisted = _load(path)
+            assert persisted["request_count"] == self.calls - 1
+            assert persisted["in_flight"]["attempts"] == 0
             if self.calls == 3:
                 raise KeyboardInterrupt
             return _reply(case)
 
-    run_plan(plan, _CheckIntent(), canary=_CANARY, checkpoint_path=str(path))
+    counter = _CheckIntent()
+    _run_trusted(plan, counter, checkpoint_path=path)
     assert _load(path)["request_count"] == 3
 
 
@@ -138,12 +161,13 @@ def test_resume_does_not_repeat_completed_trials(tmp_path) -> None:
     plan = _plan()
     path = tmp_path / "run.ckpt"
     interrupt_call = 15
-    run_plan(plan, _InterruptAt(interrupt_call), canary=_CANARY, checkpoint_path=str(path))
+    interrupted = _InterruptAt(interrupt_call)
+    _run_trusted(plan, interrupted, checkpoint_path=path)
     before = _load(path)["request_count"]
     assert before == interrupt_call
 
     counter = _InterruptAt(10**9)
-    result = run_plan(plan, counter, canary=_CANARY, checkpoint_path=str(path))
+    result = _run_trusted(plan, counter, checkpoint_path=path)
     assert result.state in (RunState.COMPLETED, RunState.COMPLETED_WITH_GAPS)
     # The resumed run issues only the REMAINING attempts; total never resets and
     # equals a single clean run's count. No completed trial is replayed.
@@ -155,13 +179,14 @@ def test_resume_does_not_repeat_completed_trials(tmp_path) -> None:
 def test_uncertain_in_flight_attempt_is_reconciled_not_reissued(tmp_path) -> None:
     plan = _plan()
     path = tmp_path / "run.ckpt"
-    run_plan(plan, _InterruptAt(5), canary=_CANARY, checkpoint_path=str(path))
+    interrupted = _InterruptAt(5)
+    _run_trusted(plan, interrupted, checkpoint_path=path)
     data = _load(path)
     assert data.get("in_flight") is not None  # an attempt was in flight at the crash
     before = data["request_count"]
 
     counter = _InterruptAt(10**9)
-    result = run_plan(plan, counter, canary=_CANARY, checkpoint_path=str(path))
+    result = _run_trusted(plan, counter, checkpoint_path=path)
     # The in-flight attempt was already counted; resume neither re-counts nor
     # reissues it as an extra physical attempt.
     assert result.request_count == _RELIABLE_REQUEST_COUNT
@@ -179,8 +204,8 @@ def _interrupted_checkpoint(tmp_path):  # type: ignore[no-untyped-def]
     control_trials = plan.trial_policy[2]
     attack_trials = plan.trial_policy[0]
     second_trial_of_first_attack = control_trials * len(plan.control_cases()) + 2
-    run_plan(plan, _InterruptAt(second_trial_of_first_attack),
-             canary=_CANARY, checkpoint_path=str(path))
+    interrupted = _InterruptAt(second_trial_of_first_attack)
+    _run_trusted(plan, interrupted, checkpoint_path=path)
     assert attack_trials >= 2  # the interrupt lands on a genuine second trial
     return plan, path, _load(path)
 
@@ -203,6 +228,22 @@ def test_progress_trials_over_budget_rejected(tmp_path) -> None:
     assert progress, "an interrupted mid-case run should persist progress"
     case_id, rec = next(iter(progress.items()))
     rec["trials"][0]["attempts"] = plan.limits.max_physical_requests + 1
+    _reseal(path, data)
+    with pytest.raises(CheckpointError):
+        load_checkpoint(str(path), expected_plan_digest=plan.digest, plan=plan)
+
+
+@pytest.mark.parametrize("mutation", ["missing_semantic", "extra_field"])
+def test_progress_trial_requires_exact_current_schema(tmp_path, mutation) -> None:  # type: ignore[no-untyped-def]
+    plan, path, data = _interrupted_checkpoint(tmp_path)
+    progress = data.get("progress") or {}
+    assert progress
+    trial = next(iter(progress.values()))["trials"][0]
+    if mutation == "missing_semantic":
+        assert "semantic" in trial
+        trial.pop("semantic")
+    else:
+        trial["extra"] = None
     _reseal(path, data)
     with pytest.raises(CheckpointError):
         load_checkpoint(str(path), expected_plan_digest=plan.digest, plan=plan)
@@ -254,13 +295,13 @@ def test_exhausted_budget_stops_issuing_and_counts_honestly(tmp_path, monkeypatc
     tight = load_plan(doc)
     path = tmp_path / "run.ckpt"
     counter = _InterruptAt(10**9)
-    result = run_plan(tight, counter, canary=_CANARY, checkpoint_path=str(path))
+    result = _run_trusted(tight, counter, checkpoint_path=path)
     assert counter.calls <= 5
     assert result.request_count <= 5
     assert _load(path)["request_count"] <= 5
 
 
-def test_outcome_attempts_over_remaining_budget_fails_closed_without_checkpoint_overshoot(
+def test_outcome_attempts_over_remaining_budget_are_ignored_as_untrusted(
     tmp_path,
 ) -> None:
     plan = _tight_plan(5)
@@ -274,7 +315,7 @@ def test_outcome_attempts_over_remaining_budget_fails_closed_without_checkpoint_
     result = run_plan(plan, responder, canary=_CANARY, checkpoint_path=str(path))
     data = _load(path)
 
-    assert calls["n"] == 1
+    assert calls["n"] == 5
     assert result.request_count == 5
     assert data["request_count"] == 5
     assert result.state is RunState.COMPLETED_WITH_GAPS
@@ -285,22 +326,23 @@ def test_outcome_attempts_over_remaining_budget_fails_closed_without_checkpoint_
     )
 
 
-def test_retry_attempts_exactly_at_remaining_budget_are_accepted(tmp_path) -> None:
+def test_outcome_attempts_equal_remaining_do_not_replace_trusted_counts(tmp_path) -> None:
     plan = _tight_plan(5)
     path = tmp_path / "run.ckpt"
-    attempts = [5]
+    calls = {"n": 0}
 
     def responder(case: InjectionCase) -> ExchangeOutcome:
-        return ExchangeOutcome(body="benign", attempts=attempts.pop(0))
+        calls["n"] += 1
+        return ExchangeOutcome(body="benign", attempts=5)
 
     result = run_plan(plan, responder, canary=_CANARY, checkpoint_path=str(path))
     assert result.request_count == 5
     assert _load(path)["request_count"] == 5
-    assert not attempts
+    assert calls["n"] == 5
 
 
 @pytest.mark.parametrize("bad_attempts", [True, False, 0, -1])
-def test_malformed_or_nonpositive_attempts_fail_closed_after_issued_attempt(
+def test_malformed_or_nonpositive_outcome_attempts_do_not_control_accounting(
     tmp_path, bad_attempts
 ) -> None:
     plan = _tight_plan(5)
@@ -313,7 +355,7 @@ def test_malformed_or_nonpositive_attempts_fail_closed_after_issued_attempt(
 
     result = run_plan(plan, responder, canary=_CANARY, checkpoint_path=str(path))
     data = _load(path)
-    assert calls["n"] == 1
+    assert calls["n"] == 5
     assert result.request_count == 5
     assert data["request_count"] == 5
     assert result.state is RunState.COMPLETED_WITH_GAPS
@@ -326,7 +368,8 @@ def test_overshoot_after_resumed_progress_does_not_reset_or_persist_illegal_coun
     plan = _tight_plan(5)
     path = tmp_path / "run.ckpt"
 
-    run_plan(plan, _InterruptAt(3), canary=_CANARY, checkpoint_path=str(path))
+    interrupted = _InterruptAt(3)
+    _run_trusted(plan, interrupted, checkpoint_path=path)
     before = _load(path)["request_count"]
     assert before == 3
 
@@ -338,18 +381,19 @@ def test_overshoot_after_resumed_progress_does_not_reset_or_persist_illegal_coun
 
     result = run_plan(plan, responder, canary=_CANARY, checkpoint_path=str(path))
     data = _load(path)
-    assert calls["n"] == 1
+    assert calls["n"] == 2
     assert result.request_count == 5
     assert data["request_count"] == 5
     assert result.state is RunState.COMPLETED_WITH_GAPS
 
 
-def test_legacy_checkpoint_without_progress_fields_loads(tmp_path) -> None:
-    # A pre-M3 checkpoint carries neither `progress` nor `in_flight`; it must still
-    # load and resume (fields default empty), never be rejected as malformed.
+def test_legacy_checkpoint_without_progress_fields_fails_closed(tmp_path) -> None:
+    # Current checkpoints have one exact closed schema; compatibility documents
+    # missing crash-safe state cannot be interpreted as current evidence.
     plan = _plan()
     path = tmp_path / "run.ckpt"
-    run_plan(plan, _InterruptAt(15), canary=_CANARY, checkpoint_path=str(path))
+    interrupted = _InterruptAt(15)
+    _run_trusted(plan, interrupted, checkpoint_path=path)
     data = _load(path)
     data.pop("progress", None)
     data.pop("in_flight", None)
@@ -359,5 +403,5 @@ def test_legacy_checkpoint_without_progress_fields_loads(tmp_path) -> None:
     )
     data["digest"] = compute_digest(data)
     path.write_text(json.dumps(data), encoding="utf-8")
-    restored = load_checkpoint(str(path), expected_plan_digest=plan.digest, plan=plan)
-    assert restored.request_count == data["request_count"]
+    with pytest.raises(CheckpointError):
+        load_checkpoint(str(path), expected_plan_digest=plan.digest, plan=plan)

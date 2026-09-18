@@ -11,11 +11,11 @@ from ai_scan.orchestration import (
     RunState,
     compile_plan,
     load_checkpoint,
-    run_plan,
 )
 from ai_scan.orchestration.checkpoint import Checkpoint, write_checkpoint_atomic
 from ai_scan.packs.signatures import compute_digest
 from ai_scan.targets import normalize_target
+from tests.trusted_engines import run_plan
 
 
 def test_run_result_status_preserves_seven_state() -> None:

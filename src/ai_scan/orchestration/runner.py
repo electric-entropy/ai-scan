@@ -23,7 +23,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from ai_scan.core.accounting import PhysicalCounter
+from ai_scan.core.accounting import delta as ledger_delta
+from ai_scan.core.accounting import require as require_ledger
+from ai_scan.core.accounting import snapshot as snapshot_ledger
 from ai_scan.core.modes import resolve_policy
+from ai_scan.core.run_identity import RunIdentity, canary_commitment, evidence_canary
 from ai_scan.injection import (
     CONTROL_GAP,
     ExchangeOutcome,
@@ -31,9 +36,14 @@ from ai_scan.injection import (
     InjectionFinding,
     InjectionStatus,
     merge_control_results,
-    physical_attempts,
 )
-from ai_scan.orchestration.checkpoint import Checkpoint, load_checkpoint, write_checkpoint_atomic
+from ai_scan.orchestration.checkpoint import (
+    Checkpoint,
+    CheckpointError,
+    load_checkpoint,
+    marker_commitment,
+    write_checkpoint_atomic,
+)
 from ai_scan.orchestration.evidence import (
     CONTROL_STATUS,
     derive_attack,
@@ -47,6 +57,7 @@ from ai_scan.orchestration.evidence import (
 from ai_scan.orchestration.planner import Plan, PlanError, PlannedCase
 from ai_scan.orchestration.scheduler import schedule
 from ai_scan.packs import Pack, resolve_packs
+from ai_scan.transport.redaction import scrub_text
 
 Responder = Callable[[InjectionCase], ExchangeOutcome]
 # Observes each completed case's (case, response, finding) — used to capture
@@ -113,6 +124,7 @@ def run_plan(
     checkpoint_path: str | None = None,
     expected_plan_digest: str | None = None,
     observer: Observer | None = None,
+    physical_request_count: PhysicalCounter | None = None,
 ) -> RunResult:
     """Run ``plan`` as a resumable state machine through the M7 confidence path.
 
@@ -121,14 +133,45 @@ def run_plan(
     secret-free and keyed by deterministic case ids; completed ids are never
     re-run after resume.
     """
+    require_ledger(physical_request_count)
     if expected_plan_digest is not None and expected_plan_digest != plan.digest:
         raise PlanError("plan digest does not match the expected plan")
 
     packs = _resolve_plan_packs(plan)
-    checkpoint = _initial_checkpoint(plan, checkpoint_path, disclosure_marker=disclosure_marker)
-    # A resumed checkpoint carries the original canary; reuse it so rendered
-    # prompts stay consistent with the already-completed (plan-bound) records.
-    canary = checkpoint.canary or canary
+    try:
+        checkpoint = _initial_checkpoint(
+            plan, checkpoint_path, canary=canary, disclosure_marker=disclosure_marker
+        )
+    except CheckpointError as exc:
+        message = str(exc)
+        if checkpoint_path is None or "run identity" not in message:
+            raise
+        if "disclosure marker" in message or "disclosure-marker" in message:
+            # A disclosure-marker identity change (old→new, marker→missing,
+            # missing→marker) is a loud, fail-closed error: the operator supplied
+            # the wrong or no marker for an existing LLM02 run. No request is
+            # issued and no prior LLM02 evidence is re-bound, exposed, or relabeled
+            # under the new identity — the rejection happens during load, before
+            # any responder call and before evidence re-derivation.
+            raise
+        # A caller supplied a different (randomly generated) canary for an existing
+        # run. Preserve all spent work, issue no request, and expose no prior
+        # finding under the new identity. Read the prior request_count structurally
+        # only — never re-bind evidence under the mismatched identity. The
+        # checkpoint is unchanged and still resumes with its original canary.
+        prior = load_checkpoint(
+            checkpoint_path,
+            expected_plan_digest=plan.digest,
+        )
+        return RunResult(
+            RunState.COMPLETED_WITH_GAPS,
+            (),
+            prior.request_count,
+            ("checkpoint run identity mismatch",),
+        )
+    persisted_canary = evidence_canary(checkpoint.canary_commitment)
+    if checkpoint.canary == persisted_canary:
+        _rehydrate_checkpoint(checkpoint, persisted_canary, canary)
     checkpoint.canary = canary
     # Reflected/known secrets observed across the run, threaded into every
     # checkpoint write so persisted proof/prompt state is redacted on disk.
@@ -159,7 +202,7 @@ def run_plan(
     # M3: a prior in-flight attempt was physically issued (already counted) but its
     # outcome was never recorded. Reconcile it as one uncertain, unusable trial —
     # fail closed, never reissue — so resume neither re-counts nor repeats it.
-    _reconcile_in_flight(checkpoint, plan_cases)
+    _reconcile_in_flight(checkpoint, plan, plan_cases, canary, frozenset(run_secrets))
     _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
 
     findings: list[InjectionFinding] = [
@@ -167,7 +210,6 @@ def run_plan(
     ]
     completed = set(checkpoint.completed)
     coverage_gaps: list[str] = []
-
     try:
         checkpoint.state = RunState.RUNNING.value
         _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
@@ -194,6 +236,7 @@ def run_plan(
                 case, responder, canary, min_control_trials,
                 checkpoint, plan, run_secrets, checkpoint_path,
                 pack=packs[case.pack_id], disclosure_marker=disclosure_marker,
+                physical_request_count=physical_request_count,
             )
             if not outcomes:
                 coverage_gaps.append(f"{case.case_id}: control coverage incomplete")
@@ -212,7 +255,8 @@ def run_plan(
                 attack_trials=0, successes=0, evidence=tuple(outcomes),
             )
             checkpoint.completed[case.case_id] = _record_from_finding(
-                control_finding, kind="control"
+                plan, case, control_finding, canary=canary, checkpoint=checkpoint,
+                run_secrets=frozenset(run_secrets),
             )
             checkpoint.progress.pop(case.case_id, None)
             completed.add(case.case_id)
@@ -236,6 +280,7 @@ def run_plan(
                 case, responder, canary, min_attack_trials,
                 checkpoint, plan, run_secrets, checkpoint_path,
                 pack=packs[case.pack_id], disclosure_marker=disclosure_marker,
+                physical_request_count=physical_request_count,
             )
             if not outcomes:
                 coverage_gaps.append(f"{case.case_id}: budget exhausted")
@@ -247,7 +292,10 @@ def run_plan(
                 disclosure_marker=disclosure_marker,
             )
             findings.append(finding)
-            checkpoint.completed[case.case_id] = _record_from_finding(finding, kind="attack")
+            checkpoint.completed[case.case_id] = _record_from_finding(
+                plan, case, finding, canary=canary, checkpoint=checkpoint,
+                run_secrets=frozenset(run_secrets),
+            )
             checkpoint.progress.pop(case.case_id, None)
             completed.add(case.case_id)
             _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
@@ -302,19 +350,38 @@ def _resolve_plan_packs(plan: Plan) -> dict[str, Pack]:
 
 
 def _initial_checkpoint(
-    plan: Plan, checkpoint_path: str | None, *, disclosure_marker: str | None = None
+    plan: Plan,
+    checkpoint_path: str | None,
+    *,
+    canary: str,
+    disclosure_marker: str | None = None,
 ) -> Checkpoint:
     if checkpoint_path is None:
-        return Checkpoint(plan_digest=plan.digest, state=RunState.PLANNED.value)
+        return Checkpoint(
+            plan_digest=plan.digest,
+            state=RunState.PLANNED.value,
+            canary=canary,
+            canary_commitment=canary_commitment(plan.digest, canary),
+            marker_commitment=marker_commitment(plan.digest, disclosure_marker),
+        )
     try:
-        return load_checkpoint(
+        loaded = load_checkpoint(
             checkpoint_path,
             expected_plan_digest=plan.digest,
             plan=plan,
             disclosure_marker=disclosure_marker,
+            expected_canary=canary,
+            expected_marker_commitment=marker_commitment(plan.digest, disclosure_marker),
         )
+        return loaded
     except FileNotFoundError:
-        return Checkpoint(plan_digest=plan.digest, state=RunState.PLANNED.value)
+        return Checkpoint(
+            plan_digest=plan.digest,
+            state=RunState.PLANNED.value,
+            canary=canary,
+            canary_commitment=canary_commitment(plan.digest, canary),
+            marker_commitment=marker_commitment(plan.digest, disclosure_marker),
+        )
 
 
 def _persist(
@@ -324,20 +391,47 @@ def _persist(
         write_checkpoint_atomic(path, checkpoint, known_secrets=known_secrets)
 
 
+def _replace_persisted_canary(value: Any, persisted: str, canary: str) -> Any:
+    if isinstance(value, str):
+        return value.replace(persisted, canary)
+    if isinstance(value, dict):
+        return {
+            key: _replace_persisted_canary(item, persisted, canary)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_replace_persisted_canary(item, persisted, canary) for item in value]
+    return value
+
+
+def _rehydrate_checkpoint(checkpoint: Checkpoint, persisted: str, canary: str) -> None:
+    """Restore only this checkpoint's commitment-derived pseudonym in memory."""
+    checkpoint.completed = _replace_persisted_canary(checkpoint.completed, persisted, canary)
+    checkpoint.progress = _replace_persisted_canary(checkpoint.progress, persisted, canary)
+    checkpoint.in_flight = _replace_persisted_canary(checkpoint.in_flight, persisted, canary)
+
+
 def _send(case: PlannedCase, responder: Responder, canary: str) -> ExchangeOutcome:
     return responder(InjectionCase(case.family, case.template, rendered_prompt(case, canary)))
 
 
-def _intent(case: PlannedCase, canary: str) -> dict[str, str]:
+def _intent(case: PlannedCase, canary: str) -> dict[str, Any]:
     return {
         "case_id": case.case_id,
         "kind": case.kind,
         "family": case.family,
         "prompt": rendered_prompt(case, canary),
+        "attempts": 0,
     }
 
 
-def _reconcile_in_flight(checkpoint: Checkpoint, plan_cases: dict[str, PlannedCase]) -> None:
+def _reconcile_in_flight(
+    checkpoint: Checkpoint,
+    plan: Plan,
+    plan_cases: dict[str, PlannedCase],
+    canary: str,
+    run_secrets: frozenset[str],
+) -> None:
     """Turn a resumed in-flight attempt into one uncertain, unusable, spent trial.
 
     The attempt was physically issued (and already counted) before the crash; its
@@ -347,13 +441,26 @@ def _reconcile_in_flight(checkpoint: Checkpoint, plan_cases: dict[str, PlannedCa
     inf = checkpoint.in_flight
     if inf is None:
         return
+    if int(inf.get("attempts", 0)) == 0:
+        raise CheckpointError("checkpoint has an unresolved attempt with no trusted ledger count")
     case = plan_cases.get(inf["case_id"])
     if case is not None:
         record = checkpoint.progress.setdefault(
             case.case_id,
             {"kind": case.kind, "family": case.family, "prompt": inf["prompt"], "trials": []},
         )
-        record["trials"].append(trial_to_dict(ExchangeOutcome(body="", transport_ok=False)))
+        record["trials"].append(
+            _trial_record(
+                plan,
+                case,
+                ExchangeOutcome(
+                    body="", transport_ok=False, attempts=int(inf.get("attempts", 1))
+                ),
+                canary,
+                checkpoint,
+                run_secrets,
+            )
+        )
     checkpoint.in_flight = None
 
 
@@ -369,6 +476,7 @@ def _run_trials(
     *,
     pack: Pack,
     disclosure_marker: str | None,
+    physical_request_count: PhysicalCounter | None,
 ) -> list[ExchangeOutcome]:
     """Run up to ``trials`` physical attempts for one case, write-ahead accounted.
 
@@ -385,11 +493,26 @@ def _run_trials(
         if checkpoint.request_count >= plan.limits.max_physical_requests:
             break
         remaining = plan.limits.max_physical_requests - checkpoint.request_count
-        # Write-ahead intent: persist the attempt and its cost BEFORE issuing it.
+        # Persist intent before issuance, but claim no request until the trusted
+        # controller/broker ledger proves that acquisition occurred.
         checkpoint.in_flight = _intent(case, canary)
-        checkpoint.request_count += 1
         _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
-        outcome = _send(case, responder, canary)
+        before = snapshot_ledger(physical_request_count)
+        try:
+            outcome = _send(case, responder, canary)
+        except BaseException:
+            try:
+                consumed = ledger_delta(before, physical_request_count, remaining=remaining)
+            except Exception:
+                assert checkpoint.in_flight is not None
+                checkpoint.in_flight["attempts"] = 0
+                _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
+                raise
+            checkpoint.request_count += consumed
+            assert checkpoint.in_flight is not None
+            checkpoint.in_flight["attempts"] = consumed
+            _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
+            raise
         if disclosure_marker is not None and _requires_semantic(pack, case):
             outcome = ExchangeOutcome(
                 body=outcome.body,
@@ -402,37 +525,39 @@ def _run_trials(
                 semantic=disclosure_semantic(plan, case, disclosure_marker, outcome.body),
             )
         run_secrets.update(outcome.known_secrets)
-        try:
-            attempts = physical_attempts(outcome)
-        except ValueError:
-            # The public responder boundary returned malformed retry accounting
-            # after one physical request was already issued. Fail closed: keep the
-            # write-ahead unit, discard the untrusted body, and exhaust the
-            # remaining run budget so resume cannot reissue the trial.
-            checkpoint.request_count = plan.limits.max_physical_requests
-            outcome = ExchangeOutcome(body="", transport_ok=False, attempts=1)
-        else:
-            if attempts > remaining:
-                # A broker/controller should prevent this. If it still happens,
-                # never persist a count or trial above the canonical plan budget,
-                # and never accept the over-budget response as evidence.
-                checkpoint.request_count = plan.limits.max_physical_requests
-                outcome = ExchangeOutcome(body="", transport_ok=False, attempts=remaining)
-            else:
-                # Account any retries the broker made beyond the write-ahead unit.
-                checkpoint.request_count += attempts - 1
+        attempts = ledger_delta(before, physical_request_count, remaining=remaining)
+        if attempts < 1 or attempts > remaining:
+            assert checkpoint.in_flight is not None
+            checkpoint.in_flight["attempts"] = 0
+            _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
+            raise PlanError("trusted physical request ledger delta is invalid")
+        checkpoint.request_count += attempts
+        outcome = ExchangeOutcome(
+            body=outcome.body,
+            status=outcome.status,
+            redirected=outcome.redirected,
+            truncated=outcome.truncated,
+            transport_ok=outcome.transport_ok,
+            attempts=attempts,
+            known_secrets=outcome.known_secrets,
+            semantic=outcome.semantic,
+        )
         checkpoint.in_flight = None
         outcomes.append(outcome)
         checkpoint.progress[case.case_id] = {
             "kind": case.kind,
             "family": case.family,
             "prompt": rendered_prompt(case, canary),
-            "trials": [trial_to_dict(o) for o in outcomes],
+            "trials": [
+                _trial_record(plan, case, o, canary, checkpoint, frozenset(run_secrets))
+                for o in outcomes
+            ],
         }
         _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
         if checkpoint.request_count >= plan.limits.max_physical_requests:
             break
     return outcomes
+
 
 
 def _requires_semantic(pack: Pack, case: PlannedCase) -> bool:
@@ -489,19 +614,77 @@ def _classify_case(
     return finding, representative if representative is not None else outcomes[-1]
 
 
-def _record_from_finding(finding: InjectionFinding, *, kind: str) -> dict[str, Any]:
+def _record_from_finding(
+    plan: Plan,
+    case: PlannedCase,
+    finding: InjectionFinding,
+    *,
+    canary: str,
+    checkpoint: Checkpoint,
+    run_secrets: frozenset[str],
+) -> dict[str, Any]:
     return {
         "family": finding.family,
         "status": finding.status.value,
         "prompt": finding.prompt,
         "proof": finding.proof,
-        "kind": kind,
+        "kind": case.kind,
         # Trial counts plus every persisted physical trial let a plan-bound load
         # re-derive the status through the shared evidence contract.
         "attack_trials": finding.attack_trials,
         "successes": finding.successes,
-        "trials": [trial_to_dict(o) for o in finding.evidence],
+        "trials": [
+            _trial_record(plan, case, outcome, canary, checkpoint, run_secrets)
+            for outcome in finding.evidence
+        ],
     }
+
+
+def _trial_record(
+    plan: Plan,
+    case: PlannedCase,
+    outcome: ExchangeOutcome,
+    canary: str,
+    checkpoint: Checkpoint,
+    run_secrets: frozenset[str],
+) -> dict[str, Any]:
+    """Bind a canonicalized persistence view to this exact plan case.
+
+    The body is scrubbed with the *complete* cumulative run secret set — the
+    disclosure marker and every reflected secret, not merely this outcome's own
+    ``known_secrets`` — and the run canary is replaced with its commitment-derived
+    pseudonym, all BEFORE :func:`trial_to_dict` seals the commitment digest. The
+    outer checkpoint/bundle scrub then finds nothing left to replace, so it is
+    idempotent over the committed fields and cannot retroactively mutate (and thus
+    self-invalidate) an already-sealed trial. A secret learned in a later case
+    cannot appear in an earlier trial's committed body — it was not reflected when
+    that body was recorded — so earlier commitments stay valid as the set grows.
+    """
+    persisted = evidence_canary(checkpoint.canary_commitment)
+    secrets = frozenset(
+        secret
+        for secret in (run_secrets | outcome.known_secrets)
+        if secret != canary
+    )
+    canonical = ExchangeOutcome(
+        body=scrub_text(outcome.body.replace(canary, persisted), secrets),
+        status=outcome.status,
+        redirected=outcome.redirected,
+        truncated=outcome.truncated,
+        transport_ok=outcome.transport_ok,
+        attempts=outcome.attempts,
+        semantic=outcome.semantic,
+    )
+    identity = RunIdentity(
+        plan.digest,
+        checkpoint.canary_commitment,
+        checkpoint.marker_commitment,
+        persisted,
+        None,
+    )
+    return trial_to_dict(
+        canonical, plan=plan, case=case, canary=persisted, identity=identity
+    )
 
 
 def _finding_from_record(record: dict[str, Any]) -> InjectionFinding:

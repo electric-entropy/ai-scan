@@ -10,7 +10,7 @@ from __future__ import annotations
 from types import MappingProxyType
 
 from ai_scan.core.models import DeterminismClass, FindingStatus, PackTrust, Severity
-from ai_scan.injection import ExchangeOutcome, InjectionCase, InjectionStatus, run_injection_pack
+from ai_scan.injection import ExchangeOutcome, InjectionCase, InjectionStatus
 from ai_scan.packs.schema import Pack, PackCase, TrialPolicy
 from ai_scan.validation import (
     ComplianceHeuristicValidator,
@@ -25,6 +25,7 @@ from ai_scan.validation import (
     status_rank,
 )
 from ai_scan.validation.base import Signal
+from tests.trusted_engines import run_injection_pack
 
 CANARY = "AISCAN-FEEDFACE"
 

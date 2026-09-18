@@ -5,9 +5,9 @@ from __future__ import annotations
 from ai_scan.fingerprint import (
     DEFAULT_PROBES,
     ProbeExchange,
-    run_fingerprint,
 )
 from ai_scan.models import FingerprintResult
+from tests.trusted_engines import run_fingerprint
 
 
 def _responder(mapping):
@@ -143,9 +143,9 @@ def test_truncated_probes_are_not_scored() -> None:
     assert result.inconclusive is True
 
 
-def test_request_count_sums_probe_attempts() -> None:
+def test_request_count_uses_trusted_fixture_ledger_not_probe_metadata() -> None:
     def respond(probe) -> ProbeExchange:
         return ProbeExchange(probe.id, "hello", {}, attempts=2)
 
     result = run_fingerprint(DEFAULT_PROBES, respond)
-    assert result.request_count == len(DEFAULT_PROBES) * 2
+    assert result.request_count == len(DEFAULT_PROBES)

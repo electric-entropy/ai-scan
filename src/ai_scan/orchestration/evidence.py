@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ai_scan.core.modes import resolve_policy
+from ai_scan.core.run_identity import RunIdentity, is_evidence_marker
 from ai_scan.injection import (
     CONTROL_CLEAN,
     CONTROL_EMITTED,
@@ -51,8 +52,17 @@ from ai_scan.orchestration.planner import Plan, PlannedCase
 from ai_scan.packs import Pack, resolve_packs
 
 TRIAL_FIELDS = frozenset({
-    "body", "status", "redirected", "truncated", "transport_ok", "attempts", "semantic"
+    "body", "status", "redirected", "truncated", "transport_ok", "attempts", "semantic",
+    "commitment",
 })
+TRIAL_COMMITMENT_VERSION = 1
+TRIAL_COMMITMENT_FIELDS = frozenset(
+    {
+        "version", "plan_digest", "case_id", "pack_id", "family", "kind",
+        "prompt_digest", "response_digest", "attempts", "canary_commitment",
+        "disclosure_marker_commitment", "digest",
+    }
+)
 SEMANTIC_VERSION = 1
 SEMANTIC_NORMALIZATION = "strip-v1"
 SEMANTIC_FIELDS = frozenset({
@@ -122,9 +132,21 @@ def rendered_prompt(case: PlannedCase, canary: str) -> str:
     return case.template.replace("{canary}", canary) if case.kind == "attack" else case.template
 
 
-def trial_to_dict(outcome: ExchangeOutcome) -> dict[str, Any]:
-    """Serialize one physical trial outcome (known secrets are never persisted)."""
-    return {
+def _sha256_json(value: object) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def trial_to_dict(
+    outcome: ExchangeOutcome,
+    *,
+    plan: Plan,
+    case: PlannedCase,
+    canary: str,
+    identity: RunIdentity | None = None,
+) -> dict[str, Any]:
+    """Serialize one plan/case-bound physical trial without known secrets."""
+    base: dict[str, Any] = {
         "body": outcome.body,
         "status": outcome.status,
         "redirected": outcome.redirected,
@@ -133,6 +155,23 @@ def trial_to_dict(outcome: ExchangeOutcome) -> dict[str, Any]:
         "attempts": physical_attempts(outcome),
         "semantic": outcome.semantic,
     }
+    identity = identity or RunIdentity.create(plan.digest, canary, None)
+    commitment: dict[str, Any] = {
+        "version": TRIAL_COMMITMENT_VERSION,
+        "plan_digest": plan.digest,
+        "case_id": case.case_id,
+        "pack_id": case.pack_id,
+        "family": case.family,
+        "kind": case.kind,
+        "prompt_digest": _sha256_json(rendered_prompt(case, canary)),
+        "response_digest": _sha256_json(base),
+        "attempts": base["attempts"],
+        "canary_commitment": identity.canary_commitment,
+        "disclosure_marker_commitment": identity.disclosure_marker_commitment,
+    }
+    commitment["digest"] = _sha256_json(commitment)
+    base["commitment"] = commitment
+    return base
 
 
 def trial_from_dict(raw: object) -> ExchangeOutcome:
@@ -140,10 +179,7 @@ def trial_from_dict(raw: object) -> ExchangeOutcome:
     if not isinstance(raw, Mapping):
         raise EvidenceError("trial evidence has unknown or missing fields")
     fields = set(raw)
-    if fields == TRIAL_FIELDS - {"semantic"}:
-        raw = dict(raw)
-        raw["semantic"] = None
-    elif fields != TRIAL_FIELDS:
+    if fields != TRIAL_FIELDS:
         raise EvidenceError("trial evidence has unknown or missing fields")
     body, status, attempts = raw["body"], raw["status"], raw["attempts"]
     flags = (raw["redirected"], raw["truncated"], raw["transport_ok"])
@@ -156,6 +192,7 @@ def trial_from_dict(raw: object) -> ExchangeOutcome:
         raise EvidenceError("trial evidence has an invalid HTTP status")
     if attempts < 1:
         raise EvidenceError("trial evidence must record at least one physical attempt")
+    _parse_trial_commitment(raw["commitment"])
     return ExchangeOutcome(
         body=body,
         status=status,
@@ -165,6 +202,61 @@ def trial_from_dict(raw: object) -> ExchangeOutcome:
         attempts=attempts,
         semantic=_semantic_from_dict(raw["semantic"]),
     )
+
+
+def _parse_trial_commitment(raw: object) -> dict[str, Any]:
+    if not isinstance(raw, Mapping) or set(raw) != TRIAL_COMMITMENT_FIELDS:
+        raise EvidenceError("trial commitment has unknown or missing fields")
+    out = dict(raw)
+    if out["version"] != TRIAL_COMMITMENT_VERSION:
+        raise EvidenceError("trial commitment version is unsupported")
+    string_fields = (
+        "plan_digest", "case_id", "pack_id", "family", "kind",
+        "prompt_digest", "response_digest", "canary_commitment",
+        "disclosure_marker_commitment", "digest",
+    )
+    if not all(isinstance(out[field], str) and out[field] for field in string_fields):
+        raise EvidenceError("trial commitment has invalid field types")
+    if out["kind"] not in {"attack", "control"}:
+        raise EvidenceError("trial commitment kind is invalid")
+    attempts = out["attempts"]
+    if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
+        raise EvidenceError("trial commitment attempts are invalid")
+    for field in (
+        "plan_digest", "prompt_digest", "response_digest", "canary_commitment",
+        "disclosure_marker_commitment", "digest",
+    ):
+        value = out[field]
+        if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+            raise EvidenceError("trial commitment digest is invalid")
+    expected_digest = _sha256_json({key: value for key, value in out.items() if key != "digest"})
+    if out["digest"] != expected_digest:
+        raise EvidenceError("trial commitment digest does not match its content")
+    return out
+
+
+def _verify_trial_commitment(
+    raw: Mapping[str, Any], plan: Plan, case: PlannedCase, canary: str, identity: RunIdentity
+) -> None:
+    commitment = _parse_trial_commitment(raw.get("commitment"))
+    response = {
+        key: raw[key]
+        for key in TRIAL_FIELDS - {"commitment"}
+    }
+    expected = {
+        "plan_digest": plan.digest,
+        "case_id": case.case_id,
+        "pack_id": case.pack_id,
+        "family": case.family,
+        "kind": case.kind,
+        "prompt_digest": _sha256_json(rendered_prompt(case, canary)),
+        "response_digest": _sha256_json(response),
+        "attempts": raw.get("attempts"),
+        "canary_commitment": identity.canary_commitment,
+        "disclosure_marker_commitment": identity.disclosure_marker_commitment,
+    }
+    if any(commitment.get(key) != value for key, value in expected.items()):
+        raise EvidenceError("trial commitment does not match its exact plan case and response")
 
 
 def _semantic_from_dict(raw: object) -> dict[str, Any] | None:
@@ -225,13 +317,24 @@ def disclosure_semantic(plan: Plan, case: PlannedCase, marker: str, body: str) -
 
 
 def trials_from_list(
-    raw: object, ceiling: int, budget: int | None = None
+    raw: object,
+    ceiling: int,
+    budget: int | None = None,
+    *,
+    plan: Plan,
+    case: PlannedCase,
+    canary: str,
+    identity: RunIdentity,
 ) -> tuple[ExchangeOutcome, ...]:
     """Parse a record's trials; ``budget`` bounds each trial's physical attempts."""
     if not isinstance(raw, list) or not raw:
         raise EvidenceError("record must carry its persisted trial evidence")
     if len(raw) > ceiling:
         raise EvidenceError("record carries more trials than the plan can substantiate")
+    for item in raw:
+        if not isinstance(item, Mapping) or set(item) != TRIAL_FIELDS:
+            raise EvidenceError("trial evidence has unknown or missing fields")
+        _verify_trial_commitment(item, plan, case, canary, identity)
     trials = tuple(trial_from_dict(item) for item in raw)
     if budget is not None and any(t.attempts > budget for t in trials):
         raise EvidenceError("trial physical attempts exceed the plan budget")
@@ -258,7 +361,12 @@ def _case_token(pack: Pack, prompt_canary: str, disclosure_marker: str | None) -
     return prompt_canary
 
 
-def _bind_semantic(plan: Plan, case: PlannedCase, trial: ExchangeOutcome) -> dict[str, Any] | None:
+def _bind_semantic(
+    plan: Plan,
+    case: PlannedCase,
+    trial: ExchangeOutcome,
+    disclosure_marker: str | None = None,
+) -> dict[str, Any] | None:
     semantic = trial.semantic
     if semantic is None:
         return None
@@ -272,6 +380,21 @@ def _bind_semantic(plan: Plan, case: PlannedCase, trial: ExchangeOutcome) -> dic
     for key, value in expected.items():
         if semantic.get(key) != value:
             raise EvidenceError("trial semantic evidence does not match the plan case")
+    # Defense in depth for a supplied (non-redacted) marker: the persisted
+    # marker_digest must be the plan/case-bound digest of THIS marker, so a
+    # substituted marker cannot inherit a prior trial's exact_match. When the
+    # marker is absent or redacted (e.g. a replayed bundle), the trial commitment
+    # already seals the semantic, so this extra check is skipped rather than
+    # verified against a placeholder.
+    if (
+        disclosure_marker is not None
+        and disclosure_marker not in _REDACTION_PLACEHOLDERS
+        and not is_evidence_marker(disclosure_marker)
+    ):
+        if semantic.get("marker_digest") != _semantic_digest(plan, case, disclosure_marker):
+            raise EvidenceError(
+                "trial semantic marker does not match the supplied disclosure marker"
+            )
     return semantic
 
 
@@ -296,7 +419,7 @@ def _disclosure_final_only_trials(
     token = _case_token(pack, canary, disclosure_marker)
     filtered: list[ExchangeOutcome] = []
     for trial in trials:
-        semantic = _bind_semantic(plan, case, trial)
+        semantic = _bind_semantic(plan, case, trial, disclosure_marker)
         if semantic is not None and disclosure_marker is None:
             raise EvidenceError("LLM02 semantic evidence requires an explicit disclosure marker")
         if semantic is not None:
@@ -388,6 +511,7 @@ def derive_records(
     canary: str,
     records: Iterable[CaseEvidence],
     disclosure_marker: str | None = None,
+    identity: RunIdentity | None = None,
 ) -> VerifiedEvidence:
     """Bind records to the plan and derive every classification from its trials.
 
@@ -396,6 +520,7 @@ def derive_records(
     """
     if not isinstance(canary, str) or not canary:
         raise EvidenceError("evidence requires the run canary")
+    identity = identity or RunIdentity.create(plan.digest, canary, disclosure_marker)
     cases = {c.case_id: c for c in plan.cases}
     parsed: list[tuple[CaseEvidence, PlannedCase, tuple[ExchangeOutcome, ...]]] = []
     seen: set[str] = set()
@@ -417,7 +542,13 @@ def derive_records(
         if case.pack_id not in packs:
             raise EvidenceError("record references a pack that does not resolve")
         trials = trials_from_list(
-            record.trials, trial_ceiling(plan, case), plan.limits.max_physical_requests
+            record.trials,
+            trial_ceiling(plan, case),
+            plan.limits.max_physical_requests,
+            plan=plan,
+            case=case,
+            canary=canary,
+            identity=identity,
         )
         parsed.append((record, case, trials))
 
@@ -461,10 +592,11 @@ def verify_records(
     canary: str,
     records: Iterable[CaseEvidence],
     disclosure_marker: str | None = None,
+    identity: RunIdentity | None = None,
 ) -> VerifiedEvidence:
     """Re-derive every record from its persisted trials; fail closed on mismatch."""
     records = list(records)
-    verified = derive_records(plan, packs, canary, records, disclosure_marker)
+    verified = derive_records(plan, packs, canary, records, disclosure_marker, identity)
     for record in records:
         derived = verified.findings[record.case_id]
         mismatched = [

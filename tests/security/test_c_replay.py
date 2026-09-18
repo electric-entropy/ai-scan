@@ -16,9 +16,10 @@ from ai_scan.evidence_graph import (
     replay_bundle,
 )
 from ai_scan.injection import ExchangeOutcome
-from ai_scan.orchestration import compile_plan, run_plan
+from ai_scan.orchestration import compile_plan
 from ai_scan.packs.signatures import compute_digest
 from ai_scan.targets import normalize_target
+from tests.trusted_engines import run_plan
 
 _CANARY = "AISCAN-CREPLAY01"
 

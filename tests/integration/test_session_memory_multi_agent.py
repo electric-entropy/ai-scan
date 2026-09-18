@@ -10,7 +10,6 @@ from ai_scan.attacks import (
     IsolationPlugin,
     MemoryPlugin,
     MultiAgentPlugin,
-    run_attack,
 )
 from ai_scan.attacks.base import AttackCase
 from ai_scan.injection import ExchangeOutcome, InjectionStatus
@@ -18,6 +17,7 @@ from tests.fixtures.apps import (
     resistant_isolation_app,
     vulnerable_isolation_app,
 )
+from tests.trusted_engines import run_attack
 
 AC = "AISCAN-SESSION-ATTACK"
 HC = "AISCAN-IDENTITY-BOUND-HIDDEN"

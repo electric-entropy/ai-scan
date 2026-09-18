@@ -14,17 +14,28 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import re
 import tempfile
 from dataclasses import dataclass, field
 from typing import Any, cast
 
 from ai_scan.core.config import load_json_strict
 from ai_scan.core.errors import ConfigError
+from ai_scan.core.run_identity import (
+    RunIdentity,
+    canary_commitment,
+    disclosure_marker_commitment,
+    evidence_canary,
+    evidence_marker,
+)
 from ai_scan.packs.signatures import compute_digest, verify_digest
 from ai_scan.transport.redaction import scrub_structure
 
-CHECKPOINT_VERSION = 1
+# v3 binds the persisted pseudonymous canary and disclosure-marker state to one
+# shared run identity and requires case-bound trial commitments.
+CHECKPOINT_VERSION = 3
+# Import compatibility only.  This public literal is no longer used as the
+# persisted identity and is never globally rewritten.
+PERSISTED_CANARY = "AISCAN-PERSISTED-CANARY"
 _ALLOWED_FIELDS = frozenset(
     {
         "checkpoint_version",
@@ -32,6 +43,8 @@ _ALLOWED_FIELDS = frozenset(
         "state",
         "request_count",
         "canary",
+        "canary_commitment",
+        "marker_commitment",
         "completed",
         "control_results",
         "progress",
@@ -61,16 +74,12 @@ _VALID_STATUSES = frozenset(
 # Per-family control coverage: a usable clean control ran, a control emitted the
 # canary (false-positive baseline), or control coverage is a gap.
 _VALID_CONTROL_RESULTS = frozenset({"clean", "emitted", "gap"})
-# Each completed record is closed-schema: the evidence shape (with persisted
-# per-trial ``trials``), or a legacy shape without trials — the pre-evidence
-# 7-field record or the baseline 5-field record. Legacy records carry no
-# re-derivable evidence, so they can never be ``confirmed`` and a legacy
-# control never counts as control coverage. Anything else is rejected.
+# Every current completed record has one exact evidence-bearing schema. Older
+# shapes have no distinct supported version and fail closed.
 _COUNTED_RECORD_FIELDS = frozenset(
     {"family", "status", "prompt", "proof", "kind", "attack_trials", "successes"}
 )
 _EVIDENCE_RECORD_FIELDS = _COUNTED_RECORD_FIELDS | {"trials"}
-_LEGACY_RECORD_FIELDS = frozenset({"family", "status", "prompt", "proof", "kind"})
 
 
 class CheckpointError(Exception):
@@ -89,11 +98,18 @@ class Checkpoint:
     # The run's synthetic canary (not a secret), stored so a resumed run and a
     # plan-binding load can re-derive each case's rendered prompt.
     canary: str = ""
+    canary_commitment: str = ""
+    # Opaque, domain-separated binding of the run's disclosure-marker *state*
+    # (present-and-which, or explicitly absent). Resume requires the supplied
+    # marker to reproduce this exact commitment before any completed/progress/
+    # in-flight evidence may be used, so old→new / marker→missing / missing→marker
+    # substitution fails closed instead of inheriting a prior LLM02 confirmation.
+    marker_commitment: str = ""
     # M3: per-case in-progress trials (so resume never repeats a completed trial)
     # and the single write-ahead attempt intent whose outcome was not yet recorded
     # (an issued-but-interrupted attempt — already counted, never reissued).
     progress: dict[str, dict[str, Any]] = field(default_factory=dict)
-    in_flight: dict[str, str] | None = None
+    in_flight: dict[str, Any] | None = None
 
     def to_body(self) -> dict[str, Any]:
         return {
@@ -102,6 +118,8 @@ class Checkpoint:
             "state": self.state,
             "request_count": self.request_count,
             "canary": self.canary,
+            "canary_commitment": self.canary_commitment,
+            "marker_commitment": self.marker_commitment,
             # Sort for a stable, digestable, diff-friendly representation.
             "completed": {k: self.completed[k] for k in sorted(self.completed)},
             "control_results": {k: self.control_results[k] for k in sorted(self.control_results)},
@@ -110,11 +128,37 @@ class Checkpoint:
         }
 
 
+def marker_commitment(plan_digest: str, marker: str | None) -> str:
+    """Compatibility name for the shared run-identity marker commitment."""
+    return disclosure_marker_commitment(plan_digest, marker)
+
+
+def _canonicalize_canary(value: Any, canary: str, persisted: str) -> Any:
+    """Replace only this run's bound canary; never rewrite public marker text."""
+    if isinstance(value, str):
+        return value.replace(canary, persisted) if canary and persisted else value
+    if isinstance(value, dict):
+        return {key: _canonicalize_canary(item, canary, persisted) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_canonicalize_canary(item, canary, persisted) for item in value]
+    return value
+
+
 def _sealed(checkpoint: Checkpoint, known_secrets: frozenset[str]) -> dict[str, Any]:
+    # Canonicalize the synthetic canary before general redaction. Using the same
+    # REDACTED token for both the canary and unrelated credentials is ambiguous:
+    # offline proof derivation can select the wrong placeholder occurrence.
+    canary = checkpoint.canary
+    commitment = checkpoint.canary_commitment
+    persisted = evidence_canary(commitment) if commitment else ""
+    canonical = _canonicalize_canary(checkpoint.to_body(), canary, persisted)
+    if commitment:
+        canonical["canary"] = persisted
+    remaining_secrets = frozenset(secret for secret in known_secrets if secret != canary)
     # Recursively scrub the body (credential literals, reflected known secrets,
     # URL-field secrets) *before* sealing, so the digest is computed over — and
     # matches — the redacted content that is actually persisted.
-    body: dict[str, Any] = scrub_structure(checkpoint.to_body(), known_secrets)
+    body: dict[str, Any] = scrub_structure(canonical, remaining_secrets)
     body["digest"] = compute_digest(body)
     return body
 
@@ -154,6 +198,8 @@ def load_checkpoint(
     expected_plan_digest: str,
     plan: object | None = None,
     disclosure_marker: str | None = None,
+    expected_canary: str | None = None,
+    expected_marker_commitment: str | None = None,
 ) -> Checkpoint:
     """Load and verify a checkpoint, failing closed on tamper / plan mismatch.
 
@@ -179,9 +225,8 @@ def load_checkpoint(
         raise CheckpointError("checkpoint is not valid strict JSON") from exc
     if not isinstance(data, dict):
         raise CheckpointError("checkpoint must be a JSON object")
-    unknown = set(data) - _ALLOWED_FIELDS
-    if unknown:
-        raise CheckpointError(f"checkpoint has unknown field(s) not permitted ({len(unknown)})")
+    if set(data) != _ALLOWED_FIELDS:
+        raise CheckpointError("checkpoint has unknown or missing top-level fields")
     if data.get("checkpoint_version") != CHECKPOINT_VERSION:
         raise CheckpointError("unsupported or missing checkpoint_version")
     if not verify_digest(data):
@@ -196,6 +241,47 @@ def load_checkpoint(
         canary = data.get("canary", "")
         if not isinstance(canary, str):
             raise CheckpointError("canary must be a string")
+        commitment = data["canary_commitment"]
+        if not isinstance(commitment, str) or (
+            commitment
+            and (
+                len(commitment) != 64
+                or any(ch not in "0123456789abcdef" for ch in commitment)
+            )
+        ):
+            raise CheckpointError("canary commitment is malformed")
+        if commitment and canary != evidence_canary(commitment):
+            raise CheckpointError("checkpoint evidence identity is malformed")
+        if expected_canary is not None and commitment != canary_commitment(
+            expected_plan_digest, expected_canary
+        ):
+            raise CheckpointError("checkpoint run identity does not match the supplied canary")
+        marker_binding = data["marker_commitment"]
+        if not isinstance(marker_binding, str) or (
+            marker_binding
+            and (
+                len(marker_binding) != 64
+                or any(ch not in "0123456789abcdef" for ch in marker_binding)
+            )
+        ):
+            raise CheckpointError("marker commitment is malformed")
+        # Fail closed on any disclosure-marker identity change (old→new,
+        # marker→missing, missing→marker). Enforced only when the caller supplies
+        # the expected commitment (a resuming run); a structural/diagnostic load
+        # passes none. An evidence-bearing checkpoint must carry the binding, so a
+        # re-digested document that strips it (to escape the check) is rejected.
+        if expected_marker_commitment is not None:
+            has_evidence = bool(
+                data.get("completed") or data.get("progress") or data.get("in_flight") is not None
+            )
+            if not marker_binding and has_evidence:
+                raise CheckpointError(
+                    "checkpoint run identity lacks a disclosure-marker commitment"
+                )
+            if marker_binding and marker_binding != expected_marker_commitment:
+                raise CheckpointError(
+                    "checkpoint run identity does not match the supplied disclosure marker"
+                )
         completed = _completed(data["completed"])
         control_results = _control_results(data["control_results"])
         progress = _progress(data.get("progress", {}))
@@ -207,10 +293,16 @@ def load_checkpoint(
             completed=completed,
             control_results=control_results,
             canary=canary,
+            canary_commitment=commitment,
+            marker_commitment=marker_binding,
             progress=progress,
             in_flight=in_flight,
         )
-    except (KeyError, TypeError, ValueError, CheckpointError) as exc:
+    except CheckpointError as exc:
+        if "run identity" in str(exc):
+            raise
+        raise CheckpointError("malformed checkpoint") from exc
+    except (KeyError, TypeError, ValueError) as exc:
         raise CheckpointError("malformed checkpoint") from exc
     if plan is not None:
         _bind_completed_to_plan(checkpoint, plan, disclosure_marker=disclosure_marker)
@@ -228,8 +320,8 @@ def _bind_completed_to_plan(
     then re-derived from its persisted trials through the shared evidence
     contract (:func:`~ai_scan.orchestration.evidence.verify_records`): status,
     proof, trial and success counts, and per-family control coverage must all
-    match, and the physical request count must cover the persisted attempts. A
-    legacy record without trials can never be ``confirmed``.
+    match, and the physical request count must cover the persisted attempts.
+    Records without complete trial evidence are rejected.
     """
     from ai_scan.orchestration.evidence import (
         CaseEvidence,
@@ -242,10 +334,26 @@ def _bind_completed_to_plan(
     from ai_scan.orchestration.planner import Plan
 
     typed_plan = cast(Plan, plan)
-    # Prefer the stored canary; fall back to deriving it from the completed
-    # records themselves so a legacy checkpoint (written before the canary field)
-    # still binds and resumes rather than being rejected as non-plan-derived.
-    canary = checkpoint.canary or _derive_canary(checkpoint.completed, plan_cases)
+    if (
+        checkpoint.completed or checkpoint.progress or checkpoint.in_flight is not None
+    ) and not checkpoint.canary_commitment:
+        raise CheckpointError("legacy checkpoint evidence lacks a run identity commitment")
+    canary = checkpoint.canary
+    try:
+        expected_marker = disclosure_marker_commitment(typed_plan.digest, disclosure_marker)
+        if checkpoint.marker_commitment != expected_marker:
+            raise CheckpointError("checkpoint run identity does not match the disclosure marker")
+        identity = RunIdentity.verify_persisted(
+            typed_plan.digest,
+            checkpoint.canary_commitment,
+            checkpoint.marker_commitment,
+            canary,
+            evidence_marker(
+                checkpoint.marker_commitment, present=disclosure_marker is not None
+            ),
+        )
+    except (ValueError, CheckpointError) as exc:
+        raise CheckpointError("checkpoint run identity is malformed") from exc
     if checkpoint.request_count > plan.limits.max_physical_requests:  # type: ignore[attr-defined]
         raise CheckpointError("request_count exceeds the plan's physical request budget")
     evidence: list[CaseEvidence] = []
@@ -260,12 +368,6 @@ def _bind_completed_to_plan(
         )
         if record.get("prompt") != expected:
             raise CheckpointError("completed record prompt is not plan-derived")
-        if "trials" not in record:
-            if record.get("status") == "confirmed":
-                raise CheckpointError(
-                    "confirmed record carries no persisted trial evidence"
-                )
-            continue
         evidence.append(
             CaseEvidence(
                 case_id=case_id,
@@ -286,6 +388,7 @@ def _bind_completed_to_plan(
                 canary,
                 evidence,
                 disclosure_marker,
+                identity,
             )
         except EvidenceError as exc:
             raise CheckpointError(f"completed record evidence is invalid: {exc}") from exc
@@ -311,7 +414,15 @@ def _bind_completed_to_plan(
         if record.get("prompt") != rendered_prompt(case, canary):
             raise CheckpointError("progress record prompt is not plan-derived")
         try:
-            trials = trials_from_list(record.get("trials"), trial_ceiling(typed_plan, case), budget)
+            trials = trials_from_list(
+                record.get("trials"),
+                trial_ceiling(typed_plan, case),
+                budget,
+                plan=typed_plan,
+                case=case,
+                canary=canary,
+                identity=identity,
+            )
         except EvidenceError as exc:
             raise CheckpointError(f"progress trial evidence is invalid: {exc}") from exc
         progress_physical += sum(t.attempts for t in trials)
@@ -327,35 +438,14 @@ def _bind_completed_to_plan(
             or inf.get("prompt") != rendered_prompt(case, canary)
         ):
             raise CheckpointError("in-flight attempt does not match its plan case")
-        in_flight_physical = 1
+        in_flight_physical = int(inf["attempts"])
     total_physical = completed_physical + progress_physical + in_flight_physical
-    if checkpoint.request_count < total_physical:
-        raise CheckpointError("request_count is below the persisted physical trial attempts")
+    if checkpoint.request_count != total_physical:
+        raise CheckpointError(
+            "request_count does not equal the persisted physical trial attempts"
+        )
     if checkpoint.request_count > budget:
         raise CheckpointError("request_count exceeds the plan's physical request budget")
-
-
-def _derive_canary(completed: dict[str, dict[str, Any]], plan_cases: dict[str, Any]) -> str:
-    """Recover the run's canary from a completed attack record's rendered prompt.
-
-    Used only when the checkpoint predates the stored ``canary`` field. The
-    candidate is verified by re-rendering the plan template, so it cannot be
-    spoofed into matching an inconsistent prompt.
-    """
-    for case_id, record in completed.items():
-        if record.get("kind") != "attack":
-            continue
-        case = plan_cases.get(case_id)
-        if case is None or "{canary}" not in case.template:
-            continue
-        prompt = str(record.get("prompt", ""))
-        prefix = case.template[: case.template.find("{canary}")]
-        if not prompt.startswith(prefix):
-            continue
-        match = re.match(r"AISCAN-[A-Za-z0-9_-]+", prompt[len(prefix):])
-        if match and case.template.replace("{canary}", match.group(0)) == prompt:
-            return match.group(0)
-    return ""
 
 
 def _require_str(value: object, name: str) -> str:
@@ -382,15 +472,7 @@ def _completed(value: object) -> dict[str, dict[str, Any]]:
         case_id = _require_str(key, "case_id")
         if not isinstance(raw_record, dict):
             raise CheckpointError("completed records must be objects")
-        record_fields = set(raw_record)
-        if record_fields == _LEGACY_RECORD_FIELDS:
-            # Legacy baseline record: no trial counts. Safe to trust as completed
-            # for non-confirmed statuses; a legacy 'confirmed' has zero trial
-            # evidence and is therefore rejected by plan binding.
-            legacy = True
-        elif record_fields in (_COUNTED_RECORD_FIELDS, _EVIDENCE_RECORD_FIELDS):
-            legacy = False
-        else:
+        if set(raw_record) != _EVIDENCE_RECORD_FIELDS:
             raise CheckpointError("completed record has unknown or missing field(s)")
         family = _require_str(raw_record.get("family"), "family")
         status = _require_str(raw_record.get("status"), "status")
@@ -403,14 +485,10 @@ def _completed(value: object) -> dict[str, dict[str, Any]]:
         proof = raw_record.get("proof")
         if proof is not None and not isinstance(proof, str):
             raise CheckpointError("proof must be a string or null")
-        if legacy:
-            attack_trials, successes = 0, 0
-        else:
-            attack_trials = _require_int(raw_record["attack_trials"], "attack_trials",
-                                         positive=False)
-            successes = _require_int(raw_record["successes"], "successes", positive=False)
-            if successes > attack_trials:
-                raise CheckpointError("completed record successes cannot exceed attack_trials")
+        attack_trials = _require_int(raw_record["attack_trials"], "attack_trials", positive=False)
+        successes = _require_int(raw_record["successes"], "successes", positive=False)
+        if successes > attack_trials:
+            raise CheckpointError("completed record successes cannot exceed attack_trials")
         normalized: dict[str, Any] = {
             "family": family,
             "status": status,
@@ -420,27 +498,30 @@ def _completed(value: object) -> dict[str, dict[str, Any]]:
             "attack_trials": attack_trials,
             "successes": successes,
         }
-        if "trials" in raw_record:
-            normalized["trials"] = _trials(raw_record["trials"])
+        normalized["trials"] = _trials(raw_record["trials"])
         out[case_id] = normalized
     return out
 
 
 def _trials(value: object) -> list[dict[str, Any]]:
     """Structurally validate persisted trial evidence (plan binding re-derives it)."""
-    from ai_scan.orchestration.evidence import EvidenceError, trial_from_dict, trial_to_dict
+    from ai_scan.orchestration.evidence import EvidenceError, trial_from_dict
 
     if not isinstance(value, list) or not value:
         raise CheckpointError("completed record trials must be a non-empty list")
     try:
-        return [trial_to_dict(trial_from_dict(item)) for item in value]
+        normalized: list[dict[str, Any]] = []
+        for item in value:
+            trial_from_dict(item)
+            normalized.append(dict(item))
+        return normalized
     except EvidenceError as exc:
         raise CheckpointError("completed record trial evidence is malformed") from exc
 
 
 def _progress(value: object) -> dict[str, dict[str, Any]]:
     """Structurally validate per-case in-progress trials (plan binding re-derives)."""
-    from ai_scan.orchestration.evidence import EvidenceError, trial_from_dict, trial_to_dict
+    from ai_scan.orchestration.evidence import EvidenceError, trial_from_dict
 
     if not isinstance(value, dict):
         raise CheckpointError("progress must be an object")
@@ -458,18 +539,24 @@ def _progress(value: object) -> dict[str, dict[str, Any]]:
         if not isinstance(raw_trials, list) or not raw_trials:
             raise CheckpointError("progress record trials must be a non-empty list")
         try:
-            trials = [trial_to_dict(trial_from_dict(item)) for item in raw_trials]
+            trials = []
+            for item in raw_trials:
+                trial_from_dict(item)
+                trials.append(dict(item))
         except EvidenceError as exc:
             raise CheckpointError("progress record trial evidence is malformed") from exc
         out[case_id] = {"kind": kind, "family": family, "prompt": prompt, "trials": trials}
     return out
 
 
-def _in_flight(value: object) -> dict[str, str] | None:
+def _in_flight(value: object) -> dict[str, Any] | None:
     """Validate the single write-ahead attempt intent (an issued, uncounted-outcome)."""
     if value is None:
         return None
-    if not isinstance(value, dict) or set(value) != {"case_id", "kind", "family", "prompt"}:
+    if not isinstance(value, dict) or set(value) not in (
+        {"case_id", "kind", "family", "prompt"},
+        {"case_id", "kind", "family", "prompt", "attempts"},
+    ):
         raise CheckpointError("in_flight has unknown or missing field(s)")
     kind = _require_str(value["kind"], "kind")
     if kind not in {"attack", "control"}:
@@ -479,6 +566,7 @@ def _in_flight(value: object) -> dict[str, str] | None:
         "kind": kind,
         "family": _require_str(value["family"], "family"),
         "prompt": _require_str(value["prompt"], "prompt"),
+        "attempts": _require_int(value.get("attempts", 0), "attempts", positive=False),
     }
 
 
@@ -488,11 +576,7 @@ def _control_results(value: object) -> dict[str, str]:
     out: dict[str, str] = {}
     for key, raw in value.items():
         family = _require_str(key, "family")
-        if isinstance(raw, bool):
-            # Legacy boolean control result: True == the control emitted the
-            # canary, False == a clean (non-emitting) control.
-            out[family] = "emitted" if raw else "clean"
-        elif isinstance(raw, str) and raw in _VALID_CONTROL_RESULTS:
+        if isinstance(raw, str) and raw in _VALID_CONTROL_RESULTS:
             out[family] = raw
         else:
             raise CheckpointError("invalid control result")

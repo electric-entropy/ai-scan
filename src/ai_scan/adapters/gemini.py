@@ -48,6 +48,8 @@ class GeminiAdapter(HttpJsonAdapter):
         return {"contents": [{"role": "user", "parts": [{"text": prompt}]}]}
 
     def extract(self, response: HttpResponse) -> str:
+        if not response.provider_semantics(self.name).final_content_eligible:
+            raise ExtractionError("provider response is not eligible final assistant content")
         try:
             data = json.loads(
                 response.body, object_pairs_hook=_strict_object, parse_constant=_reject_constant

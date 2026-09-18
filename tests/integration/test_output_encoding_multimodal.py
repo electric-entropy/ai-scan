@@ -12,13 +12,13 @@ from ai_scan.attacks import (
     AttackError,
     EncodingPlugin,
     OutputHandlingPlugin,
-    run_attack,
 )
 from ai_scan.attacks.base import AttackCase
 from ai_scan.injection import ExchangeOutcome, InjectionStatus
 from ai_scan.targets import normalize_target
 from ai_scan.transport import HttpResponse
 from tests.fixtures.apps import reflective_output_app, resistant_output_app, vulnerable_output_app
+from tests.trusted_engines import run_attack
 
 AC = "AISCAN-ENCODED-CANARY"
 HC = "AISCAN-DOM-EVIDENCE"

@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from ai_scan.attacks import AttackContext, DirectInjectionPlugin, run_attack
+from ai_scan.attacks import AttackContext, DirectInjectionPlugin
 from ai_scan.attacks.base import AttackCase, AttackError
 from ai_scan.injection import ExchangeOutcome, InjectionStatus
 from ai_scan.packs.schema import TrialPolicy
 from tests.fixtures.apps import reflective_app, resistant_app, vulnerable_app
+from tests.trusted_engines import run_attack
 
 AC = "AISCAN-ATTACK0001"
 HC = "AISCAN-HIDDEN0001"

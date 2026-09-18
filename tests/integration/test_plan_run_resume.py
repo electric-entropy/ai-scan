@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from ai_scan.injection import ExchangeOutcome
-from ai_scan.orchestration import RunState, compile_plan, load_checkpoint, run_plan
+from ai_scan.orchestration import CheckpointError, RunState, compile_plan, load_checkpoint
 from ai_scan.targets import normalize_target
+from tests.trusted_engines import run_plan
 
 
 def test_plan_run_resume_same_findings_no_duplicate_state_change(tmp_path) -> None:
@@ -36,24 +39,15 @@ def test_plan_run_resume_same_findings_no_duplicate_state_change(tmp_path) -> No
         resumed_calls.append(case.template)
         return ExchangeOutcome(canary if "{canary}" in case.template else "benign")
 
-    resumed = run_plan(
-        plan, resumed_responder, canary=canary, goal="", checkpoint_path=str(checkpoint)
-    )
-    fresh_calls: list[str] = []
-
-    def fresh_responder(case):  # type: ignore[no-untyped-def]
-        fresh_calls.append(case.template)
-        return ExchangeOutcome(canary if "{canary}" in case.template else "benign")
-
-    fresh = run_plan(plan, fresh_responder, canary=canary, goal="")
+    with pytest.raises(CheckpointError, match="unresolved"):
+        run_plan(
+            plan, resumed_responder, canary=canary, goal="", checkpoint_path=str(checkpoint)
+        )
 
     # The issued-but-interrupted control attempt is accounted and reconciled as
     # an unusable spent trial. That must not be re-issued to paper over the crash,
     # so the resumed run honestly ends with a coverage gap rather than pretending
     # to match a fresh uninterrupted run.
-    assert resumed.state is RunState.COMPLETED_WITH_GAPS
-    assert resumed.request_count == fresh.request_count
-    assert resumed.coverage_gaps
-    assert len(resumed.findings) == len(fresh.findings)
+    assert resumed_calls == []
     final_checkpoint = load_checkpoint(str(checkpoint), expected_plan_digest=plan.digest)
     assert completed_before_resume <= set(final_checkpoint.completed)

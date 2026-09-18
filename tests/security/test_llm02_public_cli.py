@@ -18,12 +18,13 @@ from ai_scan.evidence_graph import (
     replay_bundle,
 )
 from ai_scan.injection import ExchangeOutcome, InjectionCase, InjectionStatus
-from ai_scan.orchestration import compile_plan, run_plan
+from ai_scan.orchestration import compile_plan
 from ai_scan.orchestration.checkpoint import CheckpointError, load_checkpoint
 from ai_scan.packs import load_builtin_pack
 from ai_scan.packs.signatures import compute_digest
 from ai_scan.targets import normalize_target
 from tests.conftest import MockRequest, MockResponse
+from tests.trusted_engines import run_plan
 
 _URL = "http://127.0.0.1:8765/v1/chat"
 _HIDDEN = "AISCAN-1234ABCD5678EF90"
@@ -166,9 +167,9 @@ def test_llm02_control_emission_blocks_confirmation_and_counts_physical_requests
     expected_min = (
         llm02_control_count * plan.trial_policy[2]
         + llm02_attack_count * plan.trial_policy[0]
-    ) * 2
+    )
     assert result.request_count >= expected_min
-    assert calls * 2 == result.request_count
+    assert calls == result.request_count
     for case, finding in zip(plan.attack_cases(), result.findings, strict=True):
         if case.pack_id == "prompt-disclosure-reliable":
             assert finding.status is not InjectionStatus.CONFIRMED
@@ -382,19 +383,18 @@ def test_incomplete_llm02_resume_without_marker_issues_zero_llm02_calls(tmp_path
         tokens = re.findall(r"AISCAN-[0-9A-F]{16,64}", case.rendered_prompt)
         return ExchangeOutcome(body=tokens[0] if tokens else "clean")
 
-    resumed = run_plan(
-        plan,
-        resume_without_marker,
-        canary=_PROMPT_CANARY,
-        disclosure_marker=None,
-        checkpoint_path=str(checkpoint),
-    )
-
-    assert not [family for family in calls if family.startswith("prompt_disclosure")]
-    llm02 = _llm02_findings(plan, resumed)
-    assert llm02
-    assert all(f.status is InjectionStatus.INCONCLUSIVE for f in llm02)
-    assert len(resumed.coverage_gaps) >= len(_llm02_cases(plan))
+    # Resuming an LLM02 run that was started WITH a marker but now supplying no
+    # marker is a disclosure-marker identity change: it fails closed during load,
+    # before any responder call, and never relabels the incomplete evidence.
+    with pytest.raises(CheckpointError, match="disclosure marker"):
+        run_plan(
+            plan,
+            resume_without_marker,
+            canary=_PROMPT_CANARY,
+            disclosure_marker=None,
+            checkpoint_path=str(checkpoint),
+        )
+    assert calls == []
 
 
 def test_completed_llm02_checkpoint_requires_explicit_marker_but_marker_resume_zero_calls(

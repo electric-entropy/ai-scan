@@ -261,10 +261,12 @@ class HttpJsonAdapter:
         )
 
     def extract(self, response: HttpResponse) -> str:
-        spec = ExtractionSpec(
-            mode="json_pointer", path=self.extraction_path, max_chars=self.max_chars
-        )
-        return extract_text(response, spec)
+        decision = response.provider_semantics(self.name)
+        if not decision.final_content_eligible or decision.final_content is None:
+            raise ExtractionError("provider response is not eligible final assistant content")
+        if len(decision.final_content) > self.max_chars:
+            raise ExtractionError("provider final content exceeds the extraction bound")
+        return decision.final_content
 
     def capabilities(self) -> AdapterCapabilities:
         return AdapterCapabilities(

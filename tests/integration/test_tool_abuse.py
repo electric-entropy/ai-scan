@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from ai_scan.attacks import AttackContext, AttackError, ToolAbusePlugin, run_attack
+from ai_scan.attacks import AttackContext, AttackError, ToolAbusePlugin
 from ai_scan.attacks.base import AttackCase
 from ai_scan.injection import ExchangeOutcome, InjectionStatus
 from tests.fixtures.apps import fake_tool_agent, resistant_tool_agent, vulnerable_tool_agent
+from tests.trusted_engines import run_attack
 
 AC = "AISCAN-TOOL-TRACE"
 HC = "AISCAN-TOOL-HIDDEN"

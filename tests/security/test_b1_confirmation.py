@@ -11,10 +11,11 @@ import re
 
 from ai_scan.core.models import DeterminismClass, FindingStatus
 from ai_scan.injection import ExchangeOutcome, InjectionCase
-from ai_scan.orchestration import compile_plan, run_plan
+from ai_scan.orchestration import compile_plan
 from ai_scan.targets import normalize_target
 from ai_scan.validation import GatingContext, classify
 from ai_scan.validation.base import Signal
+from tests.trusted_engines import run_plan
 
 _CANARY = "AISCAN-B1CANARY"
 

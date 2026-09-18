@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 
-from ai_scan.injection import ExchangeOutcome, generate_canary, load_payloads, run_injection
+from tests.trusted_engines import run_injection
+
+from ai_scan.injection import ExchangeOutcome, generate_canary, load_payloads
 from ai_scan.reporting import Report
 from ai_scan.reporting.diff import compare_baselines, create_baseline
 from ai_scan.reporting.html import render_html

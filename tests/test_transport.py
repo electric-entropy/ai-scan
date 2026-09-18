@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -287,6 +288,24 @@ def test_budget_counts_every_physical_attempt_including_retries() -> None:
     assert controller.count == 2
 
 
+def test_fully_failed_request_reports_every_physical_attempt(monkeypatch) -> None:
+    import urllib.error
+
+    controller = RequestController(max_requests=10, min_interval=0.0)
+    transport = Transport(TransportConfig(max_retries=2), controller=controller)
+    target = normalize_target("http://127.0.0.1:8000/chat")
+
+    def fail(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise urllib.error.URLError("offline failure")
+
+    monkeypatch.setattr(transport._opener, "open", fail)
+    with pytest.raises(TransportError) as raised:
+        transport.send(target, method="POST", prompt="x", body_template=MARKER)
+
+    assert raised.value.attempts == 3
+    assert controller.count == 3
+
+
 def test_response_reports_attempts(echo_server) -> None:
     controller = RequestController(max_requests=10, min_interval=0.0)
     t = Transport(TransportConfig(), controller=controller)
@@ -298,6 +317,54 @@ def test_response_reports_attempts(echo_server) -> None:
     )
     assert resp.attempts == 1
     assert controller.count == 1
+
+
+@pytest.mark.parametrize("truncated", [False, True])
+def test_provider_audit_commits_exact_bounded_bytes_even_with_replacement_text(
+    truncated: bool,
+) -> None:
+    raw = b"\xffnot-json"
+    response = HttpResponse(
+        status=200,
+        body=raw.decode("utf-8", errors="replace"),
+        headers={},
+        redirected=False,
+        redirect_location=None,
+        truncated=truncated,
+        request_line={"method": "POST", "url": "http://127.0.0.1/chat"},
+        raw_body_digest=hashlib.sha256(raw).hexdigest(),
+        raw_body_length=len(raw),
+        decode_valid=False,
+    )
+
+    audit = json.loads(response.evidence(redact_provider_text=True)["response"]["body"])
+    assert audit == {
+        "audit_version": 1,
+        "raw_body": {"sha256": hashlib.sha256(raw).hexdigest(), "length": len(raw)},
+    }
+
+
+@pytest.mark.parametrize("decode_valid,truncated", [(False, False), (True, True)])
+def test_provider_persistence_omits_metadata_for_incomplete_or_invalid_body(
+    decode_valid: bool, truncated: bool
+) -> None:
+    raw = b'{"message":{"role":"assistant"},"done":true}'
+    response = HttpResponse(
+        status=200,
+        body=raw.decode("utf-8"),
+        headers={},
+        redirected=False,
+        redirect_location=None,
+        truncated=truncated,
+        request_line={"method": "POST", "url": "http://127.0.0.1/"},
+        raw_body_digest=hashlib.sha256(raw).hexdigest(),
+        raw_body_length=len(raw),
+        decode_valid=decode_valid,
+    )
+
+    persisted = json.loads(response.evidence(redact_provider_text=True)["response"]["body"])
+
+    assert set(persisted) == {"audit_version", "raw_body"}
 
 
 def test_budget_exhaustion_raises_budget_error(echo_server) -> None:

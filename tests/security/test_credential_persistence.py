@@ -288,7 +288,8 @@ _ESCAPED_CANARY = "AISCAN-ESCAPED01"
 
 def _run_with_escaped_secret(tmp_path: Path, checkpoint: bool):  # type: ignore[no-untyped-def]
     from ai_scan.injection import ExchangeOutcome
-    from ai_scan.orchestration import compile_plan, run_plan
+    from ai_scan.orchestration import compile_plan
+    from tests.trusted_engines import run_plan
 
     plan = compile_plan(normalize_target("http://127.0.0.1:8080/chat"), "reliable")
     escaped_body = json.dumps({"answer": SECRET, "canary": _ESCAPED_CANARY}).replace(

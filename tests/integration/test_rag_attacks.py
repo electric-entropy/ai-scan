@@ -9,11 +9,11 @@ from ai_scan.attacks import (
     AttackError,
     IndirectInjectionPlugin,
     RagIsolationPlugin,
-    run_attack,
 )
 from ai_scan.attacks.base import AttackCase
 from ai_scan.injection import ExchangeOutcome, InjectionStatus
 from tests.fixtures.apps import resistant_rag_app, vulnerable_rag_app
+from tests.trusted_engines import run_attack
 
 AC = "AISCAN-RAG-ATTACK"
 HC = "AISCAN-RAG-HIDDEN"

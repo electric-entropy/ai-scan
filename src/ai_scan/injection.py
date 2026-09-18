@@ -25,6 +25,10 @@ from dataclasses import dataclass, field
 from importlib import resources
 from typing import TYPE_CHECKING, Any
 
+from ai_scan.core.accounting import PhysicalCounter
+from ai_scan.core.accounting import delta as ledger_delta
+from ai_scan.core.accounting import require as require_ledger
+from ai_scan.core.accounting import snapshot as snapshot_ledger
 from ai_scan.core.models import DeterminismClass, FindingStatus, PackTrust
 from ai_scan.packs import resolve_packs
 from ai_scan.validation import (
@@ -285,6 +289,7 @@ def run_injection(
     canary: str,
     goal: str,
     max_cases: int | None = None,
+    physical_request_count: PhysicalCounter | None = None,
 ) -> InjectionResult:
     """Run each payload family against the target, confirming via the canary.
 
@@ -296,13 +301,17 @@ def run_injection(
         canary: The unique canary token to look for in responses.
         goal: Free-text description of the operator's stated goal (recorded).
         max_cases: Optional hard cap on the number of logical cases attempted.
+        physical_request_count: Required trusted request-controller/broker ledger.
+            ``request_count`` is derived exclusively from monotonic snapshots around
+            each exchange; responder-controlled attempt metadata is ignored.
 
     Returns:
         An :class:`InjectionResult`. ``request_count`` sums physical attempts
-        (retries included) reported by the responder. Overall status is the
-        most severe case status observed
+        (retries included) taken from the trusted ledger. Overall status is the most
+        severe case status observed
         (confirmed > potential > inconclusive > not_observed).
     """
+    require_ledger(physical_request_count)
     findings: list[InjectionFinding] = []
     request_count = 0
     cases_run = 0
@@ -318,15 +327,24 @@ def run_injection(
                 rendered_prompt=template.replace("{canary}", canary),
             )
 
+            before = snapshot_ledger(physical_request_count)
             try:
                 outcome = responder(case)
-            except Exception as exc:  # noqa: BLE001 - transport errors → inconclusive
+            except BaseException as exc:
+                consumed = ledger_delta(before, physical_request_count)
+                request_count += consumed
+                if not isinstance(exc, Exception):
+                    raise
                 # A structured denial (scope block / budget exhaustion, carrying
                 # an ``outcome``) is terminal for the run and must reach the
                 # caller; only ordinary failures degrade to an inconclusive case.
                 if getattr(exc, "outcome", None) is not None:
                     raise
-                request_count += 1
+                # Exception attributes are responder-controlled and are never
+                # canonical physical-request facts at this engine boundary. Any
+                # physical requests the failed exchange truly consumed are read
+                # from the trusted ledger, so a failure is neither under- nor
+                # over-counted (and a spoofed ``exc.attempts`` cannot inflate it).
                 findings.append(
                     InjectionFinding(
                         family=family.name,
@@ -337,7 +355,10 @@ def run_injection(
                 )
                 continue
 
-            request_count += max(1, outcome.attempts)
+            consumed = ledger_delta(before, physical_request_count)
+            request_count += consumed
+            if consumed == 0:
+                outcome = ExchangeOutcome(body="", transport_ok=False, attempts=0)
             status, proof = _evaluate(outcome, canary, case.rendered_prompt)
             findings.append(
                 InjectionFinding(
@@ -385,6 +406,7 @@ def run_injection_pack(
     canary: str,
     goal: str,
     max_cases: int | None = None,
+    physical_request_count: PhysicalCounter | None = None,
 ) -> InjectionResult:
     """Run a declarative pack, threading its metadata into classification.
 
@@ -395,23 +417,43 @@ def run_injection_pack(
     state-change corroboration is required) — all fed into the single
     confidence predicate via :class:`~ai_scan.validation.GatingContext`.
     """
+    require_ledger(physical_request_count)
     validators = _select_validators(pack.validators)
     trial = pack.trial_policy
     findings: list[InjectionFinding] = []
     request_count = 0
     cases_run = 0
 
-    def send(case: InjectionCase) -> ExchangeOutcome | None:
+    def send(case: InjectionCase) -> ExchangeOutcome:
         nonlocal request_count
+        remaining = pack.max_physical_requests - request_count
+        before = snapshot_ledger(physical_request_count)
         try:
             outcome = responder(case)
-        except Exception as exc:  # noqa: BLE001 - structured denials propagate
+        except BaseException as exc:
+            consumed = ledger_delta(
+                before, physical_request_count, remaining=remaining
+            )
+            request_count += consumed
+            if not isinstance(exc, Exception):
+                raise
             if getattr(exc, "outcome", None) is not None:
                 raise
-            request_count += 1
-            return None
-        request_count += physical_attempts(outcome)
-        return outcome
+            return ExchangeOutcome(body="", transport_ok=False, attempts=consumed)
+        consumed = ledger_delta(before, physical_request_count, remaining=remaining)
+        request_count += consumed
+        if consumed == 0:
+            return ExchangeOutcome(body="", transport_ok=False, attempts=0)
+        return ExchangeOutcome(
+            body=outcome.body,
+            status=outcome.status,
+            redirected=outcome.redirected,
+            truncated=outcome.truncated,
+            transport_ok=outcome.transport_ok,
+            attempts=consumed,
+            known_secrets=outcome.known_secrets,
+            semantic=outcome.semantic,
+        )
 
     for family in pack.families:
         # Controls run first, each for its full declared trial count: a control
@@ -422,7 +464,7 @@ def run_injection_pack(
             case = InjectionCase(family=family.name, template=template, rendered_prompt=template)
             outcomes = [send(case) for _ in range(trial.min_control_trials)]
             result = control_result(
-                [o if o is not None else _FAILED for o in outcomes],
+                outcomes,
                 canary,
                 trial.min_control_trials,
             )
@@ -435,7 +477,7 @@ def run_injection_pack(
             rendered = template.replace("{canary}", canary)
             case = InjectionCase(family=family.name, template=template, rendered_prompt=rendered)
             outcomes = [send(case) for _ in range(trial.min_attack_trials)]
-            evidence = tuple(o if o is not None else _FAILED for o in outcomes)
+            evidence = tuple(outcomes)
             status, proof, trials, successes, _rep = evaluate_trials(
                 evidence, canary, rendered, validators,
                 control_succeeded=control == CONTROL_EMITTED,
@@ -749,7 +791,12 @@ def _proof_snippet(
     """
     from ai_scan.transport.redaction import REDACTED, scrub_text
 
-    redacted = scrub_text(response, known_secrets)
+    # The synthetic canary is confirmation evidence, not a credential. Keep it
+    # available long enough to cut a deterministic proof; checkpoint/report
+    # persistence canonicalizes or redacts it at the outer boundary.
+    redacted = scrub_text(
+        response, frozenset(secret for secret in known_secrets if secret != canary)
+    )
     idx = redacted.find(canary)
     if idx == -1:
         return REDACTED

@@ -48,11 +48,16 @@ from ai_scan.transport.budgets import (
     _require_finite_positive,
     _require_positive_int,
 )
+from ai_scan.transport.provider_semantics import (
+    ProviderSemanticDecision,
+    decide_provider_semantics,
+)
 from ai_scan.transport.records import ExchangeRecord, build_exchange_record
 from ai_scan.transport.redaction import (
     body_secret_values,
     redact_headers,
     redact_url,
+    scrub_provider_envelope,
     scrub_text,
     scrubbed_key_map,
     sensitive_header_values,
@@ -231,14 +236,48 @@ class HttpResponse:
     known_secrets: frozenset[str] = field(default_factory=frozenset)
     raw_body_digest: str | None = None
     raw_body_length: int | None = None
+    decode_valid: bool = True
 
     @property
     def ok(self) -> bool:
         """True only for a clean, usable 2xx response."""
         return 200 <= self.status < 300 and not self.redirected and not self.truncated
 
-    def evidence(self) -> dict[str, Any]:
+    def provider_semantics(self, provider: str | None = None) -> ProviderSemanticDecision:
+        """Return the single typed provider eligibility/audit decision."""
+        return decide_provider_semantics(
+            self.body,
+            provider=provider,
+            raw_body_digest=self.raw_body_digest,
+            raw_body_length=self.raw_body_length,
+            decode_valid=self.decode_valid,
+            truncated=self.truncated,
+            status=self.status,
+            redirected=self.redirected,
+        )
+
+    def evidence(
+        self,
+        *,
+        known_secrets: frozenset[str] = frozenset(),
+        redact_provider_text: bool = False,
+    ) -> dict[str, Any]:
         """Return a JSON-serializable, secret-free evidence record."""
+        secrets = self.known_secrets | known_secrets
+        body = (
+            scrub_provider_envelope(
+                self.body,
+                secrets,
+                raw_body_digest=self.raw_body_digest,
+                raw_body_length=self.raw_body_length,
+                decode_valid=self.decode_valid,
+                truncated=self.truncated,
+                status=self.status,
+                redirected=self.redirected,
+            )
+            if redact_provider_text
+            else scrub_text(self.body, secrets)
+        )
         return {
             "request": {
                 "method": self.request_line.get("method", ""),
@@ -255,7 +294,7 @@ class HttpResponse:
                 ),
                 "truncated": self.truncated,
                 "headers": dict(self.headers),
-                "body": self.body,
+                "body": body,
             },
         }
 
@@ -474,7 +513,8 @@ class Transport:
 
         raise TransportError(
             f"Request to {target.origin} failed after "
-            f"{attempts} attempt(s): {_safe_reason(last_error)}"
+            f"{attempts} attempt(s): {_safe_reason(last_error)}",
+            attempts=attempts,
         )
 
     def send_prepared(
@@ -545,7 +585,8 @@ class Transport:
 
         raise TransportError(
             f"Request to {target.origin} failed after "
-            f"{attempts} attempt(s): {_safe_reason(last_error)}"
+            f"{attempts} attempt(s): {_safe_reason(last_error)}",
+            attempts=attempts,
         )
 
     def _shape(
@@ -569,7 +610,13 @@ class Transport:
             # can sit in a non-sensitive Location query param or path segment.
             location = scrub_text(redact_url(location), secret_values)
 
-        body_text = scrub_text(payload.decode("utf-8", errors="replace"), secret_values)
+        try:
+            decoded = payload.decode("utf-8", errors="strict")
+            decode_valid = True
+        except UnicodeDecodeError:
+            decoded = payload.decode("utf-8", errors="replace")
+            decode_valid = False
+        body_text = scrub_text(decoded, secret_values)
         # Redact response headers by name, then scrub *every* header value **and
         # key** for reflected known secrets (an opaque credential echoed in an
         # ordinary header value, or built into a header *name*, must not survive).
@@ -600,6 +647,7 @@ class Transport:
             known_secrets=secret_values,
             raw_body_digest=hashlib.sha256(payload).hexdigest(),
             raw_body_length=len(payload),
+            decode_valid=decode_valid,
         )
 
     def _perform(self, *args: Any, **kwargs: Any) -> Any:

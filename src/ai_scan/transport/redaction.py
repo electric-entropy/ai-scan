@@ -26,6 +26,8 @@ from collections import Counter
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
+from ai_scan.transport.provider_semantics import audit_json, decide_provider_semantics
+
 REDACTED = "REDACTED"
 _DECODE_CAP = 64
 
@@ -595,6 +597,49 @@ def scrub_structure(value: Any, known_secrets: frozenset[str] = frozenset()) -> 
     URL-field query secrets are still redacted; fails closed on unsafe input.
     """
     return _scrub(value, frozenset(known_secrets), ())
+
+
+def scrub_provider_envelope(
+    text: str,
+    known_secrets: frozenset[str] = frozenset(),
+    *,
+    raw_body_digest: str | None = None,
+    raw_body_length: int | None = None,
+    decode_valid: bool = True,
+    truncated: bool = False,
+    status: int = 200,
+    redirected: bool = False,
+) -> str:
+    """Return a metadata-preserving, model-text-free JSON provider envelope.
+
+    Provider text is used in memory by the adapter before this persistence view
+    is built. Persistence is a strict allowlist: fixed role/completion enums,
+    bounded integer usage counters, and an opaque commitment to the exact raw
+    body. Unknown fields and every semantic text/container are dropped wholesale.
+    """
+    if (raw_body_digest is None) != (raw_body_length is None):
+        return REDACTED
+    if raw_body_digest is not None and (
+        not isinstance(raw_body_digest, str)
+        or len(raw_body_digest) != 64
+        or any(ch not in "0123456789abcdef" for ch in raw_body_digest)
+        or isinstance(raw_body_length, bool)
+        or not isinstance(raw_body_length, int)
+        or raw_body_length < 0
+        or raw_body_length > (1 << 63) - 1
+    ):
+        return REDACTED
+    decision = decide_provider_semantics(
+        text,
+        raw_body_digest=raw_body_digest,
+        raw_body_length=raw_body_length,
+        decode_valid=decode_valid,
+        truncated=truncated,
+        status=status,
+        redirected=redirected,
+    )
+    _ = known_secrets
+    return audit_json(decision)
 
 
 def _short_key_hash(key: str) -> str:

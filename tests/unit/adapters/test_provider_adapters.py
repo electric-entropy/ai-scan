@@ -23,14 +23,26 @@ TARGET = normalize_target("http://127.0.0.1:8080/v1/chat")
 
 # (adapter class, response body producing "OK", extraction should yield "OK")
 _PROVIDERS = [
-    (OpenAICompatibleAdapter, {"choices": [{"message": {"content": "OK"}}]}),
-    (AnthropicAdapter, {"content": [{"text": "OK"}]}),
+    (
+        OpenAICompatibleAdapter,
+        {
+            "choices": [
+                {"message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}
+            ]
+        },
+    ),
+    (
+        AnthropicAdapter,
+        {"role": "assistant", "content": [{"type": "text", "text": "OK"}],
+         "stop_reason": "end_turn"},
+    ),
     (
         GeminiAdapter,
         {"candidates": [{"content": {"role": "model", "parts": [{"text": "OK"}]},
                          "finishReason": "STOP"}]},
     ),
-    (OllamaAdapter, {"message": {"content": "OK"}}),
+    (OllamaAdapter, {"message": {"role": "assistant", "content": "OK"},
+                     "done": True, "done_reason": "stop"}),
 ]
 
 

@@ -7,6 +7,7 @@ import json
 import pytest
 
 from ai_scan.evidence_graph import (
+    Bundle,
     BundleCollector,
     BundleError,
     ReplayError,
@@ -14,7 +15,7 @@ from ai_scan.evidence_graph import (
     replay_bundle,
 )
 from ai_scan.injection import ExchangeOutcome
-from ai_scan.orchestration import run_plan
+from tests.trusted_engines import run_plan
 from tests.unit.evidence_graph._sample import CANARY, redigest, sample_bundle_text, sample_plan
 
 
@@ -24,7 +25,8 @@ def test_replay_reproduces_confirmed_findings() -> None:
     assert result.findings
     assert "confirmed" in set(result.findings.values())
     assert set(result.findings.values()) <= {"confirmed", "not_observed"}
-    assert result.canary == CANARY
+    assert result.canary != CANARY
+    assert result.canary.startswith("AISCAN-EVIDENCE-")
 
 
 def test_single_trial_confirmed_record_cannot_replay_verify() -> None:
@@ -91,6 +93,33 @@ def test_replay_rejects_missing_response_for_finding() -> None:
             del record["trials"][0]["body"]
             break
     with pytest.raises((BundleError, ReplayError)):
+        replay_bundle(json.dumps(redigest(doc)))
+
+
+@pytest.mark.parametrize("kind", ["attack", "control"])
+@pytest.mark.parametrize("source_form", ["text", "bytes", "object"])
+@pytest.mark.parametrize("field", ["semantic", "commitment"])
+def test_replay_rejects_redigested_trial_with_missing_committed_field(
+    kind: str, source_form: str, field: str
+) -> None:
+    doc = json.loads(sample_bundle_text())
+    record = next(record for record in doc["records"] if record["kind"] == kind)
+    del record["trials"][0][field]
+    redigested = redigest(doc)
+    text = json.dumps(redigested)
+    source: str | bytes | Bundle = text if source_form == "text" else text.encode("utf-8")
+    if source_form == "object":
+        source = Bundle(redigested)
+    with pytest.raises((BundleError, ReplayError), match="missing|evidence"):
+        replay_bundle(source)
+
+
+@pytest.mark.parametrize("kind", ["attack", "control"])
+def test_replay_rejects_redigested_trial_with_extra_field(kind: str) -> None:
+    doc = json.loads(sample_bundle_text())
+    record = next(record for record in doc["records"] if record["kind"] == kind)
+    record["trials"][0]["extra"] = None
+    with pytest.raises((BundleError, ReplayError), match="missing|evidence"):
         replay_bundle(json.dumps(redigest(doc)))
 
 

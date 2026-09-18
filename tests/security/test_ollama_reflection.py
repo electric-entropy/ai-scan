@@ -32,6 +32,7 @@ def _ollama_response(content: str, thinking: str) -> HttpResponse:
             "model": "llama3",
             "message": {"role": "assistant", "content": content, "thinking": thinking},
             "done": True,
+            "done_reason": "stop",
         }
     )
     return HttpResponse(
@@ -60,6 +61,47 @@ def test_ollama_extract_returns_assistant_content_only() -> None:
     extracted = _adapter().extract(resp)
     assert extracted == "I will not repeat it."
     assert _CANARY not in extracted  # thinking is excluded
+
+
+def test_provider_evidence_redacts_all_text_payloads_but_preserves_envelope() -> None:
+    fragment = _CANARY.split("-", 1)[1][:8]
+    body = json.dumps(
+        {
+            "model": "llama3",
+            "message": {
+                "role": "assistant",
+                "content": f"eligible {_CANARY}",
+                "thinking": f"nested {fragment}",
+                "reasoning": {"steps": [f"escaped {_CANARY.encode('unicode_escape').decode()}"]},
+            },
+            "done": True,
+            "done_reason": "stop",
+        }
+    )
+    response = HttpResponse(
+        status=200,
+        body=body,
+        headers={"Content-Type": "application/json"},
+        redirected=False,
+        redirect_location=None,
+        truncated=False,
+        request_line={"method": "POST", "url": "http://127.0.0.1:11434/api/chat"},
+    )
+
+    # Classification still receives provider-semantic final content from the
+    # original response; only the persistence view is recursively scrubbed.
+    assert _adapter().extract(response) == f"eligible {_CANARY}"
+    evidence = response.evidence(
+        known_secrets=frozenset({_CANARY}), redact_provider_text=True
+    )
+    persisted = json.loads(evidence["response"]["body"])
+    assert persisted["audit_version"] == 1
+    assert persisted["role"] == "assistant"
+    assert persisted["completion_state"] == "complete"
+    assert set(persisted) == {"audit_version", "role", "completion_state", "raw_body"}
+    assert len(persisted["raw_body"]["sha256"]) == 64
+    assert _CANARY not in json.dumps(evidence)
+    assert fragment not in json.dumps(evidence)
 
 
 def test_refusal_mention_is_flagged_not_execution() -> None:

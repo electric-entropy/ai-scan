@@ -8,7 +8,7 @@ import re
 import pytest
 
 from ai_scan.injection import ExchangeOutcome
-from ai_scan.orchestration import RunState, compile_plan, run_plan
+from ai_scan.orchestration import RunState, compile_plan
 from ai_scan.orchestration.checkpoint import (
     Checkpoint,
     CheckpointError,
@@ -17,6 +17,7 @@ from ai_scan.orchestration.checkpoint import (
 )
 from ai_scan.packs.signatures import compute_digest
 from ai_scan.targets import normalize_target
+from tests.trusted_engines import run_plan
 
 _URL = "http://127.0.0.1:8000"
 
@@ -114,6 +115,22 @@ def test_plan_bound_checkpoint_loads(tmp_path) -> None:
     path = _real_checkpoint(tmp_path, plan)
     restored = load_checkpoint(path, expected_plan_digest=plan.digest, plan=plan)
     assert restored.completed
+
+
+def test_current_checkpoint_rejects_completed_record_without_trials(tmp_path) -> None:
+    plan = _plan()
+    path = _real_checkpoint(tmp_path, plan)
+    data = _load_data(path)
+    record = next(iter(data["completed"].values()))
+    record.pop("trials")
+    record["status"] = "not_observed"
+    record["proof"] = None
+    record["attack_trials"] = 0
+    record["successes"] = 0
+    _write_data(path, data)
+
+    with pytest.raises(CheckpointError, match="malformed checkpoint"):
+        load_checkpoint(path, expected_plan_digest=plan.digest, plan=plan)
 
 
 def test_record_for_case_not_in_plan_rejected(tmp_path) -> None:
@@ -278,7 +295,16 @@ def test_in_flight_case_is_rerun_on_resume(tmp_path) -> None:
         cid for cid, rec in data["completed"].items() if rec["kind"] == "attack"
     )
     template = plan_case_template(plan, attack_id)
-    del data["completed"][attack_id]  # simulate it was in flight, not completed
+    removed = data["completed"].pop(attack_id)
+    data["request_count"] -= sum(trial["attempts"] for trial in removed["trials"])
+    data["request_count"] += 1
+    data["in_flight"] = {
+        "case_id": attack_id,
+        "kind": "attack",
+        "family": removed["family"],
+        "prompt": removed["prompt"],
+        "attempts": 1,
+    }
     data["state"] = RunState.CONFIRMING.value
     _write_data(path, data)
 
@@ -298,12 +324,11 @@ def plan_case_template(plan, case_id: str) -> str:
     return next(c.template for c in plan.cases if c.case_id == case_id)
 
 
-# --- legacy baseline-format resume compatibility (no B3 weakening) --------------
+# --- legacy baseline-format handling (no B3 weakening) ---------------------------
 
-def test_legacy_baseline_not_observed_record_resumes(tmp_path) -> None:
-    # A legacy checkpoint: completed record has ONLY family/status/prompt/proof/
-    # kind (no trial counts), boolean control_results, no canary field. A
-    # not_observed completed case is safe to trust and must resume (skip it).
+def test_legacy_unredacted_baseline_record_fails_closed(tmp_path) -> None:
+    # A legacy checkpoint retains a generated canary and has no evidence-bearing
+    # representation. Re-digesting it does not make it safe to load or resume.
     plan = _plan()
     first_attack = plan.attack_cases()[0]
     ckpt = Checkpoint(plan_digest=plan.digest, state=RunState.CONFIRMING.value, request_count=1)
@@ -331,19 +356,8 @@ def test_legacy_baseline_not_observed_record_resumes(tmp_path) -> None:
     body = _reseal(body)
     open(path, "w", encoding="utf-8").write(json.dumps(body))  # noqa: SIM115
 
-    # Loads with plan binding (canary derived from the rendered prompt).
-    restored = load_checkpoint(path, expected_plan_digest=plan.digest, plan=plan)
-    assert restored.completed[first_attack.case_id]["status"] == "not_observed"
-
-    # And resume skips the completed case (no rerun of its physical attempt).
-    seen: list[str] = []
-
-    def responder(case):  # type: ignore[no-untyped-def]
-        seen.append(case.template)
-        return ExchangeOutcome("benign")
-
-    run_plan(plan, responder, canary=_CANARY, goal="", checkpoint_path=path)
-    assert first_attack.template not in seen
+    with pytest.raises(CheckpointError):
+        load_checkpoint(path, expected_plan_digest=plan.digest, plan=plan)
 
 
 def test_legacy_confirmed_without_trial_evidence_rejected(tmp_path) -> None:

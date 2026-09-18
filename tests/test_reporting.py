@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 
-from ai_scan.fingerprint import DEFAULT_PROBES, ProbeExchange, run_fingerprint
+from ai_scan.fingerprint import DEFAULT_PROBES, ProbeExchange
 from ai_scan.injection import (
     ExchangeOutcome,
     InjectionStatus,
     generate_canary,
     load_payloads,
-    run_injection,
 )
 from ai_scan.reporting import (
     Report,
@@ -18,6 +17,7 @@ from ai_scan.reporting import (
     write_report_atomic,
 )
 from ai_scan.targets import normalize_target
+from tests.trusted_engines import run_fingerprint, run_injection
 
 
 def _confirmed_injection():

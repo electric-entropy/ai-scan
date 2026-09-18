@@ -8,7 +8,7 @@ from ai_scan.adapters.base import HttpJsonAdapter
 
 
 class AnthropicAdapter(HttpJsonAdapter):
-    """Shapes a ``/v1/messages`` request; extracts the first text content block."""
+    """Shapes a ``/v1/messages`` request; accepts final text-only content blocks."""
 
     name = "anthropic"
     extraction_path = "/content/0/text"

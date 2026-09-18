@@ -19,9 +19,10 @@ from collections import Counter
 
 import pytest
 
-from ai_scan.attacks import AttackContext, DirectInjectionPlugin, run_attack
+from ai_scan.attacks import AttackContext, DirectInjectionPlugin
 from ai_scan.attacks.base import AttackCase
 from ai_scan.core.modes import resolve_policy
+from ai_scan.core.run_identity import RunIdentity
 from ai_scan.evidence_graph import (
     Bundle,
     BundleCollector,
@@ -32,8 +33,8 @@ from ai_scan.evidence_graph import (
     replay_bundle,
 )
 from ai_scan.injection import ExchangeOutcome, InjectionCase
-from ai_scan.orchestration import compile_plan, run_plan
-from ai_scan.orchestration.checkpoint import CheckpointError, load_checkpoint
+from ai_scan.orchestration import compile_plan
+from ai_scan.orchestration.checkpoint import PERSISTED_CANARY, CheckpointError, load_checkpoint
 from ai_scan.orchestration.evidence import (
     CaseEvidence,
     EvidenceError,
@@ -44,6 +45,7 @@ from ai_scan.packs.signatures import compute_digest
 from ai_scan.targets import normalize_target
 from tests.fixtures.apps import vulnerable_app
 from tests.security.test_m4_evidence_contract import _CANARY, _bundle_doc, _exact_token, _reseal
+from tests.trusted_engines import run_attack, run_plan
 
 _URL = "http://127.0.0.1:8765/v1/chat"
 
@@ -140,7 +142,7 @@ def test_reported_repro_attempts_257_count_288_is_rejected() -> None:
     doc = _bundle_doc()
     _set_attempts(doc, 257)
     assert doc["request_count"] == 288
-    with pytest.raises(ReplayError, match="budget"):
+    with pytest.raises(ReplayError, match="budget|commitment"):
         replay_bundle(_reseal(doc))
 
 
@@ -160,10 +162,31 @@ def _evidence(doc: dict) -> list[CaseEvidence]:
 def test_public_contract_objects_reject_count_forgeries(mutate) -> None:
     plan = _plan()
     doc = _bundle_doc()
-    verify_records(plan, resolve_plan_packs(plan), _CANARY, _evidence(doc))  # genuine passes
+    identity = RunIdentity.verify_persisted(
+        plan.digest,
+        doc["canary_commitment"],
+        doc["disclosure_marker_commitment"],
+        doc["canary"],
+        doc["disclosure_marker"],
+    )
+    verify_records(
+        plan,
+        resolve_plan_packs(plan),
+        doc["canary"],
+        _evidence(doc),
+        doc["disclosure_marker"],
+        identity,
+    )  # genuine passes
     mutate(doc)
     with pytest.raises(EvidenceError):
-        verify_records(plan, resolve_plan_packs(plan), _CANARY, _evidence(doc))
+        verify_records(
+            plan,
+            resolve_plan_packs(plan),
+            doc["canary"],
+            _evidence(doc),
+            doc["disclosure_marker"],
+            identity,
+        )
 
 
 def _checkpoint(tmp_path) -> tuple[object, str, dict]:
@@ -256,7 +279,9 @@ def test_boundary_spanning_secret_never_persists_in_checkpoint(tmp_path, side) -
 
     restored = load_checkpoint(path, expected_plan_digest=plan.digest, plan=plan)
     proofs = [r["proof"] for r in restored.completed.values() if r["status"] == "confirmed"]
-    assert proofs and all(_CANARY in p for p in proofs)
+    assert proofs and all("AISCAN-EVIDENCE-" in p for p in proofs)
+    assert all(PERSISTED_CANARY not in p for p in proofs)
+    assert all(_CANARY not in p for p in proofs)
 
     calls: list[str] = []
 

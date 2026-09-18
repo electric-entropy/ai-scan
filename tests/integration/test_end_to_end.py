@@ -10,11 +10,12 @@ import json
 import re
 
 from ai_scan import cli
-from ai_scan.fingerprint import DEFAULT_PROBES, ProbeExchange, run_fingerprint
-from ai_scan.injection import ExchangeOutcome, generate_canary, load_payloads, run_injection
+from ai_scan.fingerprint import DEFAULT_PROBES, ProbeExchange
+from ai_scan.injection import ExchangeOutcome, generate_canary, load_payloads
 from ai_scan.targets import normalize_target
 from ai_scan.transport import MARKER, Transport, TransportConfig
 from tests.conftest import MockRequest, MockResponse
+from tests.trusted_engines import run_fingerprint, run_injection
 
 # --- application behaviors ---------------------------------------------------
 

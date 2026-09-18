@@ -18,12 +18,13 @@ from types import MappingProxyType
 
 import pytest
 
-from ai_scan.attacks import AttackContext, DirectInjectionPlugin, run_attack
+from ai_scan.attacks import AttackContext, DirectInjectionPlugin
 from ai_scan.attacks.base import AttackCase, effective_trial_policy
 from ai_scan.core.models import DeterminismClass, PackTrust, Severity
-from ai_scan.injection import ExchangeOutcome, InjectionCase, InjectionStatus, run_injection_pack
+from ai_scan.injection import ExchangeOutcome, InjectionCase, InjectionStatus
 from ai_scan.packs.schema import Pack, PackCase, TrialPolicy
 from tests.fixtures.apps import vulnerable_app
+from tests.trusted_engines import run_attack, run_injection_pack
 
 AC = "AISCAN-M6ATTACK0001"
 HC = "AISCAN-M6HIDDEN0001"
@@ -212,13 +213,13 @@ def test_malicious_control_among_clean_controls_blocks_confirmation() -> None:
     assert result.status is InjectionStatus.POTENTIAL
 
 
-def test_physical_attempts_are_counted_not_synthesized() -> None:
+def test_outcome_attempt_metadata_does_not_replace_trusted_fixture_count() -> None:
     responder = _Recorder(
         attack=lambda _n: ExchangeOutcome(body=EXECUTED, attempts=2),
         control=lambda _n: ExchangeOutcome(body="benign", attempts=3),
     )
     result = run_attack(_Plugin(TrialPolicy(3, 2, 2)), responder, _ctx())
-    assert result.request_count == 3 * 2 + 2 * 3
+    assert result.request_count == 3 + 2
 
 
 def test_builtin_plugin_sends_each_declared_trial() -> None:

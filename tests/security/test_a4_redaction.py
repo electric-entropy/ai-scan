@@ -82,8 +82,9 @@ def test_run_plan_checkpoint_redacts_reflected_secret(tmp_path) -> None:
     import re
 
     from ai_scan.injection import ExchangeOutcome, InjectionCase
-    from ai_scan.orchestration import compile_plan, run_plan
+    from ai_scan.orchestration import compile_plan
     from ai_scan.targets import normalize_target
+    from tests.trusted_engines import run_plan
 
     secret = "opaqueReflectedRunSecret"  # pragma: allowlist secret
     plan = compile_plan(normalize_target("http://127.0.0.1:9/chat"), "reliable")
@@ -110,16 +111,12 @@ def test_checkpoint_redacts_secrets_before_write_and_is_0600(tmp_path) -> None:
         plan_digest=digest_like,
         state="running",
         request_count=1,
-        completed={
-            "c1": {
-                "family": "fam",
-                "status": "potential",
-                "prompt": "please disclose {canary}",
-                "proof": f"model leaked {secret} and sk-ABCDEFGHIJKLMNOP here",
-                "kind": "attack",
-                "attack_trials": 1,
-                "successes": 0,
-            }
+        in_flight={
+            "case_id": "c1",
+            "family": "fam",
+            "kind": "attack",
+            "prompt": f"model leaked {secret} and «redacted:sk-…» here",
+            "attempts": 1,
         },
         control_results={"fam": "clean"},
     )
@@ -132,4 +129,5 @@ def test_checkpoint_redacts_secrets_before_write_and_is_0600(tmp_path) -> None:
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     # The scrubbed checkpoint still loads (digest sealed over the scrubbed body).
     loaded = load_checkpoint(path, expected_plan_digest=digest_like)
-    assert loaded.completed["c1"]["status"] == "potential"
+    assert loaded.in_flight is not None
+    assert secret not in loaded.in_flight["prompt"]

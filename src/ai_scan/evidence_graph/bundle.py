@@ -18,6 +18,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ai_scan.core.run_identity import RunIdentity, RunIdentityError
 from ai_scan.evidence_graph.graph import (
     EvidenceGraph,
     GraphError,
@@ -43,12 +44,12 @@ from ai_scan.orchestration.planner import (
     verify_plan_integrity,
 )
 from ai_scan.packs.signatures import compute_digest, verify_digest
-from ai_scan.transport import scrub_structure
+from ai_scan.transport import scrub_structure, scrub_text
 
 # v2: every record persists all of its physical trials, control coverage is the
 # tri-state derived result, and the physical request count is bound. v1 bundles
 # (one representative response per case) cannot substantiate repeatability.
-BUNDLE_VERSION = 2
+BUNDLE_VERSION = 3
 _TOOL = "ai-scan"
 _TOP_LEVEL_KEYS = frozenset(
     {
@@ -58,7 +59,9 @@ _TOP_LEVEL_KEYS = frozenset(
         "plan_digest",
         "checkpoint",
         "canary",
+        "canary_commitment",
         "disclosure_marker",
+        "disclosure_marker_commitment",
         "control_results",
         "coverage_gaps",
         "request_count",
@@ -92,19 +95,52 @@ class CaseRecord:
     successes: int = 0
     known_secrets: frozenset[str] = field(default_factory=frozenset)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(
+        self,
+        plan: Plan,
+        source_canary: str,
+        identity: RunIdentity,
+        known_secrets: frozenset[str],
+    ) -> dict[str, Any]:
+        cases = {case.case_id: case for case in plan.cases}
+        case = cases.get(self.case_id)
+        if case is None:
+            raise BundleError("record references a case not in the plan")
         return {
             "case_id": self.case_id,
             "pack_id": self.pack_id,
             "family": self.family,
             "kind": self.kind,
-            "prompt": self.prompt,
+            "prompt": self.prompt.replace(source_canary, identity.canary),
             # Every physical trial is persisted so replay re-derives status,
             # repeatability, controls and physical counts (never inferred).
-            "trials": [trial_to_dict(t) for t in self.trials],
+            "trials": [
+                trial_to_dict(
+                    ExchangeOutcome(
+                        body=scrub_text(
+                            trial.body.replace(source_canary, identity.canary), known_secrets
+                        ),
+                        status=trial.status,
+                        redirected=trial.redirected,
+                        truncated=trial.truncated,
+                        transport_ok=trial.transport_ok,
+                        attempts=trial.attempts,
+                        semantic=trial.semantic,
+                    ),
+                    plan=plan,
+                    case=case,
+                    canary=identity.canary,
+                    identity=identity,
+                )
+                for trial in self.trials
+            ],
             "finding": {
                 "status": self.finding_status,
-                "proof": self.proof,
+                "proof": (
+                    None
+                    if self.proof is None
+                    else self.proof.replace(source_canary, identity.canary)
+                ),
                 "attack_trials": self.attack_trials,
                 "successes": self.successes,
             },
@@ -255,6 +291,11 @@ def build_bundle(
     are derived, each proof is re-derived from the redacted trials, and a run
     whose recorded statuses do not re-derive from its own evidence is refused.
     """
+    secrets = frozenset(known_secrets).union(*(r.known_secrets for r in records))
+    secrets = frozenset(secret for secret in secrets if secret != canary)
+    if disclosure_marker is not None and disclosure_marker != canary:
+        secrets = secrets | {disclosure_marker}
+    identity = RunIdentity.create(plan.digest, canary, disclosure_marker)
     content: dict[str, Any] = {
         "bundle_version": BUNDLE_VERSION,
         "metadata": {
@@ -270,14 +311,13 @@ def build_bundle(
             if checkpoint_digest is not None
             else None
         ),
-        "canary": canary,
-        "disclosure_marker": disclosure_marker,
+        "canary": identity.canary,
+        "canary_commitment": identity.canary_commitment,
+        "disclosure_marker": identity.disclosure_marker,
+        "disclosure_marker_commitment": identity.disclosure_marker_commitment,
         "coverage_gaps": list(coverage_gaps),
-        "records": [r.to_dict() for r in records],
+        "records": [r.to_dict(plan, canary, identity, secrets) for r in records],
     }
-    secrets = frozenset(known_secrets).union(*(r.known_secrets for r in records))
-    if disclosure_marker is not None and disclosure_marker != canary:
-        secrets = secrets | {disclosure_marker}
     # Scrub BEFORE deriving and digesting, so the digest seals — and replay
     # re-derives from — exactly the redacted evidence that is exported.
     scrubbed: dict[str, Any] = scrub_structure(content, secrets)
@@ -290,6 +330,7 @@ def build_bundle(
             scrubbed["canary"],
             evidence,
             scrubbed.get("disclosure_marker") or None,
+            identity,
         )
     except (EvidenceError, KeyError, TypeError) as exc:
         raise BundleError(f"run evidence does not satisfy the evidence contract: {exc}") from exc
@@ -375,7 +416,16 @@ class BundleCollector:
 
 def dump_bundle(bundle: Bundle) -> str:
     """Deterministic JSON rendering of a bundle (stable key order)."""
-    return json.dumps(json.loads(bundle_snapshot(bundle)), indent=2, sort_keys=True)
+    data = json.loads(bundle_snapshot(bundle))
+    try:
+        RunIdentity.verify_persisted(
+            data.get("plan_digest"), data.get("canary_commitment"),
+            data.get("disclosure_marker_commitment"), data.get("canary"),
+            data.get("disclosure_marker"),
+        )
+    except RunIdentityError as exc:
+        raise BundleError("bundle run identity commitment is malformed") from exc
+    return json.dumps(data, indent=2, sort_keys=True)
 
 
 def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -429,6 +479,16 @@ def load_bundle(text: str) -> Bundle:
     disclosure_marker = data.get("disclosure_marker")
     if disclosure_marker is not None and not isinstance(disclosure_marker, str):
         raise BundleError("bundle disclosure_marker is malformed")
+    try:
+        identity = RunIdentity.verify_persisted(
+            plan.digest,
+            data.get("canary_commitment"),
+            data.get("disclosure_marker_commitment"),
+            canary,
+            disclosure_marker,
+        )
+    except RunIdentityError as exc:
+        raise BundleError("bundle run identity commitment is malformed") from exc
     _validate_coverage_gaps(data.get("coverage_gaps"))
     _validate_checkpoint_ref(data.get("checkpoint"))
 
@@ -442,6 +502,7 @@ def load_bundle(text: str) -> Bundle:
             canary,
             _case_evidence(records),
             disclosure_marker,
+            identity,
         )
     except EvidenceError as exc:
         raise BundleError(f"bundle evidence is invalid: {exc}") from exc

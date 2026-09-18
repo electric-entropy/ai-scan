@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from ai_scan.core.run_identity import RunIdentity
 from ai_scan.evidence_graph.bundle import Bundle, BundleError, bundle_snapshot, load_bundle
 from ai_scan.orchestration.evidence import (
     CaseEvidence,
@@ -70,6 +71,13 @@ def replay_bundle(source: str | bytes | Bundle) -> ReplayResult:
     content = bundle.content
     canary = str(content["canary"])
     disclosure_marker = content.get("disclosure_marker")
+    identity = RunIdentity.verify_persisted(
+        plan.digest,
+        content["canary_commitment"],
+        content["disclosure_marker_commitment"],
+        canary,
+        disclosure_marker,
+    )
     records = content["records"]
     try:
         verified = verify_records(
@@ -92,6 +100,7 @@ def replay_bundle(source: str | bytes | Bundle) -> ReplayResult:
                 for r in records
             ],
             str(disclosure_marker) if disclosure_marker is not None else None,
+            identity,
         )
     except EvidenceError as exc:
         raise ReplayError(f"replayed evidence does not match the bundle: {exc}") from exc

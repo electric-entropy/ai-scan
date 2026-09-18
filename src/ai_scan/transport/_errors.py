@@ -23,13 +23,22 @@ class TransportError(Exception):
             exhaustion). ``None`` for ordinary (e.g. connection) failures.
         totals: Per-kind physical-attempt counts at the time of the failure, if
             a budget ledger was in play.
+        attempts: Physical attempts consumed by the failed logical request.
+            Zero means no request was attempted or no count is available.
     """
 
     outcome: str | None = None
 
-    def __init__(self, message: str, *, totals: dict[str, int] | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        totals: dict[str, int] | None = None,
+        attempts: int = 0,
+    ) -> None:
         super().__init__(message)
         self.totals = totals
+        self.attempts = attempts
 
 
 class BudgetExceededError(TransportError):

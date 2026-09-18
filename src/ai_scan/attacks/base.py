@@ -15,6 +15,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from ai_scan.core.accounting import PhysicalCounter
+from ai_scan.core.accounting import delta as ledger_delta
+from ai_scan.core.accounting import require as require_ledger
+from ai_scan.core.accounting import snapshot as snapshot_ledger
 from ai_scan.core.models import DeterminismClass
 from ai_scan.core.modes import resolve_policy
 from ai_scan.injection import (
@@ -28,7 +32,6 @@ from ai_scan.injection import (
     evaluate_trials,
     legacy_status,
     merge_control_results,
-    physical_attempts,
 )
 from ai_scan.packs.schema import TrialPolicy
 from ai_scan.transport import scrub_text
@@ -198,8 +201,15 @@ def effective_trial_policy(declared: TrialPolicy, mode: str) -> TrialPolicy:
     )
 
 
-def run_attack(plugin: AttackPlugin, responder: Responder, ctx: AttackContext) -> AttackResult:
+def run_attack(
+    plugin: AttackPlugin,
+    responder: Responder,
+    ctx: AttackContext,
+    *,
+    physical_request_count: PhysicalCounter | None = None,
+) -> AttackResult:
     """Run ``plugin`` against ``responder`` and classify via the M7 predicate."""
+    require_ledger(physical_request_count)
     if ctx.mode not in _VALID_MODES:
         raise AttackError(f"unknown mode {scrub_text(str(ctx.mode))!r}")
     _validate_plugin(plugin)
@@ -212,15 +222,36 @@ def run_attack(plugin: AttackPlugin, responder: Responder, ctx: AttackContext) -
     cases = _validate_cases(_guarded(lambda: list(plugin.build_cases(ctx)), "build_cases"))
 
     policy = effective_trial_policy(plugin.trial_policy, ctx.mode)
+    max_physical_requests = resolve_policy(ctx.mode).max_physical_requests
     request_count = 0
 
     def send(case: AttackCase) -> ExchangeOutcome:
         nonlocal request_count
-        outcome = responder(case)
+        remaining = max_physical_requests - request_count
+        before = snapshot_ledger(physical_request_count)
+        try:
+            outcome = responder(case)
+        except BaseException:
+            request_count += ledger_delta(
+                before, physical_request_count, remaining=remaining
+            )
+            raise
+        consumed = ledger_delta(before, physical_request_count, remaining=remaining)
         if not isinstance(outcome, ExchangeOutcome):
             raise AttackError("attack responder returned a non-ExchangeOutcome value")
-        request_count += physical_attempts(outcome)
-        return outcome
+        request_count += consumed
+        if consumed == 0:
+            return ExchangeOutcome(body="", transport_ok=False, attempts=0)
+        return ExchangeOutcome(
+            body=outcome.body,
+            status=outcome.status,
+            redirected=outcome.redirected,
+            truncated=outcome.truncated,
+            transport_ok=outcome.transport_ok,
+            attempts=consumed,
+            known_secrets=outcome.known_secrets,
+            semantic=outcome.semantic,
+        )
 
     # Every control case runs its full declared trial count. Per-family coverage
     # is tri-state: a usable emission poisons the baseline, and a family can

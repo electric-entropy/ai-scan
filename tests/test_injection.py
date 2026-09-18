@@ -13,8 +13,8 @@ from ai_scan.injection import (
     InjectionStatus,
     generate_canary,
     load_payloads,
-    run_injection,
 )
+from tests.trusted_engines import run_injection
 
 
 def _execute_responder():
@@ -186,7 +186,7 @@ def test_transport_failure_is_inconclusive() -> None:
 # --- Finding 7: physical request accounting ----------------------------------
 
 
-def test_request_count_sums_physical_attempts() -> None:
+def test_request_count_uses_trusted_fixture_ledger_not_outcome_metadata() -> None:
     canary = generate_canary()
 
     def respond(case: InjectionCase) -> ExchangeOutcome:
@@ -195,7 +195,7 @@ def test_request_count_sums_physical_attempts() -> None:
     pack = load_payloads("safe")
     result = run_injection(pack, respond, canary=canary, goal="x")
     logical = sum(len(f.templates) for f in pack.families)
-    assert result.request_count == logical * 2
+    assert result.request_count == logical
 
 
 def test_total_requests_are_bounded() -> None:

@@ -5,8 +5,9 @@ from __future__ import annotations
 from ai_scan import cli
 from ai_scan.evidence_graph import BundleCollector, dump_bundle, replay_bundle
 from ai_scan.injection import ExchangeOutcome
-from ai_scan.orchestration import compile_plan, run_plan
+from ai_scan.orchestration import compile_plan
 from ai_scan.targets import normalize_target
+from tests.trusted_engines import run_plan
 
 CANARY = "AISCAN-INTEG0001"
 
@@ -91,7 +92,7 @@ def test_cli_bundle_validate_rejects_tampered_file(tmp_path, capsys) -> None:
     run_plan(plan, _confirming_responder, canary=CANARY, goal="g", observer=collector.observe)
     bundle_path = tmp_path / "bad.json"
     text = dump_bundle(collector.build(plan=plan, canary=CANARY, run_id="run-4"))
-    bundle_path.write_text(text.replace(CANARY, "AISCAN-TWEAKED1"), encoding="utf-8")
+    bundle_path.write_text(text.replace('"run-4"', '"run-tampered"'), encoding="utf-8")
 
     assert cli.main(["bundle", "validate", "--file", str(bundle_path)]) == cli.EXIT_RUNTIME_ERROR
     assert "invalid:" in capsys.readouterr().out
