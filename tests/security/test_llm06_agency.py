@@ -296,11 +296,11 @@ def test_doctor_semantic_tamper_not_just_digest(resource, monkeypatch, capsys):
     ]
 
 
-def test_coverage_eight_partial_categories_after_llm08():
+def test_coverage_nine_partial_categories_after_llm09():
     from ai_scan.owasp_llm import coverage_summary, load_coverage_matrix
 
     matrix = load_coverage_matrix()
-    assert coverage_summary(matrix)["active_end_to_end_categories"] == 8
+    assert coverage_summary(matrix)["active_end_to_end_categories"] == 9
     category = matrix.categories[5]
     assert category.current_active_cli_coverage and not category.scaffolding_only
     assert "agency-audit" in category.active_coverage_source

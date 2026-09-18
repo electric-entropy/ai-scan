@@ -588,76 +588,53 @@
       ]
     },
     {
-      "active_coverage_source": "no current end-to-end misinformation coverage; subjective disagreement is unsupported",
-      "allowed_outcomes": [
-        "not_tested",
-        "blocked",
-        "inconclusive",
-        "not_applicable"
-      ],
+      "active_coverage_source": "misinformation-audit --manifest FILE provides partial offline structured-claim comparison only; not general truth verification or target execution",
+      "allowed_outcomes": ["tested", "finding", "not_tested", "blocked", "inconclusive", "not_applicable"],
       "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
-      "current_active_cli_coverage": false,
+      "current_active_cli_coverage": true,
       "deterministic_evidence": [
-        "Deterministic contradiction to fixture truth/citation requirements with controls"
+        "Fixed comparisons of expected and observed claim identity, value digest, source, citation presence, and snapshot identity"
       ],
       "full_coverage_claim_allowed": false,
       "id": "LLM09",
       "known_limitations": [
-        "Phase 2B work required before active end-to-end coverage",
-        "Prompt/template overlap or library scaffolding is not counted as active coverage",
-        "unsupported by current CLI as a finding-producing category"
+        "Partial offline structured-claim evidence only, not general truth verification or full LLM09 coverage",
+        "Operator-supplied ground truth, observations, sources, citations, and snapshots are not independently verified",
+        "No model scoring, LLM judge, runtime target execution, network, document loading, or reference dereferencing",
+        "Natural-language correctness, calibration, subjective disagreement, and production misinformation remain untested"
       ],
       "mode_breadth": {
-        "kitchen_sink": [
-          "planned calibration and overreliance scenarios"
-        ],
-        "reliable": [
-          "planned grounded truth-set misinformation fixtures"
-        ]
+        "kitchen_sink": ["Same five offline structured-claim rules; no mode-specific runtime expansion"],
+        "reliable": ["Five offline structured-claim rules; public compiled plans unchanged"]
       },
       "name": "Misinformation",
-      "not_applicable_when": [
-        "Subjective or unverifiable claims only"
-      ],
+      "not_applicable_when": ["No operator-supplied structured ground-truth and observed claim digests"],
       "phase_2b_planned": true,
-      "prerequisites": [
-        "Objective local truth set and expected citations are available"
-      ],
-      "required_controls": [
-        "Known-true, known-false, and uncertainty controls"
-      ],
+      "prerequisites": ["Closed bounded ai-scan-misinformation-manifest-v1 with expected and observed claims"],
+      "required_controls": ["Packaged matching negative control and five independent mismatch fixtures; strict identity validation"],
       "reserved_remediation_id": "ai-scan.owasp.LLM09.remediation",
-      "reserved_report_ids": [
-        "ai-scan.owasp.LLM09.coverage",
-        "ai-scan.owasp.LLM09.evidence"
-      ],
+      "reserved_report_ids": ["ai-scan.owasp.LLM09.coverage", "ai-scan.owasp.LLM09.evidence"],
       "reserved_sarif_rule_id": "ai-scan.owasp.LLM09.rule",
-      "scaffolding_only": true,
+      "scaffolding_only": false,
       "supported_scenarios": [
         {
-          "active_cli": false,
-          "controls": [
-            "Known-true, known-false, and uncertainty controls"
-          ],
-          "evidence": "Deterministic contradiction to fixture truth/citation requirements with controls",
-          "id": "scenario.llm09.reliable",
-          "name": "Reliable Misinformation scenario slice",
-          "status": "not_tested"
+          "active_cli": true,
+          "controls": ["Matching structured-claim negative control; malformed or duplicate identities reject"],
+          "evidence": "Opaque case/rule findings for missing, conflicting, unsupported, uncited or differently sourced claims and snapshot mismatch; executions and network_requests zero",
+          "id": "scenario.llm09.structured-claims",
+          "name": "Offline structured-claim comparison",
+          "status": "tested"
         },
         {
           "active_cli": false,
-          "controls": [
-            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
-          ],
-          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
-          "id": "scenario.llm09.kitchen-sink",
-          "name": "Kitchen Sink Misinformation broader scenario slice",
+          "controls": ["No production truth or model-calibration claims"],
+          "evidence": "Natural-language truth, source validity, calibration, and runtime misinformation remain untested",
+          "id": "scenario.llm09.runtime-gaps",
+          "name": "General truth and runtime gaps",
           "status": "not_tested"
         }
       ],
-      "target_capabilities": [
-        "Target answers against a domain truth set or citation/grounding fixture"
-      ]
+      "target_capabilities": ["Local structured expected and observed claim manifest; no target required"]
     },
     {
       "active_coverage_source": "resource prompts exist as bounded fixtures, but no current active end-to-end unbounded-consumption coverage claim",
@@ -732,7 +709,7 @@
       ]
     }
   ],
-  "content_sha256": "6af8b3719974d64035320f94769aff7ff1af3a30c0279ffc8c794c95747f74f9",
+  "content_sha256": "dceb941b4ef89a3a5591f427f0c8c4fa4da49993aa39732db4053d94d431e38f",
   "coverage_arithmetic": {
     "aggregate_full_coverage_claim_allowed": false,
     "blocked_inconclusive_not_tested_do_not_count_as_tested": true,

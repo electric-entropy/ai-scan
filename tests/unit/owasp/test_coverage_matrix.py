@@ -76,7 +76,11 @@ def test_current_state_is_honest_about_active_end_to_end_coverage() -> None:
     assert categories["LLM07"].scaffolding_only is False
     assert categories["LLM08"].current_active_cli_coverage is True
     assert categories["LLM08"].scaffolding_only is False
-    inactive_ids = ("LLM09", "LLM10")
+    assert categories["LLM09"].current_active_cli_coverage is True
+    assert categories["LLM09"].scaffolding_only is False
+    assert "misinformation-audit" in categories["LLM09"].active_coverage_source
+    assert "offline" in categories["LLM09"].active_coverage_source
+    inactive_ids = ("LLM10",)
     for category_id in inactive_ids:
         category = categories[category_id]
         assert category.current_active_cli_coverage is False
@@ -121,7 +125,7 @@ def test_reliable_and_kitchen_sink_breadth_differ_without_full_claims() -> None:
     summary = coverage_summary(matrix)
     assert summary["categories_total"] == 10
     assert summary["full_coverage_claim_allowed"] is False
-    assert summary["active_end_to_end_categories"] == 8
+    assert summary["active_end_to_end_categories"] == 9
     assert summary["active_end_to_end_categories"] < summary["categories_total"]
 
 
@@ -413,7 +417,7 @@ def test_duplicate_json_keys_are_rejected() -> None:
 
 def test_contradictory_active_or_full_states_are_rejected() -> None:
     def unsupported_marked_active(doc: dict[str, object]) -> None:
-        cat = doc["categories"][8]  # LLM09 remains inactive
+        cat = doc["categories"][9]  # LLM10 remains inactive
         cat["current_active_cli_coverage"] = True
 
     def full_claim_from_partial(doc: dict[str, object]) -> None:

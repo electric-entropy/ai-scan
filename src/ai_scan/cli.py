@@ -19,7 +19,7 @@ import stat
 import sys
 from collections.abc import Callable, Sequence
 
-from ai_scan import agency, vector
+from ai_scan import agency, misinformation, vector
 from ai_scan.adapters import Adapter, AdapterError, ExtractionError, GenericHttpAdapter
 from ai_scan.adapters.registry import AdapterRegistry, default_registry
 from ai_scan.core.config import SUPPORTED_SCHEMAS, load_document, load_json_strict
@@ -116,6 +116,10 @@ EXIT_INCONCLUSIVE = 4
 PROG = "ai-scan"
 
 
+class _MisinformationUsageError(ValueError):
+    """Internal parse failure caught before any submitted argument is emitted."""
+
+
 class _ArgumentParser(argparse.ArgumentParser):
     """ArgumentParser that maps usage/config errors to exit code ``1``.
 
@@ -124,6 +128,8 @@ class _ArgumentParser(argparse.ArgumentParser):
     """
 
     def error(self, message: str) -> None:  # type: ignore[override]
+        if self.prog == "ai-scan misinformation-audit":
+            raise _MisinformationUsageError("llm09_manifest_invalid")
         self.print_usage(sys.stderr)
         self.exit(EXIT_RUNTIME_ERROR, f"{self.prog}: error: {message}\n")
 
@@ -366,6 +372,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_vector.add_argument("--format", choices=["text", "json"], default="text")
 
+    p_misinformation = subparsers.add_parser(
+        "misinformation-audit",
+        help="Offline partial LLM09 structured-claim comparison (no execution or network).",
+        description="Compare operator-supplied claim digests; not general truth verification.",
+    )
+    p_misinformation.add_argument("--manifest", required=True, help="Local claim manifest JSON.")
+    p_misinformation.add_argument("--format", choices=["text", "json"], default="text")
+
     p_data_poisoning = subparsers.add_parser(
         "data-poisoning-audit",
         help=(
@@ -424,7 +438,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         argv: Argument vector (defaults to ``sys.argv[1:]``).
     """
     parser = build_parser()
-    args = parser.parse_args(argv)
+    supplied = sys.argv[1:] if argv is None else argv
+    if supplied and supplied[0] == "misinformation-audit":
+        # Keep this offline command's fixed-code usage boundary separate from
+        # existing commands, whose exit/error contracts are unchanged.
+        try:
+            args, unknown = parser.parse_known_args(supplied)
+            if unknown:
+                raise _MisinformationUsageError("llm09_manifest_invalid")
+        except _MisinformationUsageError:
+            print("invalid: llm09_manifest_invalid")
+            return 2
+    else:
+        args = parser.parse_args(argv)
 
     if args.command is None:
         parser.print_usage()
@@ -458,6 +484,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_agency_audit(args)
     if args.command == "vector-audit":
         return _cmd_vector_audit(args)
+    if args.command == "misinformation-audit":
+        return _cmd_misinformation_audit(args)
     if args.command == "data-poisoning-audit":
         return _cmd_data_poisoning_audit(args)
 
@@ -866,6 +894,24 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
                 raise ValueError("llm08_fixture_semantic_mismatch")
         return "schema and 2 fixtures valid"
 
+    def _llm09_misinformation_resources() -> str:
+        misinformation.load_schema_text(misinformation.load_manifest_file(
+            str(root.joinpath("owasp/misinformation-manifest-v1.schema.json"))
+        ))
+        for name, expected_rules in (
+            ("secure", set()),
+            ("vulnerable", {"missing_claim", "value_mismatch", "source_integrity",
+                            "unexpected_claim", "snapshot_mismatch"}),
+        ):
+            result = misinformation.audit_manifest_text(misinformation.load_manifest_file(
+                str(root.joinpath(f"owasp/misinformation-{name}-v1.json"))
+            ))
+            if {f.rule for f in result.findings} != expected_rules:
+                raise ValueError("llm09_fixture_semantic_mismatch")
+            if len(result.findings) != len(expected_rules):
+                raise ValueError("llm09_fixture_semantic_mismatch")
+        return "schema and 2 fixtures valid"
+
     record("metadata", _metadata)
     record("py.typed", _py_typed)
     record("schemas", _schemas)
@@ -878,6 +924,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     record("owasp-llm05-output-handling-resources", _llm05_output_handling_resources)
     record("owasp-llm06-agency-resources", _llm06_agency_resources)
     record("owasp-llm08-vector-resources", _llm08_vector_resources)
+    record("owasp-llm09-misinformation-resources", _llm09_misinformation_resources)
 
     healthy = all(bool(check["ok"]) for check in checks)
     if args.json:
@@ -931,6 +978,22 @@ def _cmd_agency_audit(args: argparse.Namespace) -> int:
         return EXIT_RUNTIME_ERROR
     print(agency.render_json(result) if args.format == "json" else agency.render_human(result))
     return EXIT_CONFIRMED_FINDING if result.status == "finding" else EXIT_OK
+
+
+def _cmd_misinformation_audit(args: argparse.Namespace) -> int:
+    """Compare inert structured claims; invalid inputs use this command's exit code 2."""
+    try:
+        result = misinformation.audit_manifest_file(args.manifest)
+    except misinformation.MisinformationManifestError:
+        if args.format == "json":
+            print(json.dumps({"error": "llm09_manifest_invalid", "executions": 0,
+                              "network_requests": 0}, sort_keys=True))
+        else:
+            print("invalid: llm09_manifest_invalid")
+        return 2
+    print(misinformation.render_json(result) if args.format == "json"
+          else misinformation.render_text(result))
+    return EXIT_CONFIRMED_FINDING if result.findings else EXIT_OK
 
 
 def _cmd_vector_audit(args: argparse.Namespace) -> int:

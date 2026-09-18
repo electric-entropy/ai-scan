@@ -57,11 +57,12 @@ ai-scan owasp-coverage   [--format summary|json]
 ai-scan supply-chain-audit    --manifest FILE [--format human|json]
 ai-scan data-poisoning-audit  --target URL [--format human|json]
 ai-scan vector-audit          --manifest FILE [--format text|json]
+ai-scan misinformation-audit  --manifest FILE [--format json|text]
 ```
 
 `bundle validate|replay`, the top-level `replay`, `report`, `baseline`,
 `validate-config`, `packs`, `adapters`, `doctor`, `owasp-coverage`, and
-`supply-chain-audit`, and `vector-audit` are all **offline** — they construct no
+`supply-chain-audit`, `vector-audit`, and `misinformation-audit` are all **offline** — they construct no
 transport and touch no network. `data-poisoning-audit` is active: it contacts only the exact
 operator-supplied `--target` URL through the hardened scope-safe transport.
 
@@ -218,7 +219,16 @@ Finite integral JSON numbers such as `8.0` and `8e0` are accepted as integers;
 fractional, non-finite, boolean, string, and out-of-range values are rejected.
 Results retain a shared opaque `context_ref` bound to tenant/context/collection
 and a separate rule-bound `finding_ref` for each finding, without source labels.
-The active partial category count is 8/10, not full coverage or compliance.
+LLM09 has partial offline structured-claim coverage through
+`ai-scan misinformation-audit --manifest FILE [--format json|text]`. It compares
+operator-supplied expected and observed claim digests, sources, citation presence,
+and snapshot identity. It never loads or resolves referenced objects, executes
+targets, connects to the network, or invokes a model/judge. Ground truth and
+observations are not independently verified: this is not general truth verification.
+Exit codes are 0 for matching claims, 3 for findings, and 2 for invalid input.
+Results contain only opaque identities, fixed rule codes, the manifest SHA-256,
+zero execution/request counts, and limitations. See [the LLM09 contract](docs/misinformation-audit.md).
+The active partial category count is 9/10, not full coverage or compliance.
 Prompt-only LLM06 tool-abuse packs do not count as LLM06 runtime coverage. Matrix identifiers
 for remediation/report/SARIF are reserved contract identifiers for future
 integration, not values emitted by the current report or SARIF renderers.

@@ -150,8 +150,14 @@ Current honest summary after Phase 2B8:
   retrieval validation, embedding inversion, tenant escape proof, runtime
   isolation, or proof that declarations are true was performed. Dormant RAG
   attack packs and prompt/template overlap do not establish LLM08 runtime coverage.
-- LLM09:2025 Misinformation — no current misinformation coverage; subjective
-  disagreement is unsupported and cannot be reported as a vulnerability.
+- LLM09:2025 Misinformation — partial offline structured-claim comparison through
+  `ai-scan misinformation-audit --manifest FILE`. Fixed rules compare submitted
+  ground-truth and observed claim digests, source/citation declarations, and snapshot
+  identities. No model judge, scoring, target execution, network, or reference loading
+  occurs. This is not general truth verification: operator-supplied truth, observations,
+  sources, and citations are not independently verified. Natural-language correctness,
+  calibration, and runtime misinformation remain untested. See the
+  [manifest contract](misinformation-audit.md).
 - LLM10:2025 Unbounded Consumption — no current unbounded-consumption coverage;
   future scenarios must stay within local budgets and cannot weaken request,
   duration, or cleanup controls.
@@ -161,9 +167,11 @@ Coverage arithmetic is conservative: the denominator is the ten OWASP categories
 and `not_tested` never increase tested coverage. Current public coverage now has
 active LLM01, LLM02, partial offline-manifest LLM03, partial active
 controlled-retrieval-protocol LLM04, partial offline-declaration LLM05, LLM06,
-and LLM08, and partial controlled-fixture LLM07 coverage only, with additional bounded
+and LLM08, partial controlled-fixture LLM07, and partial offline structured-claim LLM09
+coverage only, with additional bounded
 Kitchen Sink breadth in LLM01/LLM02/LLM07. The active partial category count is
-exactly 8/10; this is not full runtime OWASP coverage.
+exactly 9/10; this is not full runtime OWASP coverage. LLM10 remains inactive.
+The Reliable/Kitchen Sink public plan case counts remain 20/40.
 Modes may use different bounded operational limits;
 both remain subject to scope,
 request/rate/concurrency/duration ceilings, redaction, cleanup, evidence, and

@@ -1,0 +1,11 @@
+{
+  "schema_version": "ai-scan-misinformation-manifest-v1",
+  "context_ref": "context.fixture",
+  "cases": [{
+    "case_ref": "case.matched",
+    "ground_truth_snapshot_ref": "snapshot.current",
+    "observed_snapshot_ref": "snapshot.current",
+    "expected_claims": [{"claim_ref": "claim.primary", "source_ref": "source.primary", "value_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+    "observed_claims": [{"claim_ref": "claim.primary", "source_ref": "source.primary", "value_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "citation_present": true}]
+  }]
+}

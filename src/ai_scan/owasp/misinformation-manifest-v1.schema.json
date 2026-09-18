@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://electricentropy.com/schemas/ai-scan-misinformation-v1",
+  "$comment": "Structural preflight only. Runtime additionally enforces unique case_ref identities, unique claim_ref identities separately in each claim array, and at most 1024 total expected plus observed claims. Strict JSON, bounded stable-file checks, and deterministic comparisons are runtime requirements; references are never resolved.",
+  "type": "object", "additionalProperties": false,
+  "required": ["cases", "context_ref", "schema_version"],
+  "properties": {
+    "schema_version": {"const": "ai-scan-misinformation-manifest-v1"},
+    "context_ref": {"type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])"},
+    "cases": {
+      "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["case_ref", "expected_claims", "ground_truth_snapshot_ref", "observed_claims", "observed_snapshot_ref"],
+        "properties": {
+          "case_ref": {"type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])"},
+          "ground_truth_snapshot_ref": {"type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])"},
+          "observed_snapshot_ref": {"type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])"},
+          "expected_claims": {
+            "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["claim_ref", "source_ref", "value_sha256"],
+              "properties": {
+                "claim_ref": {"type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])"},
+                "source_ref": {"type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])"},
+                "value_sha256": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}(?![\\s\\S])"}
+              }
+            }
+          },
+          "observed_claims": {
+            "type": "array", "minItems": 0, "maxItems": 64, "uniqueItems": true,
+            "items": {
+              "type": "object", "additionalProperties": false,
+              "required": ["citation_present", "claim_ref", "source_ref", "value_sha256"],
+              "properties": {
+                "claim_ref": {"type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])"},
+                "source_ref": {"type": "string", "minLength": 3, "maxLength": 64, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])"},
+                "value_sha256": {"type": "string", "minLength": 64, "maxLength": 64, "pattern": "^[0-9a-f]{64}(?![\\s\\S])"},
+                "citation_present": {"type": "boolean"}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

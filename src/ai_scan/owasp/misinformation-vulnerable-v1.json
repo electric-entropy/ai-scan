@@ -1,0 +1,44 @@
+{
+  "schema_version": "ai-scan-misinformation-manifest-v1",
+  "context_ref": "context.fixture",
+  "cases": [
+    {
+      "case_ref": "case.missing",
+      "ground_truth_snapshot_ref": "snapshot.current",
+      "observed_snapshot_ref": "snapshot.current",
+      "expected_claims": [{"claim_ref": "claim.primary", "source_ref": "source.primary", "value_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+      "observed_claims": []
+    },
+    {
+      "case_ref": "case.value",
+      "ground_truth_snapshot_ref": "snapshot.current",
+      "observed_snapshot_ref": "snapshot.current",
+      "expected_claims": [{"claim_ref": "claim.primary", "source_ref": "source.primary", "value_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+      "observed_claims": [{"claim_ref": "claim.primary", "source_ref": "source.primary", "value_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "citation_present": true}]
+    },
+    {
+      "case_ref": "case.source",
+      "ground_truth_snapshot_ref": "snapshot.current",
+      "observed_snapshot_ref": "snapshot.current",
+      "expected_claims": [{"claim_ref": "claim.primary", "source_ref": "source.primary", "value_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+      "observed_claims": [{"claim_ref": "claim.primary", "source_ref": "source.primary", "value_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "citation_present": false}]
+    },
+    {
+      "case_ref": "case.unexpected",
+      "ground_truth_snapshot_ref": "snapshot.current",
+      "observed_snapshot_ref": "snapshot.current",
+      "expected_claims": [{"claim_ref": "claim.primary", "source_ref": "source.primary", "value_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+      "observed_claims": [
+        {"claim_ref": "claim.primary", "source_ref": "source.primary", "value_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "citation_present": true},
+        {"claim_ref": "claim.extra", "source_ref": "source.primary", "value_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "citation_present": true}
+      ]
+    },
+    {
+      "case_ref": "case.snapshot",
+      "ground_truth_snapshot_ref": "snapshot.current",
+      "observed_snapshot_ref": "snapshot.other",
+      "expected_claims": [{"claim_ref": "claim.primary", "source_ref": "source.primary", "value_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}],
+      "observed_claims": [{"claim_ref": "claim.primary", "source_ref": "source.primary", "value_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "citation_present": true}]
+    }
+  ]
+}

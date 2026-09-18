@@ -121,14 +121,16 @@ def test_owasp_docs_describe_current_mode_breadth_and_limits_truthfully() -> Non
     assert (
         "active llm01, llm02, partial offline-manifest llm03, partial active "
         "controlled-retrieval-protocol llm04, partial offline-declaration llm05, llm06, "
-        "and llm08, and partial controlled-fixture llm07 coverage only"
+        "and llm08, partial controlled-fixture llm07, and partial offline structured-claim llm09 "
+        "coverage only"
     ) in normalized
     assert "supply-chain-audit --manifest file" in normalized
     assert "data-poisoning-audit --target url" in normalized
     assert "output-handling-audit --manifest file" in normalized
     assert "agency-audit --manifest file" in normalized
     assert "vector-audit --manifest file" in normalized
-    assert "8/10" in normalized
+    assert "misinformation-audit --manifest file" in normalized
+    assert "9/10" in normalized
     assert "never imports, deserializes, loads, hashes, or executes model artifacts" in normalized
     assert "external service owns state and decides retrieval behavior" in normalized
     assert "model-weight poisoning" in normalized and "fine-tuning poisoning" in normalized
