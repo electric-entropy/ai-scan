@@ -19,7 +19,7 @@ import stat
 import sys
 from collections.abc import Callable, Sequence
 
-from ai_scan import agency
+from ai_scan import agency, vector
 from ai_scan.adapters import Adapter, AdapterError, ExtractionError, GenericHttpAdapter
 from ai_scan.adapters.registry import AdapterRegistry, default_registry
 from ai_scan.core.config import SUPPORTED_SCHEMAS, load_document, load_json_strict
@@ -350,6 +350,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_agency.add_argument("--manifest", required=True, help="Local declaration manifest JSON.")
     p_agency.add_argument("--format", choices=["human", "json"], default="human")
 
+    p_vector = subparsers.add_parser(
+        "vector-audit",
+        help=(
+            "Offline partial LLM08 vector/retrieval declaration assessment "
+            "(no execution or network)."
+        ),
+        description=(
+            "Offline declarations only; no vector-store, embedding, retrieval, "
+            "or runtime verification."
+        ),
+    )
+    p_vector.add_argument(
+        "--manifest", required=True, help="Local vector declaration manifest JSON."
+    )
+    p_vector.add_argument("--format", choices=["text", "json"], default="text")
+
     p_data_poisoning = subparsers.add_parser(
         "data-poisoning-audit",
         help=(
@@ -440,6 +456,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_output_handling_audit(args)
     if args.command == "agency-audit":
         return _cmd_agency_audit(args)
+    if args.command == "vector-audit":
+        return _cmd_vector_audit(args)
     if args.command == "data-poisoning-audit":
         return _cmd_data_poisoning_audit(args)
 
@@ -836,6 +854,18 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
                 raise ValueError("llm06_fixture_semantic_mismatch")
         return "schema and 2 fixtures valid"
 
+    def _llm08_vector_resources() -> str:
+        vector.load_schema_text(vector.load_manifest_file(
+            str(root.joinpath("owasp/vector-manifest-v1.schema.json"))
+        ))
+        for name, expected in (("secure", "passed"), ("vulnerable", "finding")):
+            result = vector.audit_manifest_text(vector.load_manifest_file(
+                str(root.joinpath(f"owasp/vector-{name}-v1.json"))
+            ))
+            if result.status != expected:
+                raise ValueError("llm08_fixture_semantic_mismatch")
+        return "schema and 2 fixtures valid"
+
     record("metadata", _metadata)
     record("py.typed", _py_typed)
     record("schemas", _schemas)
@@ -847,6 +877,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     record("owasp-llm04-data-poisoning-protocol", _llm04_data_poisoning_protocol)
     record("owasp-llm05-output-handling-resources", _llm05_output_handling_resources)
     record("owasp-llm06-agency-resources", _llm06_agency_resources)
+    record("owasp-llm08-vector-resources", _llm08_vector_resources)
 
     healthy = all(bool(check["ok"]) for check in checks)
     if args.json:
@@ -899,6 +930,17 @@ def _cmd_agency_audit(args: argparse.Namespace) -> int:
         print("invalid: llm06_manifest_invalid")
         return EXIT_RUNTIME_ERROR
     print(agency.render_json(result) if args.format == "json" else agency.render_human(result))
+    return EXIT_CONFIRMED_FINDING if result.status == "finding" else EXIT_OK
+
+
+def _cmd_vector_audit(args: argparse.Namespace) -> int:
+    """Assess vector declarations without constructing transport or resolving references."""
+    try:
+        result = vector.audit_manifest_file(args.manifest)
+    except vector.VectorManifestError:
+        print("invalid: llm08_manifest_invalid")
+        return EXIT_RUNTIME_ERROR
+    print(vector.render_json(result) if args.format == "json" else vector.render_text(result))
     return EXIT_CONFIRMED_FINDING if result.status == "finding" else EXIT_OK
 
 

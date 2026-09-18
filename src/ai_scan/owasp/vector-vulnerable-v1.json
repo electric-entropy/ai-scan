@@ -1,0 +1,87 @@
+{
+  "embedding": {
+    "dimensions": 1536,
+    "distance": "cosine",
+    "index_dimensions": 1536,
+    "index_version_ref": "index.primary",
+    "migration": "reindex",
+    "model_ref": "model.primary",
+    "normalization": "unit",
+    "pinned": false,
+    "reject_incompatible": true,
+    "rollback_metadata": true,
+    "rollback_ref": "rollback.primary",
+    "version_ref": "version.primary"
+  },
+  "ingestion": {
+    "atomic_promotion": true,
+    "duplicate_policy": "reject",
+    "lineage": "none",
+    "quarantine": true,
+    "source_refs": [
+      "source.primary"
+    ]
+  },
+  "lifecycle": {
+    "backup_hours": 168,
+    "cache_hours": 24,
+    "index_hours": 25,
+    "orphan_detection": true,
+    "rebuild": "accepted_lineage",
+    "replica_hours": 24,
+    "restore_namespace": true,
+    "tombstones": true
+  },
+  "operations": {
+    "audit_events": "opaque",
+    "cache_index": false,
+    "cache_model": true,
+    "cache_partition": true,
+    "cache_scope": true,
+    "concurrency": 4,
+    "failure_scope": "closed",
+    "storage_mb": 1024,
+    "storage_partition": true,
+    "timeout_seconds": 30
+  },
+  "poisoning": {
+    "anomaly": true,
+    "chunk_provenance": true,
+    "contributions_per_source": 100,
+    "near_duplicate": true,
+    "rate_per_minute": 60,
+    "recovery": "accepted_lineage",
+    "trust_tiers": "uniform"
+  },
+  "privacy": {
+    "debug_dumps": false,
+    "log_bodies": false,
+    "removed_classes": [
+      "credentials",
+      "pii"
+    ],
+    "retention": "disabled",
+    "retention_hours": 0,
+    "vector_export": false
+  },
+  "retrieval": {
+    "candidates": 100,
+    "empty_filter": "reject",
+    "metadata_filters": "exact",
+    "minimum_score": 75,
+    "query_bytes": 4096,
+    "result_bytes": 65536,
+    "threshold_policy": "minimum",
+    "top_k": 21
+  },
+  "schema_version": "ai-scan-vector-manifest-v1",
+  "scope": {
+    "collection_ref": "collection.primary",
+    "context_ref": "ctx.primary",
+    "cross_context_fallback": false,
+    "global_search": false,
+    "query_context_ref": "ctx.primary",
+    "server_bound": false,
+    "tenant_ref": "tenant.primary"
+  }
+}

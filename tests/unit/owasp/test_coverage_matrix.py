@@ -74,7 +74,9 @@ def test_current_state_is_honest_about_active_end_to_end_coverage() -> None:
     assert categories["LLM06"].scaffolding_only is False
     assert categories["LLM07"].current_active_cli_coverage is True
     assert categories["LLM07"].scaffolding_only is False
-    inactive_ids = ("LLM08", "LLM09", "LLM10")
+    assert categories["LLM08"].current_active_cli_coverage is True
+    assert categories["LLM08"].scaffolding_only is False
+    inactive_ids = ("LLM09", "LLM10")
     for category_id in inactive_ids:
         category = categories[category_id]
         assert category.current_active_cli_coverage is False
@@ -90,6 +92,8 @@ def test_current_state_is_honest_about_active_end_to_end_coverage() -> None:
         in categories["LLM07"].active_coverage_source
     )
     assert "live-only" in categories["LLM07"].active_coverage_source
+    assert "vector-audit" in categories["LLM08"].active_coverage_source
+    assert "declaration" in categories["LLM08"].active_coverage_source
 
 
 def test_matrix_identifiers_are_reserved_not_runtime_mappings() -> None:
@@ -117,7 +121,7 @@ def test_reliable_and_kitchen_sink_breadth_differ_without_full_claims() -> None:
     summary = coverage_summary(matrix)
     assert summary["categories_total"] == 10
     assert summary["full_coverage_claim_allowed"] is False
-    assert summary["active_end_to_end_categories"] == 7
+    assert summary["active_end_to_end_categories"] == 8
     assert summary["active_end_to_end_categories"] < summary["categories_total"]
 
 
@@ -409,7 +413,7 @@ def test_duplicate_json_keys_are_rejected() -> None:
 
 def test_contradictory_active_or_full_states_are_rejected() -> None:
     def unsupported_marked_active(doc: dict[str, object]) -> None:
-        cat = doc["categories"][7]  # LLM08 remains inactive
+        cat = doc["categories"][8]  # LLM09 remains inactive
         cat["current_active_cli_coverage"] = True
 
     def full_claim_from_partial(doc: dict[str, object]) -> None:
@@ -417,7 +421,7 @@ def test_contradictory_active_or_full_states_are_rejected() -> None:
         cat["full_coverage_claim_allowed"] = True
 
     def finding_without_active_coverage(doc: dict[str, object]) -> None:
-        cat = doc["categories"][7]
+        cat = doc["categories"][8]
         cat["allowed_outcomes"] = ["finding", "tested"]
 
     for mutator in (

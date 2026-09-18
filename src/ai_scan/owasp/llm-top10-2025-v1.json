@@ -514,31 +514,33 @@
       ]
     },
     {
-      "active_coverage_source": "rag-isolation prompt overlap exists, but vector/embedding behavior is not current active end-to-end coverage",
+      "active_coverage_source": "public vector-audit CLI performs partial offline LLM08 vector/embedding/retrieval declaration assessment only; no vector store, embedding model, index, retrieval path, tenant isolation, or runtime behavior is verified",
       "allowed_outcomes": [
+        "tested",
+        "finding",
         "not_tested",
         "blocked",
         "inconclusive",
         "not_applicable"
       ],
       "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
-      "current_active_cli_coverage": false,
+      "current_active_cli_coverage": true,
       "deterministic_evidence": [
-        "Namespace/provenance violation or controlled retrieval manipulation with deterministic IDs"
+        "Fixed declaration rules produce opaque context references and stable rule identifiers across scope partitioning, ingestion provenance, embedding lineage, retrieval controls, data minimization, lifecycle, poisoning resistance, and isolation/operations"
       ],
       "full_coverage_claim_allowed": false,
       "id": "LLM08",
       "known_limitations": [
-        "Phase 2B work required before active end-to-end coverage",
-        "Prompt/template overlap or library scaffolding is not counted as active coverage",
-        "unsupported by current CLI as a finding-producing category"
+        "Partial offline declaration/configuration audit only; no full LLM08 coverage claim is allowed",
+        "No live vector-store exploitation, retrieval validation, embedding inversion, tenant escape proof, or proof that declarations are true",
+        "Prompt/template overlap and dormant RAG attack packs are not counted as LLM08 coverage"
       ],
       "mode_breadth": {
         "kitchen_sink": [
-          "planned poisoning/inversion/extraction variants"
+          "same offline vector-audit declaration rules as Reliable; no runtime vector, embedding, retrieval, inversion, or tenant-escape coverage"
         ],
         "reliable": [
-          "planned namespace isolation and retrieval manipulation fixtures"
+          "vector-audit: bounded offline declaration checks for scope partitioning, ingestion provenance, embedding/model lineage, retrieval controls, data minimization/privacy, lifecycle, poisoning resistance, and isolation/operations"
         ]
       },
       "name": "Vector and Embedding Weaknesses",
@@ -547,10 +549,10 @@
       ],
       "phase_2b_planned": true,
       "prerequisites": [
-        "Operator can seed/query controlled vector or retrieval fixtures"
+        "A strict ai-scan-vector-manifest-v1 JSON declaration is available as a local regular file"
       ],
       "required_controls": [
-        "Clean namespace and benign retrieval controls"
+        "Closed schema, cross-field validation, fixed thresholds, no reference resolution, no network, and independent secure/vulnerable declaration fixtures"
       ],
       "reserved_remediation_id": "ai-scan.owasp.LLM08.remediation",
       "reserved_report_ids": [
@@ -558,31 +560,31 @@
         "ai-scan.owasp.LLM08.evidence"
       ],
       "reserved_sarif_rule_id": "ai-scan.owasp.LLM08.rule",
-      "scaffolding_only": true,
+      "scaffolding_only": false,
       "supported_scenarios": [
         {
-          "active_cli": false,
+          "active_cli": true,
           "controls": [
-            "Clean namespace and benign retrieval controls"
+            "Closed schema, cross-field validation, fixed thresholds, no reference resolution, no network, and independent secure/vulnerable declaration fixtures"
           ],
-          "evidence": "Namespace/provenance violation or controlled retrieval manipulation with deterministic IDs",
-          "id": "scenario.llm08.reliable",
-          "name": "Reliable Vector and Embedding Weaknesses scenario slice",
-          "status": "not_tested"
+          "evidence": "vector-audit findings bind fixed rule identifiers to document digest and opaque context references only",
+          "id": "scenario.llm08.offline-declaration",
+          "name": "Partial offline Vector and Embedding Weaknesses declaration assessment",
+          "status": "tested"
         },
         {
           "active_cli": false,
           "controls": [
-            "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
+            "No runtime proof from declaration checks or prompt/RAG attack-pack overlap"
           ],
-          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
-          "id": "scenario.llm08.kitchen-sink",
-          "name": "Kitchen Sink Vector and Embedding Weaknesses broader scenario slice",
+          "evidence": "Vector-store exploitation, retrieval validation, embedding inversion, tenant escape, deployed isolation, and declaration truth remain untested",
+          "id": "scenario.llm08.runtime-gaps",
+          "name": "Runtime vector and embedding weakness gaps",
           "status": "not_tested"
         }
       ],
       "target_capabilities": [
-        "Vector database, embedding index, RAG namespace, retrieval provenance, or embedding endpoint is exposed"
+        "Local manifest declares vector/embedding/retrieval controls for one context"
       ]
     },
     {
@@ -730,7 +732,7 @@
       ]
     }
   ],
-  "content_sha256": "1c5588c99102ea81e8409c52fc21bbfe953845449fed9cc07e1b60811d6aa4da",
+  "content_sha256": "6af8b3719974d64035320f94769aff7ff1af3a30c0279ffc8c794c95747f74f9",
   "coverage_arithmetic": {
     "aggregate_full_coverage_claim_allowed": false,
     "blocked_inconclusive_not_tested_do_not_count_as_tested": true,

@@ -1,0 +1,146 @@
+{
+  "$comment": "Draft 2020-12 structural preflight; finite integral JSON numbers are integers. Runtime validation additionally enforces distinct tenant/context/collection refs, query_context_ref == context_ref, dimensions == index_dimensions, candidates >= top_k, result_bytes >= query_bytes, backup_hours >= index_hours, and rate_per_minute <= contributions_per_source. Strict JSON parsing and bounded stable-file input checks are mandatory outside this schema.",
+  "$id": "https://electricentropy.com/schemas/ai-scan-vector-v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {"properties": {"embedding": {"properties": {"distance": {"const": "dot"}}}}},
+      "then": {"properties": {"embedding": {"properties": {"normalization": {"const": "unit"}}}}}
+    },
+    {
+      "if": {"properties": {"retrieval": {"properties": {"threshold_policy": {"const": "disabled"}}}}},
+      "then": {"properties": {"retrieval": {"properties": {"minimum_score": {"const": 0}}}}},
+      "else": {"properties": {"retrieval": {"properties": {"minimum_score": {"minimum": 1}}}}}
+    },
+    {
+      "if": {"properties": {"privacy": {"properties": {"retention": {"const": "disabled"}}}}},
+      "then": {"properties": {"privacy": {"properties": {"retention_hours": {"const": 0}}}}},
+      "else": {"properties": {"privacy": {"properties": {"retention_hours": {"minimum": 1}}}}}
+    }
+  ],
+  "properties": {
+    "embedding": {
+      "additionalProperties": false,
+      "properties": {
+        "dimensions": {"maximum": 65536, "minimum": 1, "type": "integer"},
+        "distance": {"enum": ["cosine", "dot", "euclidean"], "type": "string"},
+        "index_dimensions": {"maximum": 65536, "minimum": 1, "type": "integer"},
+        "index_version_ref": {"maxLength": 64, "minLength": 3, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])", "type": "string"},
+        "migration": {"enum": ["reindex", "blocked", "in_place"], "type": "string"},
+        "model_ref": {"maxLength": 64, "minLength": 3, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])", "type": "string"},
+        "normalization": {"enum": ["unit", "none"], "type": "string"},
+        "pinned": {"type": "boolean"},
+        "reject_incompatible": {"type": "boolean"},
+        "rollback_metadata": {"type": "boolean"},
+        "rollback_ref": {"maxLength": 64, "minLength": 3, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])", "type": "string"},
+        "version_ref": {"maxLength": 64, "minLength": 3, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])", "type": "string"}
+      },
+      "required": ["dimensions", "distance", "index_dimensions", "index_version_ref", "migration", "model_ref", "normalization", "pinned", "reject_incompatible", "rollback_metadata", "rollback_ref", "version_ref"],
+      "type": "object"
+    },
+    "ingestion": {
+      "additionalProperties": false,
+      "properties": {
+        "atomic_promotion": {"type": "boolean"},
+        "duplicate_policy": {"enum": ["reject", "digest_upsert", "unchecked"], "type": "string"},
+        "lineage": {"enum": ["digest", "signature", "immutable", "none"], "type": "string"},
+        "quarantine": {"type": "boolean"},
+        "source_refs": {"items": {"maxLength": 64, "minLength": 3, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])", "type": "string"}, "maxItems": 32, "minItems": 1, "uniqueItems": true, "type": "array"}
+      },
+      "required": ["atomic_promotion", "duplicate_policy", "lineage", "quarantine", "source_refs"],
+      "type": "object"
+    },
+    "lifecycle": {
+      "additionalProperties": false,
+      "properties": {
+        "backup_hours": {"maximum": 8760, "minimum": 1, "type": "integer"},
+        "cache_hours": {"maximum": 8760, "minimum": 1, "type": "integer"},
+        "index_hours": {"maximum": 8760, "minimum": 1, "type": "integer"},
+        "orphan_detection": {"type": "boolean"},
+        "rebuild": {"enum": ["accepted_lineage", "all_sources"], "type": "string"},
+        "replica_hours": {"maximum": 8760, "minimum": 1, "type": "integer"},
+        "restore_namespace": {"type": "boolean"},
+        "tombstones": {"type": "boolean"}
+      },
+      "required": ["backup_hours", "cache_hours", "index_hours", "orphan_detection", "rebuild", "replica_hours", "restore_namespace", "tombstones"],
+      "type": "object"
+    },
+    "operations": {
+      "additionalProperties": false,
+      "properties": {
+        "audit_events": {"enum": ["opaque", "disabled", "bodies"], "type": "string"},
+        "cache_index": {"type": "boolean"},
+        "cache_model": {"type": "boolean"},
+        "cache_partition": {"type": "boolean"},
+        "cache_scope": {"type": "boolean"},
+        "concurrency": {"maximum": 1024, "minimum": 1, "type": "integer"},
+        "failure_scope": {"enum": ["closed", "global"], "type": "string"},
+        "storage_mb": {"maximum": 1000000, "minimum": 1, "type": "integer"},
+        "storage_partition": {"type": "boolean"},
+        "timeout_seconds": {"maximum": 86400, "minimum": 1, "type": "integer"}
+      },
+      "required": ["audit_events", "cache_index", "cache_model", "cache_partition", "cache_scope", "concurrency", "failure_scope", "storage_mb", "storage_partition", "timeout_seconds"],
+      "type": "object"
+    },
+    "poisoning": {
+      "additionalProperties": false,
+      "properties": {
+        "anomaly": {"type": "boolean"},
+        "chunk_provenance": {"type": "boolean"},
+        "contributions_per_source": {"maximum": 100000, "minimum": 1, "type": "integer"},
+        "near_duplicate": {"type": "boolean"},
+        "rate_per_minute": {"maximum": 100000, "minimum": 1, "type": "integer"},
+        "recovery": {"enum": ["accepted_lineage", "unrestricted"], "type": "string"},
+        "trust_tiers": {"enum": ["enforced", "uniform"], "type": "string"}
+      },
+      "required": ["anomaly", "chunk_provenance", "contributions_per_source", "near_duplicate", "rate_per_minute", "recovery", "trust_tiers"],
+      "type": "object"
+    },
+    "privacy": {
+      "additionalProperties": false,
+      "properties": {
+        "debug_dumps": {"type": "boolean"},
+        "log_bodies": {"type": "boolean"},
+        "removed_classes": {"items": {"enum": ["credentials", "pii", "secrets"], "type": "string"}, "maxItems": 3, "uniqueItems": true, "type": "array"},
+        "retention": {"enum": ["disabled", "bounded"], "type": "string"},
+        "retention_hours": {"maximum": 8760, "minimum": 0, "type": "integer"},
+        "vector_export": {"type": "boolean"}
+      },
+      "required": ["debug_dumps", "log_bodies", "removed_classes", "retention", "retention_hours", "vector_export"],
+      "type": "object"
+    },
+    "retrieval": {
+      "additionalProperties": false,
+      "properties": {
+        "candidates": {"maximum": 100000, "minimum": 1, "type": "integer"},
+        "empty_filter": {"enum": ["reject", "global"], "type": "string"},
+        "metadata_filters": {"enum": ["exact", "none"], "type": "string"},
+        "minimum_score": {"maximum": 100, "minimum": 0, "type": "integer"},
+        "query_bytes": {"maximum": 10000000, "minimum": 1, "type": "integer"},
+        "result_bytes": {"maximum": 10000000, "minimum": 1, "type": "integer"},
+        "threshold_policy": {"enum": ["minimum", "disabled"], "type": "string"},
+        "top_k": {"maximum": 10000, "minimum": 1, "type": "integer"}
+      },
+      "required": ["candidates", "empty_filter", "metadata_filters", "minimum_score", "query_bytes", "result_bytes", "threshold_policy", "top_k"],
+      "type": "object"
+    },
+    "schema_version": {"const": "ai-scan-vector-manifest-v1"},
+    "scope": {
+      "additionalProperties": false,
+      "properties": {
+        "collection_ref": {"maxLength": 64, "minLength": 3, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])", "type": "string"},
+        "context_ref": {"maxLength": 64, "minLength": 3, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])", "type": "string"},
+        "cross_context_fallback": {"type": "boolean"},
+        "global_search": {"type": "boolean"},
+        "query_context_ref": {"maxLength": 64, "minLength": 3, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])", "type": "string"},
+        "server_bound": {"type": "boolean"},
+        "tenant_ref": {"maxLength": 64, "minLength": 3, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,15}(?![\\s\\S])", "type": "string"}
+      },
+      "required": ["collection_ref", "context_ref", "cross_context_fallback", "global_search", "query_context_ref", "server_bound", "tenant_ref"],
+      "type": "object"
+    }
+  },
+  "required": ["embedding", "ingestion", "lifecycle", "operations", "poisoning", "privacy", "retrieval", "schema_version", "scope"],
+  "type": "object"
+}

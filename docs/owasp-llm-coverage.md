@@ -20,7 +20,7 @@ Those reserved identifiers are not emitted by the current report or SARIF
 runtime surfaces; current JSON reports leave `remediation` and
 `framework_mappings` empty, and current SARIF rule IDs remain finding-family IDs.
 
-Current honest summary after Phase 2B7:
+Current honest summary after Phase 2B8:
 
 - LLM01:2025 Prompt Injection — partial current active CLI coverage through the
   public direct-injection packs. Reliable plans compile 12 cases from
@@ -138,9 +138,18 @@ Current honest summary after Phase 2B7:
   resume, bundle, and replay are live-only for LLM07 and never accept persisted
   marker-dependent trials as authoritative evidence. Arbitrary production prompt
   inspection, unknown prompt recovery, and proof of absence remain out of scope.
-- LLM08:2025 Vector and Embedding Weaknesses — no current vector/embedding
-  behavior coverage; RAG prompt overlap does not count without namespace,
-  provenance, retrieval, or embedding evidence.
+- LLM08:2025 Vector and Embedding Weaknesses — partial offline declaration
+  coverage through `ai-scan vector-audit --manifest FILE`. Fixed rules assess
+  declared scope partitioning, ingestion provenance/integrity, embedding/model
+  lineage, retrieval controls, data minimization/privacy, lifecycle, poisoning
+  resistance, and isolation/operations controls. Only the selected bounded
+  regular non-symlink manifest is read; declared documents, embeddings, indexes,
+  model files, plugins, URLs, commands, archives, and code are never opened,
+  imported, fetched, connected to, or executed. “Declaration checks passed” means
+  only that declarations passed fixed checks. No vector-store exploitation,
+  retrieval validation, embedding inversion, tenant escape proof, runtime
+  isolation, or proof that declarations are true was performed. Dormant RAG
+  attack packs and prompt/template overlap do not establish LLM08 runtime coverage.
 - LLM09:2025 Misinformation — no current misinformation coverage; subjective
   disagreement is unsupported and cannot be reported as a vulnerability.
 - LLM10:2025 Unbounded Consumption — no current unbounded-consumption coverage;
@@ -151,10 +160,10 @@ Coverage arithmetic is conservative: the denominator is the ten OWASP categories
 `not_applicable` is excluded and separately reported; `blocked`, `inconclusive`,
 and `not_tested` never increase tested coverage. Current public coverage now has
 active LLM01, LLM02, partial offline-manifest LLM03, partial active
-controlled-retrieval-protocol LLM04, partial offline-declaration LLM05 and LLM06,
-and partial controlled-fixture LLM07 coverage only, with additional bounded
+controlled-retrieval-protocol LLM04, partial offline-declaration LLM05, LLM06,
+and LLM08, and partial controlled-fixture LLM07 coverage only, with additional bounded
 Kitchen Sink breadth in LLM01/LLM02/LLM07. The active partial category count is
-exactly 7/10; this is not full runtime OWASP coverage.
+exactly 8/10; this is not full runtime OWASP coverage.
 Modes may use different bounded operational limits;
 both remain subject to scope,
 request/rate/concurrency/duration ceilings, redaction, cleanup, evidence, and
@@ -164,3 +173,46 @@ AI-Scan does not claim full OWASP coverage, OWASP compliance, or comprehensive
 LLM01-LLM10 testing from this matrix. Such a claim remains blocked until
 every category has real active CLI wiring, deterministic evidence, required
 negative controls, local end-to-end fixtures, and independently verified reports.
+
+### LLM08 manifest preflight and identities
+
+`vector-manifest-v1.schema.json` is a standard Draft 2020-12 structural preflight
+contract, not a claim of full schema/runtime domain equality. It enforces closed
+required fields, types, enum membership, bounds, unique arrays, whole-string
+opaque-reference syntax (including rejection of trailing newlines), and these
+representable conditional relations:
+
+- `distance == dot` requires `normalization == unit`.
+- `threshold_policy == disabled` requires `minimum_score == 0`;
+  `minimum` requires a positive score.
+- `retention == disabled` iff `retention_hours == 0`;
+  `bounded` requires positive hours.
+
+Runtime validation is additionally authoritative for dynamic relations that
+standard JSON Schema does not directly express: tenant/context/collection refs
+must be distinct; `query_context_ref == context_ref`;
+`dimensions == index_dimensions`; `candidates >= top_k`;
+`result_bytes >= query_bytes`; `backup_hours >= index_hours`; and
+`rate_per_minute <= contributions_per_source`. Schema-valid documents can still
+fail these semantic checks. Strict JSON parsing rejects duplicate keys and
+non-finite/overflow numbers before validation. Input size, UTF-8, stable-file,
+and non-symlink checks are separate input-boundary requirements, not schema claims.
+
+Integer fields follow JSON Schema numeric semantics: finite integral literals
+such as `8`, `8.0`, and `8e0` are accepted and canonicalized to Python integers
+before semantic checks and rule evaluation. Fractional literals are checked
+losslessly (not rounded through binary floating point); booleans, strings,
+non-finite values, and out-of-bound values reject. The manifest digest still
+identifies the exact original UTF-8 text, not a normalized document.
+
+The result and each finding retain the same shared `context_ref`. Its SHA-256
+input is `ai-scan-llm08-context-ref-v1` followed by a NUL and the canonical compact
+ASCII JSON tuple `["v1", tenant_ref, context_ref, collection_ref]` in that order.
+Each finding also exposes a separate `finding_ref`, using the distinct
+`ai-scan-llm08-finding-ref-v1` domain followed by a NUL and that tuple with the
+exact public rule ID appended. References use `llm08-context-` or
+`llm08-finding-` followed by 64 lowercase hex characters (78 characters total).
+They are deterministic, independent of manifest key order, and contain no source
+identifier text. They are grouping identities, not keyed confidentiality proofs:
+predictable labels can be guessed offline. Rule IDs, reasons, remediations, and
+finding order remain fixed. Both JSON and text findings include both references.

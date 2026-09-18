@@ -46,6 +46,9 @@ EXPECTED_DATA = [
     "owasp/agency-manifest-v1.schema.json",
     "owasp/agency-secure-v1.json",
     "owasp/agency-vulnerable-v1.json",
+    "owasp/vector-manifest-v1.schema.json",
+    "owasp/vector-secure-v1.json",
+    "owasp/vector-vulnerable-v1.json",
     "reporting/templates/report.html",
 ]
 EXPECTED_SDIST_FILES = [
@@ -149,6 +152,21 @@ def test_fresh_wheel_import_version_matches_metadata(built_dists, tmp_path) -> N
                 "agency-audit",
                 "--manifest",
                 str(Path(location) / f"agency-{name}-v1.json"),
+                "--format",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert smoke.returncode == code, smoke.stdout + smoke.stderr
+        assert json.loads(smoke.stdout)["status"] == status
+    for name, code, status in (("secure", 0, "passed"), ("vulnerable", 3, "finding")):
+        smoke = subprocess.run(
+            [
+                str(executable),
+                "vector-audit",
+                "--manifest",
+                str(Path(location) / f"vector-{name}-v1.json"),
                 "--format",
                 "json",
             ],

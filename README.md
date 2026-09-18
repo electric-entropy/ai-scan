@@ -56,12 +56,13 @@ ai-scan doctor           [--json]
 ai-scan owasp-coverage   [--format summary|json]
 ai-scan supply-chain-audit    --manifest FILE [--format human|json]
 ai-scan data-poisoning-audit  --target URL [--format human|json]
+ai-scan vector-audit          --manifest FILE [--format text|json]
 ```
 
 `bundle validate|replay`, the top-level `replay`, `report`, `baseline`,
 `validate-config`, `packs`, `adapters`, `doctor`, `owasp-coverage`, and
-`supply-chain-audit` are all **offline** — they construct no transport and touch
-no network. `data-poisoning-audit` is active: it contacts only the exact
+`supply-chain-audit`, and `vector-audit` are all **offline** — they construct no
+transport and touch no network. `data-poisoning-audit` is active: it contacts only the exact
 operator-supplied `--target` URL through the hardened scope-safe transport.
 
 Active commands (`fingerprint`, `inject`, `assess`, `run`) run **unattended** —
@@ -200,7 +201,24 @@ marker in system-prompt state before scanning. Confirmation requires exact
 eligible final assistant marker text plus matched clean controls and is
 live-only; arbitrary production prompt inspection, unknown prompt recovery, and
 proof of absence remain out of scope.
-The active partial category count is 7/10, not full coverage or compliance.
+LLM08 has only partial offline declaration coverage through
+`ai-scan vector-audit --manifest FILE`. It deterministically assesses declared
+scope partitioning, ingestion provenance/integrity, embedding/model lineage,
+retrieval controls, data minimization/privacy, lifecycle, poisoning resistance,
+and isolation/operations controls. Only the selected bounded manifest is opened;
+declared documents, embeddings, indexes, model files, plugins, URLs, commands,
+archives, and code are never opened, imported, fetched, connected to, or
+executed. A clean outcome means “declaration checks passed” only. No vector-store
+exploitation, retrieval validation, embedding inversion, tenant escape proof,
+runtime isolation, or proof that declarations are true was performed.
+The shipped Draft 2020-12 vector manifest schema is structural preflight, not
+the full runtime domain contract. Runtime validation additionally enforces
+dynamic cross-field relations; see the [LLM08 contract](docs/owasp-llm-coverage.md#llm08-manifest-preflight-and-identities).
+Finite integral JSON numbers such as `8.0` and `8e0` are accepted as integers;
+fractional, non-finite, boolean, string, and out-of-range values are rejected.
+Results retain a shared opaque `context_ref` bound to tenant/context/collection
+and a separate rule-bound `finding_ref` for each finding, without source labels.
+The active partial category count is 8/10, not full coverage or compliance.
 Prompt-only LLM06 tool-abuse packs do not count as LLM06 runtime coverage. Matrix identifiers
 for remediation/report/SARIF are reserved contract identifiers for future
 integration, not values emitted by the current report or SARIF renderers.
