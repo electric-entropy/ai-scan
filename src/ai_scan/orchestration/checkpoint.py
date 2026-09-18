@@ -326,6 +326,7 @@ def _bind_completed_to_plan(
     from ai_scan.orchestration.evidence import (
         CaseEvidence,
         EvidenceError,
+        is_marker_dependent_case,
         resolve_plan_packs,
         verify_records,
     )
@@ -354,6 +355,7 @@ def _bind_completed_to_plan(
         )
     except (ValueError, CheckpointError) as exc:
         raise CheckpointError("checkpoint run identity is malformed") from exc
+    packs = resolve_plan_packs(typed_plan)
     if checkpoint.request_count > plan.limits.max_physical_requests:  # type: ignore[attr-defined]
         raise CheckpointError("request_count exceeds the plan's physical request budget")
     evidence: list[CaseEvidence] = []
@@ -361,6 +363,8 @@ def _bind_completed_to_plan(
         case = plan_cases.get(case_id)
         if case is None:
             raise CheckpointError("completed record references a case not in the plan")
+        if is_marker_dependent_case(packs[case.pack_id], case):
+            raise CheckpointError("marker-dependent evidence is live-only and not resumable")
         if record.get("family") != case.family or record.get("kind") != case.kind:
             raise CheckpointError("completed record does not match its plan case")
         expected = case.template if case.kind == "control" else case.template.replace(
@@ -384,7 +388,7 @@ def _bind_completed_to_plan(
         try:
             verified = verify_records(
                 typed_plan,
-                resolve_plan_packs(typed_plan),
+                packs,
                 canary,
                 evidence,
                 disclosure_marker,
@@ -409,6 +413,8 @@ def _bind_completed_to_plan(
         case = plan_cases.get(case_id)
         if case is None:
             raise CheckpointError("progress record references a case not in the plan")
+        if is_marker_dependent_case(packs[case.pack_id], case):
+            raise CheckpointError("marker-dependent progress evidence is live-only")
         if record.get("kind") != case.kind or record.get("family") != case.family:
             raise CheckpointError("progress record does not match its plan case")
         if record.get("prompt") != rendered_prompt(case, canary):
@@ -432,6 +438,8 @@ def _bind_completed_to_plan(
         case = plan_cases.get(inf["case_id"])
         if case is None:
             raise CheckpointError("in-flight attempt references a case not in the plan")
+        if is_marker_dependent_case(packs[case.pack_id], case):
+            raise CheckpointError("marker-dependent in-flight evidence is live-only")
         if (
             inf.get("kind") != case.kind
             or inf.get("family") != case.family

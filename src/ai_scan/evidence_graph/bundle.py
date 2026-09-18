@@ -32,6 +32,7 @@ from ai_scan.orchestration.evidence import (
     EvidenceError,
     VerifiedEvidence,
     derive_records,
+    is_marker_dependent_case,
     resolve_plan_packs,
     trial_to_dict,
     verify_records,
@@ -296,6 +297,14 @@ def build_bundle(
     if disclosure_marker is not None and disclosure_marker != canary:
         secrets = secrets | {disclosure_marker}
     identity = RunIdentity.create(plan.digest, canary, disclosure_marker)
+    packs = resolve_plan_packs(plan)
+    cases = {case.case_id: case for case in plan.cases}
+    if any(
+        (case := cases.get(record.case_id)) is not None
+        and is_marker_dependent_case(packs[case.pack_id], case)
+        for record in records
+    ):
+        raise BundleError("marker-dependent evidence is live-only and cannot be bundled")
     content: dict[str, Any] = {
         "bundle_version": BUNDLE_VERSION,
         "metadata": {
@@ -322,7 +331,6 @@ def build_bundle(
     # re-derives from — exactly the redacted evidence that is exported.
     scrubbed: dict[str, Any] = scrub_structure(content, secrets)
     try:
-        packs = resolve_plan_packs(plan)
         evidence = _case_evidence(scrubbed["records"])
         verified = derive_records(
             plan,
@@ -416,7 +424,9 @@ class BundleCollector:
 
 def dump_bundle(bundle: Bundle) -> str:
     """Deterministic JSON rendering of a bundle (stable key order)."""
-    data = json.loads(bundle_snapshot(bundle))
+    snapshot = bundle_snapshot(bundle)
+    load_bundle(snapshot)
+    data = json.loads(snapshot)
     try:
         RunIdentity.verify_persisted(
             data.get("plan_digest"), data.get("canary_commitment"),
@@ -495,10 +505,18 @@ def load_bundle(text: str) -> Bundle:
     # Every record must re-derive from its own persisted trials under the shared
     # evidence contract (plan binding, repeatability, matched clean controls).
     records = _validate_records(data.get("records"))
+    packs = resolve_plan_packs(plan)
+    cases = {case.case_id: case for case in plan.cases}
+    if any(
+        (case := cases.get(str(record["case_id"]))) is not None
+        and is_marker_dependent_case(packs[case.pack_id], case)
+        for record in records
+    ):
+        raise BundleError("marker-dependent evidence is live-only and cannot be loaded")
     try:
         verified = verify_records(
             plan,
-            resolve_plan_packs(plan),
+            packs,
             canary,
             _case_evidence(records),
             disclosure_marker,

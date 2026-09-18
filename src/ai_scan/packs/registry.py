@@ -29,6 +29,8 @@ _BUILTIN: dict[str, str] = {
     "tool-abuse-kitchen": "tool-abuse-kitchen-v1.json",
     "prompt-disclosure-reliable": "prompt-disclosure-reliable-v1.json",
     "prompt-disclosure-kitchen": "prompt-disclosure-kitchen-v1.json",
+    "system-prompt-leakage-reliable": "system-prompt-leakage-reliable-v1.json",
+    "system-prompt-leakage-kitchen": "system-prompt-leakage-kitchen-v1.json",
 }
 
 _VALID_MODES = frozenset({"reliable", "kitchen-sink"})

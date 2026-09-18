@@ -72,7 +72,9 @@ def test_current_state_is_honest_about_active_end_to_end_coverage() -> None:
     assert categories["LLM05"].scaffolding_only is False
     assert categories["LLM06"].current_active_cli_coverage is True
     assert categories["LLM06"].scaffolding_only is False
-    inactive_ids = ("LLM07", "LLM08", "LLM09", "LLM10")
+    assert categories["LLM07"].current_active_cli_coverage is True
+    assert categories["LLM07"].scaffolding_only is False
+    inactive_ids = ("LLM08", "LLM09", "LLM10")
     for category_id in inactive_ids:
         category = categories[category_id]
         assert category.current_active_cli_coverage is False
@@ -83,8 +85,11 @@ def test_current_state_is_honest_about_active_end_to_end_coverage() -> None:
         )
     assert "agency-audit" in categories["LLM06"].active_coverage_source
     assert "offline" in categories["LLM06"].active_coverage_source
-    assert "capability-gated" in categories["LLM07"].active_coverage_source
-    assert "current public CLI" in categories["LLM07"].active_coverage_source
+    assert (
+        "controlled synthetic system-prompt fixture"
+        in categories["LLM07"].active_coverage_source
+    )
+    assert "live-only" in categories["LLM07"].active_coverage_source
 
 
 def test_matrix_identifiers_are_reserved_not_runtime_mappings() -> None:
@@ -112,7 +117,7 @@ def test_reliable_and_kitchen_sink_breadth_differ_without_full_claims() -> None:
     summary = coverage_summary(matrix)
     assert summary["categories_total"] == 10
     assert summary["full_coverage_claim_allowed"] is False
-    assert summary["active_end_to_end_categories"] == 6
+    assert summary["active_end_to_end_categories"] == 7
     assert summary["active_end_to_end_categories"] < summary["categories_total"]
 
 
@@ -138,15 +143,18 @@ def test_llm01_active_breadth_is_bound_to_public_compiled_plans() -> None:
     assert {pack_id for pack_id, _version, _digest in plans["reliable"].packs} == {
         "direct-injection-reliable",
         "prompt-disclosure-reliable",
+        "system-prompt-leakage-reliable",
     }
     assert {pack_id for pack_id, _version, _digest in plans["kitchen-sink"].packs} == {
         "direct-injection-reliable",
         "direct-injection-kitchen",
         "prompt-disclosure-reliable",
         "prompt-disclosure-kitchen",
+        "system-prompt-leakage-reliable",
+        "system-prompt-leakage-kitchen",
     }
-    assert len(plans["reliable"].cases) == 16
-    assert len(plans["kitchen-sink"].cases) == 32
+    assert len(plans["reliable"].cases) == 20
+    assert len(plans["kitchen-sink"].cases) == 40
     assert tuple(sorted({case.family for case in plans["reliable"].attack_cases()})) == (
         "encoding",
         "instruction_conflict",
@@ -154,6 +162,8 @@ def test_llm01_active_breadth_is_bound_to_public_compiled_plans() -> None:
         "prompt_disclosure_system_text",
         "role_confusion",
         "system_boundary",
+        "system_prompt_leakage_direct_extract",
+        "system_prompt_leakage_structured_restatement",
     )
     assert tuple(sorted({case.family for case in plans["kitchen-sink"].attack_cases()})) == (
         "bounded_adaptive_retry",
@@ -170,6 +180,10 @@ def test_llm01_active_breadth_is_bound_to_public_compiled_plans() -> None:
         "role_confusion",
         "role_play_boundary",
         "system_boundary",
+        "system_prompt_leakage_boundary_continuation",
+        "system_prompt_leakage_direct_extract",
+        "system_prompt_leakage_structured_restatement",
+        "system_prompt_leakage_transformation",
     )
 
     assert llm01.active_coverage_source == (
@@ -395,7 +409,7 @@ def test_duplicate_json_keys_are_rejected() -> None:
 
 def test_contradictory_active_or_full_states_are_rejected() -> None:
     def unsupported_marked_active(doc: dict[str, object]) -> None:
-        cat = doc["categories"][6]  # LLM07 remains inactive
+        cat = doc["categories"][7]  # LLM08 remains inactive
         cat["current_active_cli_coverage"] = True
 
     def full_claim_from_partial(doc: dict[str, object]) -> None:
@@ -403,7 +417,7 @@ def test_contradictory_active_or_full_states_are_rejected() -> None:
         cat["full_coverage_claim_allowed"] = True
 
     def finding_without_active_coverage(doc: dict[str, object]) -> None:
-        cat = doc["categories"][6]
+        cat = doc["categories"][7]
         cat["allowed_outcomes"] = ["finding", "tested"]
 
     for mutator in (

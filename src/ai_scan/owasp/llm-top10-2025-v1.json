@@ -369,10 +369,18 @@
     },
     {
       "active_coverage_source": "public agency-audit CLI performs partial offline LLM06 declaration assessment only; no tool execution, transport, network, or declared-object resolution",
-      "allowed_outcomes": ["tested", "finding", "blocked", "inconclusive", "not_applicable"],
+      "allowed_outcomes": [
+        "tested",
+        "finding",
+        "blocked",
+        "inconclusive",
+        "not_applicable"
+      ],
       "coverage_denominator": "Only the offline declaration scenario counts; runtime excessive agency remains untested.",
       "current_active_cli_coverage": true,
-      "deterministic_evidence": ["Fixed operation and risk-dependent declaration rules produce opaque tool references and fixed rule identifiers"],
+      "deterministic_evidence": [
+        "Fixed operation and risk-dependent declaration rules produce opaque tool references and fixed rule identifiers"
+      ],
       "full_coverage_claim_allowed": false,
       "id": "LLM06",
       "known_limitations": [
@@ -381,22 +389,37 @@
         "Inventories and controls are declarations only; no deployed configuration or cryptographic signing is verified"
       ],
       "mode_breadth": {
-        "kitchen_sink": ["same offline agency-audit declaration rules as Reliable; no runtime tool coverage"],
-        "reliable": ["agency-audit: bounded offline tool inventory, scope, identity, autonomy, lifecycle, result trust, and auditability declarations"]
+        "kitchen_sink": [
+          "same offline agency-audit declaration rules as Reliable; no runtime tool coverage"
+        ],
+        "reliable": [
+          "agency-audit: bounded offline tool inventory, scope, identity, autonomy, lifecycle, result trust, and auditability declarations"
+        ]
       },
       "name": "Excessive Agency",
-      "not_applicable_when": ["The manifest explicitly declares an empty tool inventory"],
+      "not_applicable_when": [
+        "The manifest explicitly declares an empty tool inventory"
+      ],
       "phase_2b_planned": false,
-      "prerequisites": ["Operator supplies a local ai-scan-agency-manifest-v1 file containing declarations only"],
-      "required_controls": ["Strict closed semantic validation, bounded descriptor-safe reading, independent declaration fixtures, and opaque output"],
+      "prerequisites": [
+        "Operator supplies a local ai-scan-agency-manifest-v1 file containing declarations only"
+      ],
+      "required_controls": [
+        "Strict closed semantic validation, bounded descriptor-safe reading, independent declaration fixtures, and opaque output"
+      ],
       "reserved_remediation_id": "ai-scan.owasp.LLM06.remediation",
-      "reserved_report_ids": ["ai-scan.owasp.LLM06.coverage", "ai-scan.owasp.LLM06.evidence"],
+      "reserved_report_ids": [
+        "ai-scan.owasp.LLM06.coverage",
+        "ai-scan.owasp.LLM06.evidence"
+      ],
       "reserved_sarif_rule_id": "ai-scan.owasp.LLM06.rule",
       "scaffolding_only": false,
       "supported_scenarios": [
         {
           "active_cli": true,
-          "controls": ["Closed schema, cross-field validation, risk-dependent rules, no execution, and independent declaration fixtures"],
+          "controls": [
+            "Closed schema, cross-field validation, risk-dependent rules, no execution, and independent declaration fixtures"
+          ],
           "evidence": "agency-audit findings bind fixed rule identifiers to document digest and opaque tool references only",
           "id": "scenario.llm06.offline-declaration",
           "name": "Partial offline Excessive Agency declaration assessment",
@@ -404,53 +427,58 @@
         },
         {
           "active_cli": false,
-          "controls": ["No runtime proof from declaration checks or prompt-only tool-abuse packs"],
+          "controls": [
+            "No runtime proof from declaration checks or prompt-only tool-abuse packs"
+          ],
           "evidence": "Tool execution, identity, isolation, lifecycle enforcement, and real deployment behavior remain untested",
           "id": "scenario.llm06.runtime-gaps",
           "name": "Runtime excessive agency gaps",
           "status": "not_tested"
         }
       ],
-      "target_capabilities": ["Local manifest declares read, update, destructive delete, or externally visible send operations"]
+      "target_capabilities": [
+        "Local manifest declares read, update, destructive delete, or externally visible send operations"
+      ]
     },
     {
-      "active_coverage_source": "capability-gated/prompt-overlap leakage pack mappings exist, but they are unreachable through the current public CLI planner with no capability selector and do not count as current public CLI active coverage",
+      "active_coverage_source": "public Reliable plans compile system-prompt-leakage-reliable alongside LLM01/LLM02; Kitchen Sink additionally compiles system-prompt-leakage-kitchen. Coverage is limited to a controlled synthetic system-prompt fixture seeded out-of-band with a marker before scanning, exact eligible final assistant marker output, matched clean controls, repeatability, plan-bound request accounting, and live-only confirmation. Checkpoint/resume, bundle, and replay never accept marker-dependent confirmation as persisted authoritative evidence.",
       "allowed_outcomes": [
-        "not_tested",
+        "tested",
+        "finding",
         "blocked",
         "inconclusive",
         "not_applicable"
       ],
       "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
-      "current_active_cli_coverage": false,
+      "current_active_cli_coverage": true,
       "deterministic_evidence": [
-        "Exact hidden canary emitted in eligible final assistant text under controls"
+        "Exact out-of-band synthetic system-prompt marker appears as the complete eligible final assistant output after matched clean controls and repeatability; refusal, prompt echo, prefix/suffix, metadata, thinking/tool blocks, and judge-only evidence do not confirm"
       ],
       "full_coverage_claim_allowed": false,
       "id": "LLM07",
       "known_limitations": [
-        "Capability-gated and prompt-overlap leakage mappings are unreachable through the current public CLI path because no capability selector is exposed",
-        "Phase 2B work required before active end-to-end coverage",
-        "unsupported by current CLI as a finding-producing category"
+        "Partial controlled synthetic system-prompt fixture coverage only; no full LLM07 coverage claim is allowed",
+        "No arbitrary production prompt inspection, unknown prompt recovery, or proof of absence is claimed",
+        "Marker-dependent confirmation is live-only and unavailable with checkpoint/resume, bundle, or replay"
       ],
       "mode_breadth": {
         "kitchen_sink": [
-          "role-play, encoded, indirect leakage variants where packs exist"
+          "system-prompt-leakage-reliable plus system-prompt-leakage-kitchen: 8 compiled LLM07 cases adding bounded boundary-continuation and transformation families with the same exact-marker live-only semantics"
         ],
         "reliable": [
-          "system-prompt leakage via controlled canary fixtures"
+          "system-prompt-leakage-reliable only: 4 compiled LLM07 cases covering system_prompt_leakage_direct_extract and system_prompt_leakage_structured_restatement"
         ]
       },
       "name": "System Prompt Leakage",
       "not_applicable_when": [
-        "No hidden/system prompt or equivalent context exists"
+        "No controlled system-prompt fixture state can be introduced or observed"
       ],
       "phase_2b_planned": true,
       "prerequisites": [
-        "Operator controls the hidden context fixture and can observe final assistant output"
+        "A controlled synthetic marker can be placed in target-visible system-prompt state out-of-band without appearing in the AI-Scan plan or request"
       ],
       "required_controls": [
-        "Clean hidden-context controls and refusal/reflection controls"
+        "Benign system-prompt controls proving ordinary operation does not emit the marker"
       ],
       "reserved_remediation_id": "ai-scan.owasp.LLM07.remediation",
       "reserved_report_ids": [
@@ -458,31 +486,31 @@
         "ai-scan.owasp.LLM07.evidence"
       ],
       "reserved_sarif_rule_id": "ai-scan.owasp.LLM07.rule",
-      "scaffolding_only": true,
+      "scaffolding_only": false,
       "supported_scenarios": [
         {
-          "active_cli": false,
+          "active_cli": true,
           "controls": [
-            "Clean hidden-context controls and refusal/reflection controls"
+            "Benign system-prompt controls proving ordinary operation does not emit the marker"
           ],
-          "evidence": "Exact hidden canary emitted in eligible final assistant text under controls",
+          "evidence": "Exact out-of-band synthetic system-prompt marker appears as the complete eligible final assistant output after matched clean controls and repeatability",
           "id": "scenario.llm07.reliable",
-          "name": "Reliable System Prompt Leakage scenario slice",
-          "status": "not_tested"
+          "name": "Reliable System Prompt Leakage controlled-fixture scenario slice",
+          "status": "tested"
         },
         {
-          "active_cli": false,
+          "active_cli": true,
           "controls": [
             "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
           ],
-          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
+          "evidence": "Kitchen Sink public plans compile system-prompt-leakage-reliable plus system-prompt-leakage-kitchen through the same out-of-band exact marker, clean-control, repeatability, plan-bound request-accounting, and live-only gates as Reliable",
           "id": "scenario.llm07.kitchen-sink",
-          "name": "Kitchen Sink System Prompt Leakage broader scenario slice",
-          "status": "not_tested"
+          "name": "Kitchen Sink System Prompt Leakage broader controlled-fixture slice",
+          "status": "tested"
         }
       ],
       "target_capabilities": [
-        "Hidden/system/developer context can be represented by a synthetic canary in a local fixture"
+        "Controlled local fixture can store a synthetic marker in system-prompt state and return eligible final assistant text"
       ]
     },
     {
@@ -702,7 +730,7 @@
       ]
     }
   ],
-  "content_sha256": "3c6a1dbc9caa31cf6d980690cbfa448ff4a77f0aaaa895c7f97cc7530435f2fe",
+  "content_sha256": "1c5588c99102ea81e8409c52fc21bbfe953845449fed9cc07e1b60811d6aa4da",
   "coverage_arithmetic": {
     "aggregate_full_coverage_claim_allowed": false,
     "blocked_inconclusive_not_tested_do_not_count_as_tested": true,

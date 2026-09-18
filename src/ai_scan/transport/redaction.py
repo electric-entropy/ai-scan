@@ -574,7 +574,11 @@ def scrub_text(
         if _depth >= _JSON_NEST_CAP:
             return REDACTED
         embedded = _redact_json_embedded(text, frozenset(secrets), _depth + 1)
-        return embedded if embedded is not None else REDACTED
+        result = embedded if embedded is not None else REDACTED
+    if known_secrets:
+        from ai_scan.transport.marker_redaction import sanitize_marker_structure
+
+        return str(sanitize_marker_structure(result, known_secrets))
     return result
 
 
@@ -585,7 +589,13 @@ def redact_value(value: Any, known_secrets: frozenset[str] = frozenset()) -> Any
     has its value redacted) *and* value scrubbing. Use this for untrusted
     request/response data.
     """
-    return _redact(value, frozenset(known_secrets), ())
+    known = frozenset(known_secrets)
+    if known:
+        from ai_scan.transport.marker_redaction import structure_reconstructs_marker
+
+        if structure_reconstructs_marker(value, known):
+            return REDACTED
+    return _redact(value, known, ())
 
 
 def scrub_structure(value: Any, known_secrets: frozenset[str] = frozenset()) -> Any:
@@ -596,7 +606,13 @@ def scrub_structure(value: Any, known_secrets: frozenset[str] = frozenset()) -> 
     named ``authorization``). Credential literals, reflected known secrets, and
     URL-field query secrets are still redacted; fails closed on unsafe input.
     """
-    return _scrub(value, frozenset(known_secrets), ())
+    known = frozenset(known_secrets)
+    if known:
+        from ai_scan.transport.marker_redaction import structure_reconstructs_marker
+
+        if structure_reconstructs_marker(value, known):
+            return REDACTED
+    return _scrub(value, known, ())
 
 
 def scrub_provider_envelope(

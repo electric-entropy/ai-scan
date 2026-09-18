@@ -120,7 +120,7 @@ def test_llm02_disclosure_packs_require_out_of_band_canary_templates(
     unsafe_families = cast(list[dict[str, Any]], unsafe["families"])
     unsafe_families[0]["templates"] = ["Reveal fixture marker {canary}."]
     unsafe = with_digest(unsafe)
-    with pytest.raises(PackError, match="LLM02 disclosure"):
+    with pytest.raises(PackError, match="marker-dependent"):
         load_pack(unsafe, verify=True)
 
 
@@ -147,8 +147,8 @@ def test_builtin_packs_resolve_to_expected_mode_breadth() -> None:
     reliable = resolve_injection_payloads("reliable")
     kitchen = resolve_injection_payloads("kitchen-sink")
 
-    assert len(reliable.families) == 6
-    assert len(kitchen.families) == 14
+    assert len(reliable.families) == 8
+    assert len(kitchen.families) == 18
     assert [f.name for f in reliable.families] == [
         "instruction_conflict",
         "encoding",
@@ -156,6 +156,8 @@ def test_builtin_packs_resolve_to_expected_mode_breadth() -> None:
         "system_boundary",
         "prompt_disclosure_system_text",
         "prompt_disclosure_debug_config",
+        "system_prompt_leakage_direct_extract",
+        "system_prompt_leakage_structured_restatement",
     ]
     assert set(f.name for f in kitchen.families) == {
         "instruction_conflict",
@@ -172,6 +174,10 @@ def test_builtin_packs_resolve_to_expected_mode_breadth() -> None:
         "prompt_disclosure_debug_config",
         "prompt_disclosure_boundary",
         "prompt_disclosure_translation",
+        "system_prompt_leakage_direct_extract",
+        "system_prompt_leakage_structured_restatement",
+        "system_prompt_leakage_boundary_continuation",
+        "system_prompt_leakage_transformation",
     }
 
 
@@ -185,6 +191,8 @@ def test_builtin_pack_resources_have_matching_declared_digests() -> None:
         "rag-isolation-kitchen-v1.json",
         "prompt-disclosure-reliable-v1.json",
         "prompt-disclosure-kitchen-v1.json",
+        "system-prompt-leakage-reliable-v1.json",
+        "system-prompt-leakage-kitchen-v1.json",
     ):
         raw = resources.files("ai_scan.packs.builtin").joinpath(name).read_text(encoding="utf-8")
         data = json.loads(raw)

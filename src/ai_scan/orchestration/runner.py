@@ -20,14 +20,13 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass, field, replace
+from typing import Any, cast
 
 from ai_scan.core.accounting import PhysicalCounter
 from ai_scan.core.accounting import delta as ledger_delta
 from ai_scan.core.accounting import require as require_ledger
 from ai_scan.core.accounting import snapshot as snapshot_ledger
-from ai_scan.core.modes import resolve_policy
 from ai_scan.core.run_identity import RunIdentity, canary_commitment, evidence_canary
 from ai_scan.injection import (
     CONTROL_GAP,
@@ -46,17 +45,22 @@ from ai_scan.orchestration.checkpoint import (
 )
 from ai_scan.orchestration.evidence import (
     CONTROL_STATUS,
+    EvidenceError,
     derive_attack,
     derive_control,
     disclosure_semantic,
     family_key,
+    is_marker_dependent_case,
     rendered_prompt,
+    resolve_plan_packs,
     trial_from_dict,
     trial_to_dict,
 )
 from ai_scan.orchestration.planner import Plan, PlanError, PlannedCase
 from ai_scan.orchestration.scheduler import schedule
-from ai_scan.packs import Pack, resolve_packs
+from ai_scan.packs import Pack
+from ai_scan.transport._errors import BudgetExceededError, ScopeError, TransportError
+from ai_scan.transport.marker_redaction import MAX_SECRET, MAX_SECRETS, sanitize_marker_structure
 from ai_scan.transport.redaction import scrub_text
 
 Responder = Callable[[InjectionCase], ExchangeOutcome]
@@ -176,8 +180,9 @@ def run_plan(
     # Reflected/known secrets observed across the run, threaded into every
     # checkpoint write so persisted proof/prompt state is redacted on disk.
     run_secrets: set[str] = set()
-    if disclosure_marker is not None and disclosure_marker != canary:
+    if disclosure_marker:
         run_secrets.add(disclosure_marker)
+    observations: list[tuple[PlannedCase, ExchangeOutcome, InjectionFinding]] = []
     checkpoint.state = RunState.VALIDATED.value
     _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
 
@@ -210,6 +215,7 @@ def run_plan(
     ]
     completed = set(checkpoint.completed)
     coverage_gaps: list[str] = []
+    public_error: Exception | None = None
     try:
         checkpoint.state = RunState.RUNNING.value
         _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
@@ -223,8 +229,10 @@ def run_plan(
         for case in plan.control_cases():
             if case.case_id in completed:
                 continue
-            if _requires_explicit_marker(packs[case.pack_id], case, disclosure_marker):
-                coverage_gaps.append(f"{case.case_id}: LLM02 disclosure marker not supplied")
+            if _must_gate_marker_case(
+                packs[case.pack_id], case, disclosure_marker, checkpoint_path
+            ):
+                coverage_gaps.append(f"{case.case_id}: marker-dependent disclosure is live-only")
                 family = family_key(case)
                 control_results[family] = merge_control_results(
                     control_results.get(family), CONTROL_GAP
@@ -252,8 +260,10 @@ def run_plan(
             checkpoint.control_results = dict(control_results)
             control_finding = InjectionFinding(
                 case.family, status, case.template, None,
-                attack_trials=0, successes=0, evidence=tuple(outcomes),
+                attack_trials=0, successes=0,
+                evidence=tuple(outcomes),
             )
+
             checkpoint.completed[case.case_id] = _record_from_finding(
                 plan, case, control_finding, canary=canary, checkpoint=checkpoint,
                 run_secrets=frozenset(run_secrets),
@@ -262,7 +272,7 @@ def run_plan(
             completed.add(case.case_id)
             _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
             if observer is not None:
-                observer(case, outcomes[-1], control_finding)
+                observations.append((case, outcomes[-1], control_finding))
 
         checkpoint.state = RunState.CONFIRMING.value
         _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
@@ -270,8 +280,10 @@ def run_plan(
         for case in schedule(plan).order:
             if case.case_id in completed:
                 continue
-            if _requires_explicit_marker(packs[case.pack_id], case, disclosure_marker):
-                coverage_gaps.append(f"{case.case_id}: LLM02 disclosure marker not supplied")
+            if _must_gate_marker_case(
+                packs[case.pack_id], case, disclosure_marker, checkpoint_path
+            ):
+                coverage_gaps.append(f"{case.case_id}: marker-dependent disclosure is live-only")
                 finding = _inconclusive_disclosure_finding(case, canary)
                 findings.append(finding)
                 checkpoint.progress.pop(case.case_id, None)
@@ -291,6 +303,7 @@ def run_plan(
                 control=control_results.get(family_key(case)),
                 disclosure_marker=disclosure_marker,
             )
+
             findings.append(finding)
             checkpoint.completed[case.case_id] = _record_from_finding(
                 plan, case, finding, canary=canary, checkpoint=checkpoint,
@@ -300,22 +313,103 @@ def run_plan(
             completed.add(case.case_id)
             _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
             if observer is not None:
-                observer(case, representative, finding)
+                observations.append((case, representative, finding))
     except (KeyboardInterrupt, SystemExit):
         # Operator interrupt: clean up and end in the CANCELLED terminal state.
         _run_cleanup(checkpoint_path, checkpoint, run_secrets, RunState.CANCELLED)
+        bodies = [outcome.body for finding in findings for outcome in finding.evidence]
+        omit_bodies = isinstance(sanitize_marker_structure(bodies, run_secrets), str)
         return RunResult(
-            RunState.CANCELLED, tuple(findings), checkpoint.request_count, tuple(coverage_gaps)
+            RunState.CANCELLED,
+            tuple(_sanitize_finding(f, run_secrets, omit_bodies) for f in findings),
+            checkpoint.request_count, tuple(coverage_gaps)
         )
-    except Exception:
+    except Exception as exc:
         # Ordinary error mid-run: pass through the CLEANING_UP phase to the FAILED
         # terminal state (finally-style), then propagate the error.
         _run_cleanup(checkpoint_path, checkpoint, run_secrets, RunState.FAILED)
-        raise
+        if not run_secrets:
+            raise
+        # Never retain responder exception args, attributes or exception chains.
+        # Preserve fixed transport taxonomy, using only our trusted ledger count.
+        if isinstance(exc, ScopeError):
+            public_error = ScopeError("request blocked because it would leave scope")
+        elif isinstance(exc, BudgetExceededError):
+            public_error = BudgetExceededError("request budget exhausted")
+        elif isinstance(exc, TransportError):
+            public_error = TransportError("transport failed")
+        else:
+            public_error = RuntimeError("run failed")
+    if public_error is not None:
+        if isinstance(public_error, TransportError):
+            public_error.totals = {"total": checkpoint.request_count}
+            public_error.attempts = (
+                checkpoint.in_flight["attempts"] if checkpoint.in_flight else 0
+            )
+        # The public traceback retains this frame. Drop every execution value
+        # that can contain an observed secret before raising the opaque error.
+        disclosure_marker = None
+        del goal
+        checkpoint_path = None
+        responder = cast(Responder, None)
+        observer = None
+        run_secrets.clear()
+        observations.clear()
+        findings.clear()
+        outcomes = []
+        trials = []
+        control_finding = cast(InjectionFinding, None)
+        finding = cast(InjectionFinding, None)
+        representative = cast(ExchangeOutcome, None)
+        bodies = []
+        outcome = cast(ExchangeOutcome, None)
+        safe_case = cast(PlannedCase, None)
+        raise public_error
 
     state = RunState.COMPLETED_WITH_GAPS if coverage_gaps else RunState.COMPLETED
     _run_cleanup(checkpoint_path, checkpoint, run_secrets, state)
-    return RunResult(state, tuple(findings), checkpoint.request_count, tuple(coverage_gaps))
+    bodies = [o.body for f in findings for o in f.evidence]
+    bodies.extend(o.body for _, _, f in observations for o in f.evidence)
+    omit_bodies = isinstance(sanitize_marker_structure(bodies, run_secrets), str)
+    # Defer observers until the complete run secret union is known. Earlier
+    # responses may reflect a secret identified only by a later response.
+    if observer is not None:
+        for case, outcome, finding in observations:
+            observer_failed = False
+            try:
+                safe_case = replace(
+                    case,
+                    case_id=scrub_text(case.case_id, frozenset(run_secrets)),
+                    pack_id=scrub_text(case.pack_id, frozenset(run_secrets)),
+                    family=scrub_text(case.family, frozenset(run_secrets)),
+                    template=scrub_text(case.template, frozenset(run_secrets)),
+                )
+                observer(safe_case, _sanitize_outcome(outcome, run_secrets, omit_bodies),
+                         _sanitize_finding(finding, run_secrets, omit_bodies))
+            except Exception:
+                observer_failed = True
+            if observer_failed:
+                # As above, the public traceback retains this frame. Discard all
+                # secret-bearing execution values before raising the opaque error.
+                disclosure_marker = None
+                del goal
+                checkpoint_path = None
+                responder = cast(Responder, None)
+                observer = None
+                run_secrets.clear()
+                observations.clear()
+                findings.clear()
+                outcomes = []
+                trials = []
+                control_finding = cast(InjectionFinding, None)
+                finding = cast(InjectionFinding, None)
+                representative = cast(ExchangeOutcome, None)
+                bodies = []
+                outcome = cast(ExchangeOutcome, None)
+                safe_case = cast(PlannedCase, None)
+                raise RuntimeError("run observer failed")
+    return RunResult(state, tuple(_sanitize_finding(f, run_secrets, omit_bodies) for f in findings),
+                     checkpoint.request_count, tuple(coverage_gaps))
 
 
 def _run_cleanup(
@@ -339,14 +433,9 @@ def _run_cleanup(
 
 def _resolve_plan_packs(plan: Plan) -> dict[str, Pack]:
     try:
-        policy = resolve_policy(plan.mode)
-        resolved = {p.id: p for p in resolve_packs(plan.mode, trust=policy.pack_trust)}
-    except Exception as exc:  # PolicyError / PackResolutionError
-        raise PlanError(f"cannot resolve packs for plan in mode {plan.mode!r}: {exc}") from exc
-    missing = {c.pack_id for c in plan.cases} - set(resolved)
-    if missing:
-        raise PlanError("plan references packs that no longer resolve")
-    return resolved
+        return resolve_plan_packs(plan)
+    except EvidenceError as exc:
+        raise PlanError("plan pack/case identity does not match the registry") from exc
 
 
 def _initial_checkpoint(
@@ -524,7 +613,6 @@ def _run_trials(
                 known_secrets=outcome.known_secrets,
                 semantic=disclosure_semantic(plan, case, disclosure_marker, outcome.body),
             )
-        run_secrets.update(outcome.known_secrets)
         attempts = ledger_delta(before, physical_request_count, remaining=remaining)
         if attempts < 1 or attempts > remaining:
             assert checkpoint.in_flight is not None
@@ -532,6 +620,14 @@ def _run_trials(
             _persist(checkpoint_path, checkpoint, frozenset(run_secrets))
             raise PlanError("trusted physical request ledger delta is invalid")
         checkpoint.request_count += attempts
+        assert checkpoint.in_flight is not None
+        checkpoint.in_flight["attempts"] = attempts
+        if (type(outcome.known_secrets) is not frozenset
+                or len(outcome.known_secrets) > MAX_SECRETS
+                or any(type(s) is not str or len(s) > MAX_SECRET for s in outcome.known_secrets)
+                or len(run_secrets | outcome.known_secrets) > MAX_SECRETS):
+            raise PlanError("run secret inventory exceeds the bounded contract")
+        run_secrets.update(outcome.known_secrets)
         outcome = ExchangeOutcome(
             body=outcome.body,
             status=outcome.status,
@@ -561,18 +657,21 @@ def _run_trials(
 
 
 def _requires_semantic(pack: Pack, case: PlannedCase) -> bool:
-    categories = frozenset(pack.mappings.get("owasp-llm", ()))
-    return (
-        case.family.startswith("prompt_disclosure")
-        and "LLM02" in categories
-        and "LLM01" not in categories
-    )
+    return is_marker_dependent_case(pack, case)
 
 
 def _requires_explicit_marker(
     pack: Pack, case: PlannedCase, disclosure_marker: str | None
 ) -> bool:
     return disclosure_marker is None and _requires_semantic(pack, case)
+
+
+def _must_gate_marker_case(
+    pack: Pack, case: PlannedCase, disclosure_marker: str | None, checkpoint_path: str | None
+) -> bool:
+    return is_marker_dependent_case(pack, case) and (
+        disclosure_marker is None or checkpoint_path is not None
+    )
 
 
 def _inconclusive_disclosure_finding(case: PlannedCase, canary: str) -> InjectionFinding:
@@ -612,6 +711,37 @@ def _classify_case(
         evidence=tuple(outcomes),
     )
     return finding, representative if representative is not None else outcomes[-1]
+
+
+def _sanitize_outcome(
+    outcome: ExchangeOutcome, secrets: set[str], omit_body: bool = False,
+) -> ExchangeOutcome:
+    semantic = sanitize_marker_structure(outcome.semantic, secrets)
+    return ExchangeOutcome(
+        body="REDACTED" if omit_body else scrub_text(outcome.body, frozenset(secrets)),
+        status=outcome.status,
+        redirected=outcome.redirected,
+        truncated=outcome.truncated,
+        transport_ok=outcome.transport_ok,
+        attempts=outcome.attempts,
+        known_secrets=frozenset(),
+        semantic=semantic if isinstance(semantic, dict) else None,
+    )
+
+
+def _sanitize_finding(
+    finding: InjectionFinding, secrets: set[str], omit_bodies: bool = False,
+) -> InjectionFinding:
+    return InjectionFinding(
+        scrub_text(finding.family, frozenset(secrets)),
+        finding.status,
+        scrub_text(finding.prompt, frozenset(secrets)),
+        None if finding.proof is None else scrub_text(finding.proof, frozenset(secrets)),
+        attack_trials=finding.attack_trials,
+        successes=finding.successes,
+        evidence=tuple(_sanitize_outcome(outcome, secrets, omit_bodies)
+                       for outcome in finding.evidence),
+    )
 
 
 def _record_from_finding(

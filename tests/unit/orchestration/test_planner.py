@@ -47,14 +47,12 @@ def test_public_planner_executable_owasp_categories_match_current_cli_wiring() -
     reliable = compile_plan(target, "reliable")
     kitchen_sink = compile_plan(target, "kitchen-sink")
 
-    assert _executable_owasp_categories(reliable) == {"LLM01", "LLM02"}
-    assert _executable_owasp_categories(kitchen_sink) == {"LLM01", "LLM02"}
+    assert _executable_owasp_categories(reliable) == {"LLM01", "LLM02", "LLM07"}
+    assert _executable_owasp_categories(kitchen_sink) == {"LLM01", "LLM02", "LLM07"}
     assert all(
         "LLM06" not in _executable_owasp_categories(plan) for plan in (reliable, kitchen_sink)
     )
-    assert all(
-        "LLM07" not in _executable_owasp_categories(plan) for plan in (reliable, kitchen_sink)
-    )
+
 
 
 def test_public_kitchen_sink_plan_adds_real_llm01_direct_injection_breadth() -> None:
@@ -66,15 +64,18 @@ def test_public_kitchen_sink_plan_adds_real_llm01_direct_injection_breadth() -> 
     assert {pack_id for pack_id, _version, _digest in reliable.packs} == {
         "direct-injection-reliable",
         "prompt-disclosure-reliable",
+        "system-prompt-leakage-reliable",
     }
     assert {pack_id for pack_id, _version, _digest in kitchen_sink.packs} == {
         "direct-injection-reliable",
         "direct-injection-kitchen",
         "prompt-disclosure-reliable",
         "prompt-disclosure-kitchen",
+        "system-prompt-leakage-reliable",
+        "system-prompt-leakage-kitchen",
     }
-    assert len(reliable.cases) == 16
-    assert len(kitchen_sink.cases) == 32
+    assert len(reliable.cases) == 20
+    assert len(kitchen_sink.cases) == 40
     assert set(kitchen_sink.attack_cases()) > set(reliable.attack_cases())
     assert {
         "encoded_envelope",

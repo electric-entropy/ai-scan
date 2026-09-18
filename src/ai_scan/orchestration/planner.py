@@ -18,6 +18,7 @@ from typing import Any
 
 from ai_scan.core.modes import resolve_policy
 from ai_scan.packs import Pack, load_builtin_pack, resolve_packs
+from ai_scan.packs.schema import marker_category
 from ai_scan.packs.signatures import compute_digest, verify_digest
 from ai_scan.targets import Target, TargetError, normalize_target
 
@@ -275,7 +276,7 @@ def verify_plan_integrity(plan: Plan) -> None:
     except TargetError as exc:
         raise PlanError("plan target is not a valid target") from exc
     canonical = compile_plan(target, plan.mode, adapter=plan.adapter, seed=plan.seed)
-    if plan.digest != canonical.digest:
+    if plan != canonical:
         raise PlanError(
             "plan does not match the canonical policy-derived plan for its mode "
             "(re-digested or tampered plan rejected)"
@@ -421,8 +422,7 @@ def _pack_owasp_categories(pack_id: str) -> frozenset[str]:
 
 
 def _attack_template_forbids_canary(pack_id: str) -> bool:
-    categories = _pack_owasp_categories(pack_id)
-    return "LLM02" in categories and "LLM01" not in categories
+    return marker_category(load_builtin_pack(pack_id).mappings) is not None
 
 
 def _attack_template_requires_canary(pack_id: str) -> bool:

@@ -12,10 +12,7 @@ import pytest
 from ai_scan import cli
 from ai_scan.evidence_graph import (
     BundleCollector,
-    ReplayError,
-    dump_bundle,
-    load_bundle,
-    replay_bundle,
+    BundleError,
 )
 from ai_scan.injection import ExchangeOutcome, InjectionCase, InjectionStatus
 from ai_scan.orchestration import compile_plan
@@ -42,6 +39,18 @@ def _llm02_cases(plan, *, kind: str | None = None):  # type: ignore[no-untyped-d
         if "LLM02" in load_builtin_pack(pack_id).mappings.get("owasp-llm", ())
     }
     cases = [case for case in plan.cases if case.pack_id in llm02_pack_ids]
+    if kind is not None:
+        cases = [case for case in cases if case.kind == kind]
+    return tuple(cases)
+
+
+def _marker_cases(plan, *, category: str, kind: str | None = None):  # type: ignore[no-untyped-def]
+    pack_ids = {
+        pack_id
+        for pack_id, _version, _digest in plan.packs
+        if category in load_builtin_pack(pack_id).mappings.get("owasp-llm", ())
+    }
+    cases = [case for case in plan.cases if case.pack_id in pack_ids]
     if kind is not None:
         cases = [case for case in cases if case.kind == kind]
     return tuple(cases)
@@ -176,7 +185,7 @@ def test_llm02_control_emission_blocks_confirmation_and_counts_physical_requests
             assert finding.successes >= plan.trial_policy[1]
 
 
-def test_llm02_checkpoint_bundle_and_replay_round_trip_and_tamper_fail_closed(tmp_path) -> None:
+def test_llm02_checkpoint_and_bundle_are_live_only_fail_closed(tmp_path) -> None:
     plan = _plan("reliable")
     checkpoint = tmp_path / "llm02.ckpt"
     collector = BundleCollector()
@@ -191,79 +200,39 @@ def test_llm02_checkpoint_bundle_and_replay_round_trip_and_tamper_fail_closed(tm
     restored = load_checkpoint(
         str(checkpoint), expected_plan_digest=plan.digest, plan=plan, disclosure_marker=_HIDDEN
     )
+    assert all(not case_id.startswith("prompt-disclosure-") for case_id in restored.completed)
+    llm02 = _llm02_findings(plan, live)
+    assert llm02 and all(f.status is InjectionStatus.INCONCLUSIVE for f in llm02)
+    assert all(f.attack_trials == 0 and f.successes == 0 and f.evidence == () for f in llm02)
+
+    live_without_checkpoint = run_plan(
+        plan,
+        _disclosing_responder,
+        canary=_PROMPT_CANARY,
+        disclosure_marker=_HIDDEN,
+        observer=collector.observe,
+    )
     assert any(
-        record["status"] == "confirmed"
-        for case_id, record in restored.completed.items()
-        if case_id.startswith("prompt-disclosure-reliable:") and record["kind"] == "attack"
+        f.status is InjectionStatus.CONFIRMED
+        for f in _llm02_findings(plan, live_without_checkpoint)
     )
-
-    text = dump_bundle(
-        collector.build(
-            plan=plan, canary=_PROMPT_CANARY, disclosure_marker=_HIDDEN, run_id="llm02"
-        )
-    )
-    load_bundle(text)
-    replayed = replay_bundle(text)
-    assert replayed.verified
-    assert any(
-        status == "confirmed"
-        for case_id, status in replayed.findings.items()
-        if case_id.startswith("prompt-disclosure-reliable:")
-    )
-    assert live.request_count == json.loads(text)["request_count"]
-
-    doc = json.loads(text)
-    attack = next(
-        r
-        for r in doc["records"]
-        if r["case_id"].startswith("prompt-disclosure-reliable:") and r["kind"] == "attack"
-    )
-    attack["finding"]["successes"] = len(attack["trials"]) + 1
-    doc["digest"] = compute_digest(doc)
-    with pytest.raises(ReplayError):
-        replay_bundle(json.dumps(doc))
+    with pytest.raises(BundleError):
+        collector.build(plan=plan, canary=_PROMPT_CANARY, disclosure_marker=_HIDDEN, run_id="llm02")
 
 
-def test_llm02_semantic_metadata_survives_redaction_without_placeholder_evidence(tmp_path) -> None:
+def test_llm02_live_semantic_result_is_scrubbed_without_placeholder_evidence() -> None:
     plan = _plan("reliable")
-    checkpoint = tmp_path / "llm02.ckpt"
     live = run_plan(
         plan,
         _disclosing_responder,
         canary=_PROMPT_CANARY,
         disclosure_marker=_HIDDEN,
-        checkpoint_path=str(checkpoint),
     )
-    assert any(f.status is InjectionStatus.CONFIRMED for f in live.findings)
-
-    raw = checkpoint.read_text(encoding="utf-8")
-    assert _HIDDEN not in raw
-    doc = json.loads(raw)
-    llm02_attack = next(
-        record
-        for case_id, record in doc["completed"].items()
-        if case_id.startswith("prompt-disclosure-reliable:") and record["kind"] == "attack"
-    )
-    assert {trial["body"] for trial in llm02_attack["trials"]} == {"REDACTED"}
-    semantics = [trial.get("semantic") for trial in llm02_attack["trials"]]
-    assert all(meta and meta["exact_match"] for meta in semantics)
-    assert all(meta["marker_digest"] == meta["body_digest"] for meta in semantics)
-
-    calls: list[str] = []
-
-    def no_more(case: InjectionCase) -> ExchangeOutcome:
-        calls.append(case.rendered_prompt)
-        return _disclosing_responder(case)
-
-    resumed = run_plan(
-        plan,
-        no_more,
-        canary=_PROMPT_CANARY,
-        disclosure_marker=_HIDDEN,
-        checkpoint_path=str(checkpoint),
-    )
-    assert calls == []
-    assert [f.status for f in resumed.findings] == [f.status for f in live.findings]
+    llm02 = _llm02_findings(plan, live)
+    assert llm02 and all(f.status is InjectionStatus.CONFIRMED for f in llm02)
+    assert _HIDDEN not in repr(live)
+    assert all(_HIDDEN not in trial.body for f in live.findings for trial in f.evidence)
+    assert all(_HIDDEN not in trial.known_secrets for f in live.findings for trial in f.evidence)
 
 
 def test_run_plan_without_explicit_llm02_marker_skips_llm02_and_keeps_llm01_active() -> None:
@@ -291,7 +260,9 @@ def test_run_plan_without_explicit_llm02_marker_skips_llm02_and_keeps_llm01_acti
     assert all(f.status is InjectionStatus.INCONCLUSIVE for f in llm02)
     assert all(f.attack_trials == 0 and f.successes == 0 and f.evidence == () for f in llm02)
     assert any(f.status is InjectionStatus.CONFIRMED for f in result.findings if f not in llm02)
-    assert len(result.coverage_gaps) == len(_llm02_cases(plan))
+    assert len(result.coverage_gaps) == len(_llm02_cases(plan)) + len(
+        _marker_cases(plan, category="LLM07")
+    )
 
 
 def test_public_cli_without_synthetic_canary_file_skips_llm02_zero_calls(
@@ -338,8 +309,16 @@ def test_public_cli_without_synthetic_canary_file_skips_llm02_zero_calls(
     ]
     plan = _plan("reliable")
     expected_requests = (
-        (len(plan.control_cases()) - len(_llm02_cases(plan, kind="control"))) * plan.trial_policy[2]
-        + (len(plan.attack_cases()) - len(_llm02_cases(plan, kind="attack"))) * plan.trial_policy[0]
+        (
+            len(plan.control_cases())
+            - len(_llm02_cases(plan, kind="control"))
+            - len(_marker_cases(plan, category="LLM07", kind="control"))
+        ) * plan.trial_policy[2]
+        + (
+            len(plan.attack_cases())
+            - len(_llm02_cases(plan, kind="attack"))
+            - len(_marker_cases(plan, category="LLM07", kind="attack"))
+        ) * plan.trial_policy[0]
     )
     assert len(captures) == expected_requests
     report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -368,14 +347,14 @@ def test_incomplete_llm02_resume_without_marker_issues_zero_llm02_calls(tmp_path
         tokens = re.findall(r"AISCAN-[0-9A-F]{16,64}", case.rendered_prompt)
         return ExchangeOutcome(body=tokens[0] if tokens else "clean")
 
-    with pytest.raises(RuntimeError):
-        run_plan(
-            plan,
-            crash_on_first_llm02,
-            canary=_PROMPT_CANARY,
-            disclosure_marker=_HIDDEN,
-            checkpoint_path=str(checkpoint),
-        )
+    result = run_plan(
+        plan,
+        crash_on_first_llm02,
+        canary=_PROMPT_CANARY,
+        disclosure_marker=_HIDDEN,
+        checkpoint_path=str(checkpoint),
+    )
+    assert all(f.status is InjectionStatus.INCONCLUSIVE for f in _llm02_findings(plan, result))
     calls: list[str] = []
 
     def resume_without_marker(case: InjectionCase) -> ExchangeOutcome:
@@ -409,7 +388,7 @@ def test_completed_llm02_checkpoint_requires_explicit_marker_but_marker_resume_z
         disclosure_marker=_HIDDEN,
         checkpoint_path=str(checkpoint),
     )
-    assert any(f.status is InjectionStatus.CONFIRMED for f in _llm02_findings(plan, live))
+    assert all(f.status is InjectionStatus.INCONCLUSIVE for f in _llm02_findings(plan, live))
 
     def fail_if_called(case: InjectionCase) -> ExchangeOutcome:
         raise AssertionError(f"unexpected responder call for {case.family}")
@@ -470,59 +449,31 @@ def test_llm02_legacy_redacted_checkpoint_without_semantic_metadata_fails_closed
         checkpoint_path=str(checkpoint),
     )
     doc = json.loads(checkpoint.read_text(encoding="utf-8"))
-    for record in doc["completed"].values():
-        if record["kind"] == "attack" and record["family"].startswith("prompt_disclosure"):
-            for trial in record["trials"]:
-                trial.pop("semantic", None)
+    assert all(not case_id.startswith("prompt-disclosure-") for case_id in doc["completed"])
+    case = _llm02_cases(plan, kind="attack")[0]
+    doc["completed"][case.case_id] = {
+        "family": case.family, "kind": case.kind, "prompt": case.template,
+        "status": "confirmed", "proof": "REDACTED", "attack_trials": 3,
+        "successes": 3,
+    }
     checkpoint.write_text(json.dumps(_reseal_checkpoint(doc)), encoding="utf-8")
-
-    with pytest.raises(CheckpointError):
-        load_checkpoint(
-            str(checkpoint), expected_plan_digest=plan.digest, plan=plan, disclosure_marker=_HIDDEN
-        )
+    with pytest.raises(CheckpointError, match="malformed checkpoint"):
+        load_checkpoint(str(checkpoint), expected_plan_digest=plan.digest, plan=plan,
+                        disclosure_marker=_HIDDEN)
 
 
 def test_llm02_semantic_digest_tamper_is_rejected_in_checkpoint_and_bundle(tmp_path) -> None:
     plan = _plan("reliable")
-    checkpoint = tmp_path / "llm02.ckpt"
     collector = BundleCollector()
     run_plan(
         plan,
         _disclosing_responder,
         canary=_PROMPT_CANARY,
         disclosure_marker=_HIDDEN,
-        checkpoint_path=str(checkpoint),
         observer=collector.observe,
     )
-    doc = json.loads(checkpoint.read_text(encoding="utf-8"))
-    attack = next(
-        record
-        for record in doc["completed"].values()
-        if record["kind"] == "attack" and record["family"].startswith("prompt_disclosure")
-    )
-    attack["trials"][0]["semantic"]["body_digest"] = "0" * 64
-    checkpoint.write_text(json.dumps(_reseal_checkpoint(doc)), encoding="utf-8")
-    with pytest.raises(CheckpointError):
-        load_checkpoint(
-            str(checkpoint), expected_plan_digest=plan.digest, plan=plan, disclosure_marker=_HIDDEN
-        )
-
-    bundle_doc = json.loads(
-        dump_bundle(
-            collector.build(
-                plan=plan, canary=_PROMPT_CANARY, disclosure_marker=_HIDDEN, run_id="llm02"
-            )
-        )
-    )
-    bundle_attack = next(
-        r
-        for r in bundle_doc["records"]
-        if r["case_id"].startswith("prompt-disclosure-reliable:") and r["kind"] == "attack"
-    )
-    bundle_attack["trials"][0]["semantic"]["exact_match"] = False
-    bundle_doc["digest"] = compute_digest({k: v for k, v in bundle_doc.items() if k != "digest"})
-    with pytest.raises(ReplayError):
-        replay_bundle(json.dumps(bundle_doc))
+    with pytest.raises(BundleError):
+        collector.build(plan=plan, canary=_PROMPT_CANARY, disclosure_marker=_HIDDEN, run_id="llm02")
 
 
 def test_public_cli_run_executes_llm02_against_loopback_fixture(mock_server, tmp_path) -> None:

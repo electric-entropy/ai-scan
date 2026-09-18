@@ -16,8 +16,7 @@
   "cleanup": null,
   "mappings": {
     "owasp-llm": [
-      "LLM06",
-      "LLM07"
+      "LLM06"
     ]
   },
   "provenance": {
@@ -46,5 +45,5 @@
       ]
     }
   ],
-  "digest": "c9e28cb60f7079343b5ec3871b7f58d9ab33df9b0b47913ef2125b5ec4f842fd"
+  "digest": "a40ce7f4c10c27d89f0837365c2c512c06f194fd692fe7959e63943493d9b364"
 }

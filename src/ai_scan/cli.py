@@ -186,7 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument(
         "--synthetic-canary-file",
         help=(
-            "Read a pre-provisioned synthetic LLM02 marker from a local file. "
+            "Read a pre-provisioned synthetic LLM02/LLM07 live-fixture marker from a local file. "
             "The marker is never placed in the plan or command line; use only "
             "with a controlled target fixture seeded out-of-band."
         ),
@@ -1202,6 +1202,10 @@ def _run_plan_active(
         "runner_count": result.request_count,
         "plan_digest": plan.digest,
     }
+    from ai_scan.transport.marker_redaction import sanitize_marker_structure
+
+    safe_evidence = sanitize_marker_structure(evidence, run_secrets)
+    evidence = safe_evidence if isinstance(safe_evidence, list) else []
     report = Report.build(
         target=target,
         fingerprint=None,

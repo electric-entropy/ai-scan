@@ -203,7 +203,12 @@ def _interrupted_checkpoint(tmp_path):  # type: ignore[no-untyped-def]
     path = tmp_path / "run.ckpt"
     control_trials = plan.trial_policy[2]
     attack_trials = plan.trial_policy[0]
-    second_trial_of_first_attack = control_trials * len(plan.control_cases()) + 2
+    executable_controls = [
+        c
+        for c in plan.control_cases()
+        if not c.family.startswith(("prompt_disclosure", "system_prompt_leakage"))
+    ]
+    second_trial_of_first_attack = control_trials * len(executable_controls) + 2
     interrupted = _InterruptAt(second_trial_of_first_attack)
     _run_trusted(plan, interrupted, checkpoint_path=path)
     assert attack_trials >= 2  # the interrupt lands on a genuine second trial

@@ -194,7 +194,7 @@ def test_provider_audit_keeps_only_allowlisted_metadata_for_faithful_body() -> N
     assert "safe" not in json.dumps(audit)
 
 
-# --- B1: a completed LLM02 checkpoint re-loads its own committed evidence --------
+# --- B1: LLM02 checkpoint mode is live-only and stores no marker evidence --------
 
 
 def _disclosing_responder(marker, *, mark_secret):  # type: ignore[no-untyped-def]
@@ -217,7 +217,7 @@ def _disclosing_responder(marker, *, mark_secret):  # type: ignore[no-untyped-de
 
 
 @pytest.mark.parametrize("mark_secret", [True, False])
-def test_completed_llm02_checkpoint_reloads_offline_with_zero_calls(
+def test_llm02_checkpoint_mode_is_live_only_with_zero_marker_calls(
     tmp_path, mark_secret
 ) -> None:  # type: ignore[no-untyped-def]
     plan, responder = _disclosing_responder(_MARKER, mark_secret=mark_secret)
@@ -225,15 +225,14 @@ def test_completed_llm02_checkpoint_reloads_offline_with_zero_calls(
     first = run_plan(
         plan, responder, canary=_CANARY, disclosure_marker=_MARKER, checkpoint_path=path
     )
-    confirmed = [
+    inconclusive = [
         f for f in first.findings
-        if f.family.startswith("prompt_disclosure") and f.status.value == "confirmed"
+        if f.family.startswith("prompt_disclosure") and f.status.value == "inconclusive"
     ]
-    assert confirmed  # LLM02 confirmed on the live run
+    assert inconclusive
 
-    # Re-loading the checkpoint under the SAME identity binds and re-derives its
-    # own persisted evidence with no responder call (idempotent scrub: the outer
-    # persistence scrub cannot mutate an already-committed trial).
+    # Re-loading the checkpoint under the SAME identity never reissues or restores
+    # marker-dependent evidence; unrelated completed cases remain resumable.
     calls = {"n": 0}
 
     def must_not_call(case):  # type: ignore[no-untyped-def]
@@ -249,6 +248,7 @@ def test_completed_llm02_checkpoint_reloads_offline_with_zero_calls(
     restored = load_checkpoint(path, expected_plan_digest=plan.digest, plan=plan,
                                disclosure_marker=_MARKER)
     assert restored.completed
+    assert all(not case_id.startswith("prompt-disclosure-") for case_id in restored.completed)
 
 
 def test_completed_checkpoint_persists_no_raw_marker_or_canary(tmp_path) -> None:  # type: ignore[no-untyped-def]

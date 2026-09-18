@@ -20,7 +20,7 @@ Those reserved identifiers are not emitted by the current report or SARIF
 runtime surfaces; current JSON reports leave `remediation` and
 `framework_mappings` empty, and current SARIF rule IDs remain finding-family IDs.
 
-Current honest summary after Phase 2B6:
+Current honest summary after Phase 2B7:
 
 - LLM01:2025 Prompt Injection — partial current active CLI coverage through the
   public direct-injection packs. Reliable plans compile 12 cases from
@@ -41,9 +41,11 @@ Current honest summary after Phase 2B6:
   hidden-canary fixtures only. The expected marker is provisioned out-of-band
   (for local fixtures, `run --synthetic-canary-file FILE`) and is absent from the
   plan, prompt, URL, headers, and request body for LLM02 disclosure probes.
-  Without that explicit marker input, live `run` and checkpoint resume skip LLM02
-  controls/attacks as inconclusive coverage gaps while continuing normal LLM01
-  execution.
+  Without that explicit marker input, live `run` skips LLM02 controls/attacks as
+  inconclusive coverage gaps while continuing normal LLM01 execution.
+  Checkpoint/resume, bundle, and replay never accept LLM02 marker-dependent
+  confirmation as persisted authoritative evidence; LLM02 confirmation is
+  live-only.
   External LLM02 coverage is capability-gated unless the operator has seeded the
   exact synthetic marker into the target fixture independently. Reliable plans compile 4 LLM02 cases from
   `prompt-disclosure-reliable` covering `prompt_disclosure_debug_config` and
@@ -117,10 +119,25 @@ Current honest summary after Phase 2B6:
   runtime behavior, or absence of excessive agency was verified. Prompt-only
   tool-abuse packs do not establish LLM06 coverage. The [manifest contract](agency-audit.md)
   specifies the strict schema, cross-field rules, bounds, and claim limitations.
-- LLM07:2025 System Prompt Leakage — no current active public CLI coverage.
-  Tool-abuse/leakage mappings are capability-gated or prompt-overlap leads and
-  are unreachable through the current public `plan`/`run` path without a
-  capability selector.
+- LLM07:2025 System Prompt Leakage — partial current active CLI coverage through
+  public system-prompt-leakage packs using deterministic synthetic system-prompt
+  marker fixtures only. The fixture independently stores the expected marker in
+  system-prompt state before scanning; AI-Scan keeps it out of argv, environment,
+  plan, prompt, URL, headers, body, public artifacts, errors, and logs. Reliable
+  plans compile 4 LLM07 cases from `system-prompt-leakage-reliable` covering
+  `system_prompt_leakage_direct_extract` and
+  `system_prompt_leakage_structured_restatement`. Kitchen Sink plans compile
+  those plus 4 cases from `system-prompt-leakage-kitchen`, adding
+  `system_prompt_leakage_boundary_continuation` and
+  `system_prompt_leakage_transformation`. Confirmation requires exact eligible
+  final assistant marker text, matched clean controls, repeatability, redaction,
+  plan binding, scope gates, and canonical plan-bound ceilings. Refusal,
+  explanation, prompt echo, prefix/suffix, partial/encoded marker, JSON envelope,
+  thinking/tool blocks, malformed/truncated/nonterminal/error/redirect evidence,
+  dirty controls, reflection, and judge-only evidence do not confirm. Checkpoint,
+  resume, bundle, and replay are live-only for LLM07 and never accept persisted
+  marker-dependent trials as authoritative evidence. Arbitrary production prompt
+  inspection, unknown prompt recovery, and proof of absence remain out of scope.
 - LLM08:2025 Vector and Embedding Weaknesses — no current vector/embedding
   behavior coverage; RAG prompt overlap does not count without namespace,
   provenance, retrieval, or embedding evidence.
@@ -133,10 +150,11 @@ Current honest summary after Phase 2B6:
 Coverage arithmetic is conservative: the denominator is the ten OWASP categories;
 `not_applicable` is excluded and separately reported; `blocked`, `inconclusive`,
 and `not_tested` never increase tested coverage. Current public coverage now has
-active LLM01, LLM02, partial offline-manifest LLM03, and partial active
-controlled-retrieval-protocol LLM04, plus partial offline-declaration LLM05 and LLM06
-coverage only, with additional bounded Kitchen Sink breadth in LLM01/LLM02.
-The active partial category count is exactly 6/10; this is not runtime coverage of six categories.
+active LLM01, LLM02, partial offline-manifest LLM03, partial active
+controlled-retrieval-protocol LLM04, partial offline-declaration LLM05 and LLM06,
+and partial controlled-fixture LLM07 coverage only, with additional bounded
+Kitchen Sink breadth in LLM01/LLM02/LLM07. The active partial category count is
+exactly 7/10; this is not full runtime OWASP coverage.
 Modes may use different bounded operational limits;
 both remain subject to scope,
 request/rate/concurrency/duration ceilings, redaction, cleanup, evidence, and

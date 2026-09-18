@@ -18,6 +18,10 @@ from ai_scan.targets import normalize_target
 from tests.trusted_engines import run_plan
 
 
+def _non_marker_case(case):  # type: ignore[no-untyped-def]
+    return not case.family.startswith(("prompt_disclosure", "system_prompt_leakage"))
+
+
 def test_run_result_status_preserves_seven_state() -> None:
     from ai_scan.injection import InjectionFinding, InjectionStatus
     from ai_scan.orchestration import RunResult
@@ -96,7 +100,7 @@ def test_resume_does_not_repeat_completed_physical_attempt(tmp_path) -> None:
     # Completed controls and the completed attack are not re-run; the remaining
     # attacks run min_attack_trials each on top of the persisted request count.
     min_a, _, _min_c = plan.trial_policy
-    attacks = [c for c in plan.attack_cases() if not c.family.startswith("prompt_disclosure")]
+    attacks = [c for c in plan.attack_cases() if _non_marker_case(c)]
     assert result.request_count == kept + (len(attacks) - 1) * min_a
 
 
@@ -155,10 +159,10 @@ def test_kitchen_sink_llm01_cases_execute_through_plan_with_clean_controls(tmp_p
         finding.family for finding in result.findings if finding.status.value == "confirmed"
     }
     attacks = sum(
-        not c.family.startswith("prompt_disclosure") for c in plan.attack_cases()
+        _non_marker_case(c) for c in plan.attack_cases()
     ) * plan.trial_policy[0]
     controls = sum(
-        not c.family.startswith("prompt_disclosure") for c in plan.control_cases()
+        _non_marker_case(c) for c in plan.control_cases()
     ) * plan.trial_policy[2]
     assert result.request_count == attacks + controls
 
@@ -196,10 +200,10 @@ def test_kitchen_sink_refusal_or_reflection_only_cannot_confirm(body: str, tmp_p
     assert all("{canary}" not in prompt for prompt in sent_attacks)
     assert all("AISCAN-X" not in prompt and "{canary}" not in prompt for prompt in sent_controls)
     attacks = sum(
-        not c.family.startswith("prompt_disclosure") for c in plan.attack_cases()
+        _non_marker_case(c) for c in plan.attack_cases()
     ) * plan.trial_policy[0]
     controls = sum(
-        not c.family.startswith("prompt_disclosure") for c in plan.control_cases()
+        _non_marker_case(c) for c in plan.control_cases()
     ) * plan.trial_policy[2]
     assert result.request_count == attacks + controls
 

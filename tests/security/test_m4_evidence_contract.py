@@ -61,7 +61,11 @@ def _exact_token(case: InjectionCase) -> ExchangeOutcome:
 
 
 def _direct_attacks(findings: Any) -> list[Any]:
-    return [f for f in findings if not f.family.startswith("prompt_disclosure")]
+    return [
+        f
+        for f in findings
+        if not f.family.startswith(("prompt_disclosure", "system_prompt_leakage"))
+    ]
 
 
 def _statuses(findings: Any) -> dict[str, str]:
@@ -126,7 +130,7 @@ def test_exact_token_round_trips_through_bundle_and_replay() -> None:
     live_attacks = {
         c.case_id: f.status.value
         for c, f in zip(plan.attack_cases(), live.findings, strict=False)
-        if not c.family.startswith("prompt_disclosure")
+        if not c.family.startswith(("prompt_disclosure", "system_prompt_leakage"))
     }
     assert "confirmed" in set(replayed.findings.values())
     assert set(replayed.findings.values()) <= {"confirmed", "not_observed"}

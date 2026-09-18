@@ -80,6 +80,15 @@ class PackError(Exception):
     """Raised when a pack document is malformed, unsafe, or fails digest check."""
 
 
+def marker_category(mappings: Mapping[str, tuple[str, ...]]) -> str | None:
+    """One category owns the independently provisioned marker channel."""
+    categories = frozenset(mappings.get("owasp-llm", ()))
+    marker = categories & {"LLM02", "LLM07"}
+    if marker and (len(marker) != 1 or categories != marker):
+        raise PackError("contradictory marker category mappings")
+    return next(iter(marker), None)
+
+
 @dataclass(frozen=True)
 class TrialPolicy:
     """Per-pack trial minima (mirrors the mode policy minima)."""
@@ -188,7 +197,7 @@ def load_pack(data: dict[str, Any], *, verify: bool = True) -> Pack:
         raise PackError("a pack with side_effects must declare a cleanup procedure")
     mappings = _as_mappings(data.get("mappings", {}))
     provenance = _as_provenance(data.get("provenance", {}))
-    families = _as_families(data["families"], mappings)
+    families = _as_families(data["families"], mappings, pack_id)
 
     pack = Pack(
         schema_version=SCHEMA_VERSION,
@@ -329,7 +338,9 @@ def _as_provenance(value: Any) -> Mapping[str, str]:
     return MappingProxyType(out)
 
 
-def _as_families(value: Any, mappings: Mapping[str, tuple[str, ...]]) -> tuple[PackCase, ...]:
+def _as_families(
+    value: Any, mappings: Mapping[str, tuple[str, ...]], pack_id: str
+) -> tuple[PackCase, ...]:
     if not isinstance(value, list) or not value:
         raise PackError("pack field 'families' must be a non-empty list")
     if len(value) > _MAX_FAMILIES:
@@ -337,7 +348,7 @@ def _as_families(value: Any, mappings: Mapping[str, tuple[str, ...]]) -> tuple[P
     families: list[PackCase] = []
     seen: set[str] = set()
     for raw in value:
-        family = _as_family(raw, mappings)
+        family = _as_family(raw, mappings, pack_id)
         if family.name in seen:
             raise PackError(f"duplicate family name {_q(family.name)}")
         seen.add(family.name)
@@ -345,14 +356,14 @@ def _as_families(value: Any, mappings: Mapping[str, tuple[str, ...]]) -> tuple[P
     return tuple(families)
 
 
-def _as_family(value: Any, mappings: Mapping[str, tuple[str, ...]]) -> PackCase:
+def _as_family(value: Any, mappings: Mapping[str, tuple[str, ...]], pack_id: str) -> PackCase:
     if not isinstance(value, dict):
         raise PackError("each family must be an object")
     unknown = set(value) - _ALLOWED_FAMILY
     if unknown:
         raise PackError(f"unknown family field(s) not permitted ({len(unknown)} present)")
     name = _require_str(value, "name")
-    templates = _as_templates(value.get("templates"), mappings)
+    templates = _as_templates(value.get("templates"), mappings, pack_id)
     controls = _as_controls(value.get("controls"))
     return PackCase(
         name=name,
@@ -362,21 +373,22 @@ def _as_family(value: Any, mappings: Mapping[str, tuple[str, ...]]) -> PackCase:
     )
 
 
-def _as_templates(value: Any, mappings: Mapping[str, tuple[str, ...]]) -> tuple[str, ...]:
+def _as_templates(
+    value: Any, mappings: Mapping[str, tuple[str, ...]], pack_id: str
+) -> tuple[str, ...]:
     if not isinstance(value, list) or not value:
         raise PackError("family 'templates' must be a non-empty list")
     if len(value) > _MAX_TEMPLATES_PER_FAMILY:
         raise PackError(f"family declares more than {_MAX_TEMPLATES_PER_FAMILY} templates")
-    owasp = frozenset(mappings.get("owasp-llm", ()))
-    disclosure_pack = "LLM02" in owasp and "LLM01" not in owasp
+    marker_pack = marker_category(mappings) is not None
     out: list[str] = []
     for item in value:
         if not isinstance(item, str) or not item:
             raise PackError("each template must be a non-empty string")
-        if disclosure_pack:
+        if marker_pack:
             if CANARY_MARKER in item:
                 raise PackError(
-                    "LLM02 disclosure attack templates must not contain the '{canary}' marker"
+                    "marker-dependent attack templates must not contain the '{canary}' marker"
                 )
         elif CANARY_MARKER not in item:
             raise PackError("each attack template must contain the '{canary}' marker")

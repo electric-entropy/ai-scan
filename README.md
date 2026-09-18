@@ -146,13 +146,16 @@ overlap, planned Phase 2B work, and unsupported scenarios. It explicitly does
 not claim full OWASP coverage or OWASP compliance. AI-Scan does not claim full
 OWASP coverage from this partial matrix; see
 [`docs/owasp-llm-coverage.md`](docs/owasp-llm-coverage.md).
-The current active public `plan`/`run` OWASP categories are LLM01 and LLM02;
-LLM02 uses deterministic synthetic hidden-canary fixtures, never real secrets. Its
-expected marker must be provisioned to the target out-of-band (for local checks,
-pass `run --synthetic-canary-file FILE`). Without that explicit marker input, live
-`run` and checkpoint resume skip LLM02 controls/attacks as inconclusive coverage
-gaps while continuing normal LLM01 execution. AI-Scan does not put that marker in
-the plan, prompt, URL, headers, or request body for LLM02 disclosure probes.
+The current active public `plan`/`run` OWASP categories are LLM01, LLM02, and
+LLM07. LLM02 and LLM07 use deterministic synthetic marker fixtures, never real
+secrets. The expected marker must be provisioned to the target out-of-band (for
+local checks, pass `run --synthetic-canary-file FILE`). Without that explicit
+marker input, live `run` skips marker-dependent controls/attacks as inconclusive
+coverage gaps while continuing normal LLM01 execution. Checkpoint/resume,
+bundle, and replay are live-only for marker-dependent confirmation and never
+accept LLM02/LLM07 persisted trials as authoritative evidence. AI-Scan does not
+put that marker in the plan, prompt, URL, headers, or request body for disclosure
+or system-prompt-leakage probes.
 LLM03 has only partial offline manifest coverage through
 `ai-scan supply-chain-audit --manifest FILE`: it reads one bounded local regular
 non-symlink artifact manifest, performs no network access, constructs no
@@ -189,9 +192,16 @@ no tools or declared objects are executed or resolved. A clean outcome means
 “declaration checks passed” only. No tool execution, permission enforcement,
 deployed identity, isolation, cleanup, runtime behavior, or absence of excessive
 agency was verified. See [the manifest contract](docs/agency-audit.md).
-The active partial category count is 6/10, not full coverage or compliance.
-Prompt-only LLM06 tool-abuse packs and LLM07 pack mappings remain capability-gated/unreachable without a public
-capability selector and do not count as active end-to-end CLI coverage. Matrix identifiers
+LLM07 has partial active controlled system-prompt fixture coverage through the
+same public `plan`/`run` path: Reliable compiles the
+`system-prompt-leakage-reliable` pack and Kitchen Sink adds
+`system-prompt-leakage-kitchen`. The fixture independently stores the synthetic
+marker in system-prompt state before scanning. Confirmation requires exact
+eligible final assistant marker text plus matched clean controls and is
+live-only; arbitrary production prompt inspection, unknown prompt recovery, and
+proof of absence remain out of scope.
+The active partial category count is 7/10, not full coverage or compliance.
+Prompt-only LLM06 tool-abuse packs do not count as LLM06 runtime coverage. Matrix identifiers
 for remediation/report/SARIF are reserved contract identifiers for future
 integration, not values emitted by the current report or SARIF renderers.
 

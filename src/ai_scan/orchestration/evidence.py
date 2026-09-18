@@ -50,6 +50,8 @@ from ai_scan.injection import (
 )
 from ai_scan.orchestration.planner import Plan, PlannedCase
 from ai_scan.packs import Pack, resolve_packs
+from ai_scan.packs.schema import marker_category
+from ai_scan.transport.marker_redaction import MAX_SECRET, MAX_TEXT, contains_marker
 
 TRIAL_FIELDS = frozenset({
     "body", "status", "redirected", "truncated", "transport_ok", "attempts", "semantic",
@@ -120,6 +122,12 @@ def resolve_plan_packs(plan: Plan) -> dict[str, Pack]:
         raise EvidenceError("cannot resolve packs for the plan mode") from exc
     if {c.pack_id for c in plan.cases} - set(resolved):
         raise EvidenceError("plan references packs that no longer resolve")
+    if any(pack_id not in resolved or (version, digest) !=
+           (resolved[pack_id].version, resolved[pack_id].digest)
+           for pack_id, version, digest in plan.packs):
+        raise EvidenceError("plan pack identity does not match the registry")
+    if any(not case_matches_pack(resolved[c.pack_id], c) for c in plan.cases):
+        raise EvidenceError("plan case is not an exact member of its registry pack")
     return resolved
 
 
@@ -346,9 +354,31 @@ def trial_ceiling(plan: Plan, case: PlannedCase) -> int:
     return attack_trials if case.kind == "attack" else control_trials
 
 
+def is_marker_dependent_case(pack: Pack, case: PlannedCase) -> bool:
+    """True only for verified marker-dependent plan cases (LLM02/LLM07)."""
+    return marker_category(pack.mappings) is not None and case_matches_pack(pack, case)
+
+
+def case_matches_pack(pack: Pack, case: PlannedCase) -> bool:
+    """Exact template/index/family/kind membership, independent of names."""
+    if case.pack_id != pack.id:
+        return False
+    if case.kind not in {"attack", "control"} or type(case.index) is not int:
+        return False
+    for family in pack.families:
+        if family.name != case.family:
+            continue
+        templates = family.templates if case.kind == "attack" else family.controls
+        return (
+            0 <= case.index < len(templates)
+            and templates[case.index] == case.template
+            and case.case_id == f"{pack.id}:{family.name}:{case.kind}:{case.index}"
+        )
+    return False
+
+
 def _is_disclosure_pack(pack: Pack) -> bool:
-    categories = frozenset(pack.mappings.get("owasp-llm", ()))
-    return "LLM02" in categories and "LLM01" not in categories
+    return marker_category(pack.mappings) is not None
 
 
 def _case_token(pack: Pack, prompt_canary: str, disclosure_marker: str | None) -> str:
@@ -359,6 +389,12 @@ def _case_token(pack: Pack, prompt_canary: str, disclosure_marker: str | None) -
             return _DISCLOSURE_SENTINEL
         return disclosure_marker
     return prompt_canary
+
+
+def _contains_marker_representation(body: str, marker: str | None) -> bool:
+    if marker is None or marker in _REDACTION_PLACEHOLDERS:
+        return False
+    return contains_marker(body, marker)
 
 
 def _bind_semantic(
@@ -413,8 +449,7 @@ def _disclosure_final_only_trials(
     persisted evidence without it cannot confirm. Live in-memory trials may also
     be evaluated directly when the real disclosure marker is supplied.
     """
-    categories = frozenset(pack.mappings.get("owasp-llm", ()))
-    if "LLM02" not in categories or "LLM01" in categories:
+    if not is_marker_dependent_case(pack, case):
         return trials
     token = _case_token(pack, canary, disclosure_marker)
     filtered: list[ExchangeOutcome] = []
@@ -451,7 +486,30 @@ def derive_control(
     canary: str,
     disclosure_marker: str | None = None,
 ) -> str:
-    trials = _disclosure_final_only_trials(plan, case, pack, trials, canary, disclosure_marker)
+    if is_marker_dependent_case(pack, case):
+        if (disclosure_marker is None or len(disclosure_marker) > MAX_SECRET
+                or any(len(trial.body) > MAX_TEXT for trial in trials)):
+            return CONTROL_GAP
+        token = _case_token(pack, canary, disclosure_marker)
+        trials = tuple(
+            ExchangeOutcome(
+                body=(
+                    token
+                    if _contains_marker_representation(trial.body, disclosure_marker)
+                    else ""
+                ),
+                status=trial.status,
+                redirected=trial.redirected,
+                truncated=trial.truncated,
+                transport_ok=trial.transport_ok,
+                attempts=trial.attempts,
+                known_secrets=trial.known_secrets,
+                semantic=trial.semantic,
+            )
+            for trial in trials
+        )
+    else:
+        trials = _disclosure_final_only_trials(plan, case, pack, trials, canary, disclosure_marker)
     return control_result(
         trials, _case_token(pack, canary, disclosure_marker), plan.trial_policy[2]
     )
@@ -480,7 +538,7 @@ def derive_attack(
         min_successes=plan.trial_policy[1],
         requires_state_change=pack.side_effects,
     )
-    if _is_disclosure_pack(pack) and status.value == "confirmed":
+    if is_marker_dependent_case(pack, case) and status.value == "confirmed":
         proof = "REDACTED"
     return DerivedCase(status, proof, usable, successes), representative
 
@@ -627,6 +685,7 @@ __all__ = [
     "derive_control",
     "derive_records",
     "family_key",
+    "is_marker_dependent_case",
     "rendered_prompt",
     "resolve_plan_packs",
     "trial_from_dict",
