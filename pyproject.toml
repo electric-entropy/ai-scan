@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-scan"
-version = "0.2.1"
+version = "0.2.2"
 description = "CLI-first AI-system pentesting platform with reliable evidence and fail-closed safety gates."
 readme = "README.md"
 license = "LicenseRef-PolyForm-Shield-1.0.0"

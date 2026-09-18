@@ -135,7 +135,7 @@ def test_fresh_wheel_import_version_matches_metadata(built_dists, tmp_path) -> N
             "-c",
             (
                 "from importlib import metadata; import ai_scan; "
-                "assert ai_scan.__version__ == metadata.version('ai-scan') == '0.2.1'"
+                "assert ai_scan.__version__ == metadata.version('ai-scan') == '0.2.2'"
             ),
         ],
         capture_output=True,

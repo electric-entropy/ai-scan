@@ -2,6 +2,37 @@
 
 All notable changes to AI-Scan are documented here. The project uses a conservative release process: local gates pass before a push, GitHub CI verifies the pushed SHA, and external scan targets are never used for release validation.
 
+## 0.2.2 - 2026-09-18
+
+### Added
+
+- Deterministic offline declaration audits for OWASP LLM02 through LLM10,
+  bringing the applicability matrix to **10/10 partial categories** without
+  claiming comprehensive live exploitation, certification, or truth verification.
+- Additional direct-injection, prompt-disclosure, and system-prompt-leakage
+  packs in the bounded public plans.
+
+### Changed
+
+- Strengthened run identity, physical-request accounting, checkpoint/bundle
+  verification, offline replay, recursive redaction, cleanup handling, and
+  provider-semantic response filtering.
+- Generic HTTP structured responses and scalar metadata extraction are
+  fail-closed for confirmation while remaining available for observation.
+- Normalized reports now preserve run-level coverage gaps such as checkpoint
+  identity rejection; baseline and CycloneDX SBOM validation are stricter.
+
+### Security
+
+- Confirmation now requires repeatable whole-response canary execution after
+  minimal surrounding-whitespace normalization. Refusals, explanatory mentions,
+  prefixes/suffixes, envelopes, metadata, and other non-exact occurrences cannot
+  contribute confirmation successes.
+- Legacy single-shot `inject` and `assess` remain analyst-lead surfaces and no
+  longer represent uncontrolled one-response observations as confirmed findings.
+- Live bounded Ollama validation reconciled all physical requests and confirmed
+  that persisted provider artifacts retain only allowlisted non-text metadata.
+
 ## 0.2.1 - 2026-09-14
 
 ### Removed

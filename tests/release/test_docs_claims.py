@@ -217,9 +217,9 @@ def test_readme_states_assess_is_legacy_v1() -> None:
     assert "legacy v1" in " ".join(_text(_README).split()).lower()
 
 
-def test_readme_documents_shipped_v020_capabilities() -> None:
+def test_readme_documents_shipped_v022_capabilities() -> None:
     lowered = _text(_README).lower()
-    assert "v0.2.1" in lowered
+    assert "v0.2.2" in lowered
     for token in ("doctor", "kitchen sink", "reliable", "evidence bundle", "replay",
                   "adapter", "pack", "worker"):
         assert token in lowered, token

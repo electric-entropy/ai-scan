@@ -62,7 +62,7 @@ def test_exit_code_constants_are_stable() -> None:
 
 
 def test_source_tree_version_matches_package_metadata() -> None:
-    assert ai_scan.__version__ == metadata.version("ai-scan") == "0.2.1"
+    assert ai_scan.__version__ == metadata.version("ai-scan") == "0.2.2"
 
 
 def test_scope_denial_through_real_transport_maps_to_blocked(monkeypatch, capsys) -> None:

@@ -1,6 +1,6 @@
 # ai-scan
 
-**CLI-only LLM security-assessment platform** (v0.2.1) — behavioral model
+**CLI-only LLM security-assessment platform** (v0.2.2) — behavioral model
 fingerprinting and safe, canary-based prompt-injection testing for HTTP(S) LLM
 endpoints, with a repeatable **Reliable** confirmation engine, tamper-evident
 evidence bundles, and fully offline replay. Python 3.11+, standard library only,
@@ -119,7 +119,7 @@ from the `2` used for safety-control denials (e.g. an out-of-scope request).
 - **Redaction & scope** — see [SECURITY.md](SECURITY.md) for the full list
   (no-redirect-follow, header/URL/body redaction, exact-origin scoping).
 
-## Platform capabilities (v0.2.1)
+## Platform capabilities (v0.2.2)
 
 **Reliable vs Kitchen Sink modes** (`plan --mode ...`). Both share the same
 scope, budget, redaction, and confirmation rules — Kitchen Sink only broadens
