@@ -80,15 +80,10 @@ def test_current_state_is_honest_about_active_end_to_end_coverage() -> None:
     assert categories["LLM09"].scaffolding_only is False
     assert "misinformation-audit" in categories["LLM09"].active_coverage_source
     assert "offline" in categories["LLM09"].active_coverage_source
-    inactive_ids = ("LLM10",)
-    for category_id in inactive_ids:
-        category = categories[category_id]
-        assert category.current_active_cli_coverage is False
-        assert category.full_coverage_claim_allowed is False
-        assert any(
-            "Phase 2B" in item or "unsupported" in item
-            for item in category.known_limitations
-        )
+    assert categories["LLM10"].current_active_cli_coverage is True
+    assert categories["LLM10"].scaffolding_only is False
+    assert "consumption-audit" in categories["LLM10"].active_coverage_source
+    assert "offline" in categories["LLM10"].active_coverage_source
     assert "agency-audit" in categories["LLM06"].active_coverage_source
     assert "offline" in categories["LLM06"].active_coverage_source
     assert (
@@ -125,8 +120,8 @@ def test_reliable_and_kitchen_sink_breadth_differ_without_full_claims() -> None:
     summary = coverage_summary(matrix)
     assert summary["categories_total"] == 10
     assert summary["full_coverage_claim_allowed"] is False
-    assert summary["active_end_to_end_categories"] == 9
-    assert summary["active_end_to_end_categories"] < summary["categories_total"]
+    assert summary["active_end_to_end_categories"] == 10
+    assert summary["active_end_to_end_categories"] == summary["categories_total"]
 
 
 def test_llm01_active_breadth_is_bound_to_public_compiled_plans() -> None:
@@ -416,9 +411,9 @@ def test_duplicate_json_keys_are_rejected() -> None:
 
 
 def test_contradictory_active_or_full_states_are_rejected() -> None:
-    def unsupported_marked_active(doc: dict[str, object]) -> None:
-        cat = doc["categories"][9]  # LLM10 remains inactive
-        cat["current_active_cli_coverage"] = True
+    def active_marked_unsupported(doc: dict[str, object]) -> None:
+        cat = doc["categories"][9]
+        cat["current_active_cli_coverage"] = False
 
     def full_claim_from_partial(doc: dict[str, object]) -> None:
         cat = doc["categories"][0]
@@ -429,7 +424,7 @@ def test_contradictory_active_or_full_states_are_rejected() -> None:
         cat["allowed_outcomes"] = ["finding", "tested"]
 
     for mutator in (
-        unsupported_marked_active,
+        active_marked_unsupported,
         full_claim_from_partial,
         finding_without_active_coverage,
     ):

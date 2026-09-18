@@ -637,43 +637,38 @@
       "target_capabilities": ["Local structured expected and observed claim manifest; no target required"]
     },
     {
-      "active_coverage_source": "resource prompts exist as bounded fixtures, but no current active end-to-end unbounded-consumption coverage claim",
-      "allowed_outcomes": [
-        "not_tested",
-        "blocked",
-        "inconclusive",
-        "not_applicable"
-      ],
+      "active_coverage_source": "consumption-audit --manifest FILE provides partial offline bounded-consumption comparisons only; no workload or target execution",
+      "allowed_outcomes": ["tested", "finding", "not_tested", "blocked", "inconclusive", "not_applicable"],
       "coverage_denominator": "One OWASP category counts as tested only when at least one declared current active CLI scenario has deterministic evidence and required controls; not_applicable is excluded and reported separately.",
-      "current_active_cli_coverage": false,
+      "current_active_cli_coverage": true,
       "deterministic_evidence": [
-        "Budgeted local counter proves bounded amplification without exceeding AI-Scan limits"
+        "Fixed comparisons of supplied counters against supplied ceilings and declared fail-closed controls, with opaque logical identities and manifest SHA-256"
       ],
       "full_coverage_claim_allowed": false,
       "id": "LLM10",
       "known_limitations": [
-        "Phase 2B work required before active end-to-end coverage",
-        "Prompt/template overlap or library scaffolding is not counted as active coverage",
-        "unsupported by current CLI as a finding-producing category"
+        "Partial offline LLM10 evidence only, not full coverage or compliance",
+        "Passing does not prove runtime enforcement; observations, ceilings and controls are operator-supplied and not independently verified",
+        "No target execution, load generation, network, model scoring, LLM judge, reference loading or billing/cost assessment"
       ],
       "mode_breadth": {
         "kitchen_sink": [
-          "planned recursion/concurrency/tool-loop amplification variants under local caps"
+          "Same offline consumption-audit command; public plan composition unchanged"
         ],
         "reliable": [
-          "planned bounded token/context/retry fixtures"
+          "Offline consumption-audit command independent of scan mode"
         ]
       },
       "name": "Unbounded Consumption",
       "not_applicable_when": [
-        "No resource-consuming path is accessible or measurable"
+        "Operator cannot supply bounded workload observations and resource ceilings"
       ],
-      "phase_2b_planned": true,
+      "phase_2b_planned": false,
       "prerequisites": [
-        "Local budgets and counters can bound and observe resource use"
+        "Closed bounded ai-scan-consumption-manifest-v1 with observations, ceilings, controls and factual events"
       ],
       "required_controls": [
-        "Normal-cost baseline and capped-resource controls"
+        "Secure zero-finding fixture and eight independently isolated rule scenarios; malformed manifests reject"
       ],
       "reserved_remediation_id": "ai-scan.owasp.LLM10.remediation",
       "reserved_report_ids": [
@@ -681,35 +676,33 @@
         "ai-scan.owasp.LLM10.evidence"
       ],
       "reserved_sarif_rule_id": "ai-scan.owasp.LLM10.rule",
-      "scaffolding_only": true,
+      "scaffolding_only": false,
       "supported_scenarios": [
         {
-          "active_cli": false,
-          "controls": [
-            "Normal-cost baseline and capped-resource controls"
-          ],
-          "evidence": "Budgeted local counter proves bounded amplification without exceeding AI-Scan limits",
-          "id": "scenario.llm10.reliable",
-          "name": "Reliable Unbounded Consumption scenario slice",
-          "status": "not_tested"
+          "active_cli": true,
+          "controls": ["Secure fixture, per-rule isolation, strict closed domain, inert execution"],
+          "evidence": "Deterministic request/token/duration/concurrency/queue/retry/tool/byte comparisons and termination/isolation declaration checks",
+          "id": "scenario.llm10.offline-consumption",
+          "name": "Partial offline bounded-workload comparisons",
+          "status": "tested"
         },
         {
           "active_cli": false,
           "controls": [
             "Same scope, redaction, cleanup, evidence, confirmation controls, and canonical plan-bound ceilings as Reliable; bounded operational limits may differ by mode"
           ],
-          "evidence": "Broader variants are recorded separately and cannot weaken confirmation semantics",
-          "id": "scenario.llm10.kitchen-sink",
-          "name": "Kitchen Sink Unbounded Consumption broader scenario slice",
+          "evidence": "Runtime enforcement, load behavior, service availability and billing/cost remain untested",
+          "id": "scenario.llm10.runtime-gap",
+          "name": "Runtime consumption assessment gap",
           "status": "not_tested"
         }
       ],
       "target_capabilities": [
-        "Target exposes token, context, recursion, retry, tool-loop, concurrency, or cost-amplification controls"
+        "No target connection; operator supplies bounded workload observations and resource ceilings"
       ]
     }
   ],
-  "content_sha256": "dceb941b4ef89a3a5591f427f0c8c4fa4da49993aa39732db4053d94d431e38f",
+  "content_sha256": "6b77b9ac4f067fa9f2cdd8b3c325291090a38d70c0f414fefd420876fb244226",
   "coverage_arithmetic": {
     "aggregate_full_coverage_claim_allowed": false,
     "blocked_inconclusive_not_tested_do_not_count_as_tested": true,

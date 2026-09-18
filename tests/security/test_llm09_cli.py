@@ -276,7 +276,7 @@ def test_exact_active_category_set_and_unchanged_plans():
 
     matrix = load_coverage_matrix()
     assert {c.id for c in matrix.categories if c.current_active_cli_coverage} == {
-        f"LLM{i:02}" for i in range(1, 10)}
+        f"LLM{i:02}" for i in range(1, 11)}
     assert all(not c.full_coverage_claim_allowed for c in matrix.categories)
     for mode, count in [("reliable", 20), ("kitchen-sink", 40)]:
         plan = compile_plan(target=normalize_target("http://127.0.0.1:8000/"), mode=mode)

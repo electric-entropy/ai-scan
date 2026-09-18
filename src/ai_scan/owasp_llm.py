@@ -34,7 +34,7 @@ _ALLOWED_OUTCOMES = frozenset(
     {"tested", "not_tested", "blocked", "inconclusive", "finding", "not_applicable"}
 )
 _ACTIVE_CATEGORIES = frozenset(
-    {"LLM01", "LLM02", "LLM03", "LLM04", "LLM05", "LLM06", "LLM07", "LLM08", "LLM09"}
+    {"LLM01", "LLM02", "LLM03", "LLM04", "LLM05", "LLM06", "LLM07", "LLM08", "LLM09", "LLM10"}
 )
 # Phase 2A is a contract only. Even categories with current active coverage are
 # partial scenario coverage, so no category may claim full/comprehensive coverage.

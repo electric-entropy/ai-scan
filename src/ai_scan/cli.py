@@ -19,7 +19,7 @@ import stat
 import sys
 from collections.abc import Callable, Sequence
 
-from ai_scan import agency, misinformation, vector
+from ai_scan import agency, consumption, misinformation, vector
 from ai_scan.adapters import Adapter, AdapterError, ExtractionError, GenericHttpAdapter
 from ai_scan.adapters.registry import AdapterRegistry, default_registry
 from ai_scan.core.config import SUPPORTED_SCHEMAS, load_document, load_json_strict
@@ -120,6 +120,10 @@ class _MisinformationUsageError(ValueError):
     """Internal parse failure caught before any submitted argument is emitted."""
 
 
+class _ConsumptionUsageError(ValueError):
+    """Internal fixed-code offline usage failure."""
+
+
 class _ArgumentParser(argparse.ArgumentParser):
     """ArgumentParser that maps usage/config errors to exit code ``1``.
 
@@ -128,6 +132,8 @@ class _ArgumentParser(argparse.ArgumentParser):
     """
 
     def error(self, message: str) -> None:  # type: ignore[override]
+        if self.prog == "ai-scan consumption-audit":
+            raise _ConsumptionUsageError("llm10_manifest_invalid")
         if self.prog == "ai-scan misinformation-audit":
             raise _MisinformationUsageError("llm09_manifest_invalid")
         self.print_usage(sys.stderr)
@@ -372,6 +378,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_vector.add_argument("--format", choices=["text", "json"], default="text")
 
+    p_consumption = subparsers.add_parser(
+        "consumption-audit",
+        help="Offline partial LLM10 bounded-workload comparison (no execution or network).",
+        description="Compare supplied counters and controls; not runtime enforcement verification.",
+    )
+    p_consumption.add_argument("--manifest", required=True, help="Local workload manifest JSON.")
+    p_consumption.add_argument("--format", choices=["text", "json"], default="text")
+
     p_misinformation = subparsers.add_parser(
         "misinformation-audit",
         help="Offline partial LLM09 structured-claim comparison (no execution or network).",
@@ -439,7 +453,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = build_parser()
     supplied = sys.argv[1:] if argv is None else argv
-    if supplied and supplied[0] == "misinformation-audit":
+    if supplied and supplied[0] == "consumption-audit":
+        try:
+            args, unknown = parser.parse_known_args(supplied)
+            if unknown:
+                raise _ConsumptionUsageError("llm10_manifest_invalid")
+        except _ConsumptionUsageError:
+            print("invalid: llm10_manifest_invalid")
+            return 2
+    elif supplied and supplied[0] == "misinformation-audit":
         # Keep this offline command's fixed-code usage boundary separate from
         # existing commands, whose exit/error contracts are unchanged.
         try:
@@ -486,6 +508,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_vector_audit(args)
     if args.command == "misinformation-audit":
         return _cmd_misinformation_audit(args)
+    if args.command == "consumption-audit":
+        return _cmd_consumption_audit(args)
     if args.command == "data-poisoning-audit":
         return _cmd_data_poisoning_audit(args)
 
@@ -912,6 +936,26 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
                 raise ValueError("llm09_fixture_semantic_mismatch")
         return "schema and 2 fixtures valid"
 
+    def _llm10_consumption_resources() -> str:
+        consumption.load_schema_text(consumption.load_manifest_file(
+            str(root.joinpath("owasp/consumption-manifest-v1.schema.json"))
+        ))
+        for name in ("secure", "vulnerable"):
+            result = consumption.audit_manifest_text(consumption.load_manifest_file(
+                str(root.joinpath(f"owasp/consumption-{name}-v1.json"))
+            ))
+            expected = set(consumption.RULES) if name == "vulnerable" else set()
+            if {f.rule for f in result.findings} != expected:
+                raise ValueError("llm10_fixture_semantic_mismatch")
+            if len(result.findings) != len(expected):
+                raise ValueError("llm10_fixture_semantic_mismatch")
+            if name == "vulnerable" and (
+                len(result.scenario_refs) != len(expected) or
+                {f.scenario_ref for f in result.findings} != set(result.scenario_refs)
+            ):
+                raise ValueError("llm10_fixture_rule_isolation_mismatch")
+        return "schema and 2 fixtures valid; all 8 rules isolated"
+
     record("metadata", _metadata)
     record("py.typed", _py_typed)
     record("schemas", _schemas)
@@ -925,6 +969,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     record("owasp-llm06-agency-resources", _llm06_agency_resources)
     record("owasp-llm08-vector-resources", _llm08_vector_resources)
     record("owasp-llm09-misinformation-resources", _llm09_misinformation_resources)
+    record("owasp-llm10-consumption-resources", _llm10_consumption_resources)
 
     healthy = all(bool(check["ok"]) for check in checks)
     if args.json:
@@ -978,6 +1023,22 @@ def _cmd_agency_audit(args: argparse.Namespace) -> int:
         return EXIT_RUNTIME_ERROR
     print(agency.render_json(result) if args.format == "json" else agency.render_human(result))
     return EXIT_CONFIRMED_FINDING if result.status == "finding" else EXIT_OK
+
+
+def _cmd_consumption_audit(args: argparse.Namespace) -> int:
+    """Compare offline declarations and observations without executing a workload."""
+    try:
+        result = consumption.audit_manifest_file(args.manifest)
+    except consumption.ConsumptionManifestError:
+        if args.format == "json":
+            print(json.dumps({"error": "llm10_manifest_invalid", "executions": 0,
+                              "network_requests": 0}, sort_keys=True))
+        else:
+            print("invalid: llm10_manifest_invalid")
+        return 2
+    print(consumption.render_json(result) if args.format == "json"
+          else consumption.render_text(result))
+    return EXIT_CONFIRMED_FINDING if result.findings else EXIT_OK
 
 
 def _cmd_misinformation_audit(args: argparse.Namespace) -> int:

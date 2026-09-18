@@ -20,7 +20,7 @@ Those reserved identifiers are not emitted by the current report or SARIF
 runtime surfaces; current JSON reports leave `remediation` and
 `framework_mappings` empty, and current SARIF rule IDs remain finding-family IDs.
 
-Current honest summary after Phase 2B8:
+Current honest summary after Phase 2B10:
 
 - LLM01:2025 Prompt Injection — partial current active CLI coverage through the
   public direct-injection packs. Reliable plans compile 12 cases from
@@ -158,19 +158,23 @@ Current honest summary after Phase 2B8:
   sources, and citations are not independently verified. Natural-language correctness,
   calibration, and runtime misinformation remain untested. See the
   [manifest contract](misinformation-audit.md).
-- LLM10:2025 Unbounded Consumption — no current unbounded-consumption coverage;
-  future scenarios must stay within local budgets and cannot weaken request,
-  duration, or cleanup controls.
+- LLM10:2025 Unbounded Consumption — partial offline bounded-consumption comparison
+  through `ai-scan consumption-audit --manifest FILE`. Fixed rules compare supplied
+  workload counters against supplied resource ceilings and declared fail-closed controls.
+  There is no target execution, load generation, network, reference dereferencing,
+  model scoring, LLM judge, or billing/cost assessment. Passing does not prove runtime
+  enforcement. See the [manifest contract](consumption-audit.md).
 
 Coverage arithmetic is conservative: the denominator is the ten OWASP categories;
 `not_applicable` is excluded and separately reported; `blocked`, `inconclusive`,
 and `not_tested` never increase tested coverage. Current public coverage now has
 active LLM01, LLM02, partial offline-manifest LLM03, partial active
 controlled-retrieval-protocol LLM04, partial offline-declaration LLM05, LLM06,
-and LLM08, partial controlled-fixture LLM07, and partial offline structured-claim LLM09
+and LLM08, partial controlled-fixture LLM07, partial offline structured-claim LLM09,
+and partial offline bounded-consumption LLM10
 coverage only, with additional bounded
 Kitchen Sink breadth in LLM01/LLM02/LLM07. The active partial category count is
-exactly 9/10; this is not full runtime OWASP coverage. LLM10 remains inactive.
+exactly 10/10; every category remains partial, not full runtime OWASP coverage or compliance.
 The Reliable/Kitchen Sink public plan case counts remain 20/40.
 Modes may use different bounded operational limits;
 both remain subject to scope,

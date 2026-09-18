@@ -52,6 +52,9 @@ EXPECTED_DATA = [
     "owasp/misinformation-manifest-v1.schema.json",
     "owasp/misinformation-secure-v1.json",
     "owasp/misinformation-vulnerable-v1.json",
+    "owasp/consumption-manifest-v1.schema.json",
+    "owasp/consumption-secure-v1.json",
+    "owasp/consumption-vulnerable-v1.json",
     "reporting/templates/report.html",
 ]
 EXPECTED_SDIST_FILES = [
@@ -63,6 +66,7 @@ EXPECTED_SDIST_FILES = [
     "docs/pack-authoring.md",
     "docs/evidence-and-retention.md",
     "docs/owasp-llm-coverage.md",
+    "docs/consumption-audit.md",
     "docs/threat-model.md",
 ]
 # Phase D contract change: tests are intentionally no longer shipped in the sdist
@@ -163,7 +167,7 @@ def test_fresh_wheel_import_version_matches_metadata(built_dists, tmp_path) -> N
         )
         assert smoke.returncode == code, smoke.stdout + smoke.stderr
         assert json.loads(smoke.stdout)["status"] == status
-    for category in ("vector", "misinformation"):
+    for category in ("vector", "misinformation", "consumption"):
         for name, code, status in (("secure", 0, "passed"), ("vulnerable", 3, "finding")):
             smoke = subprocess.run(
                 [str(executable), category + "-audit", "--manifest",
@@ -176,3 +180,5 @@ def test_fresh_wheel_import_version_matches_metadata(built_dists, tmp_path) -> N
             assert doc["executions"] == doc["network_requests"] == 0
             if category == "misinformation":
                 assert len(doc["findings"]) == (5 if code else 0)
+            if category == "consumption":
+                assert len(doc["findings"]) == (8 if code else 0)

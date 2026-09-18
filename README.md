@@ -58,11 +58,12 @@ ai-scan supply-chain-audit    --manifest FILE [--format human|json]
 ai-scan data-poisoning-audit  --target URL [--format human|json]
 ai-scan vector-audit          --manifest FILE [--format text|json]
 ai-scan misinformation-audit  --manifest FILE [--format json|text]
+ai-scan consumption-audit     --manifest FILE [--format json|text]
 ```
 
 `bundle validate|replay`, the top-level `replay`, `report`, `baseline`,
 `validate-config`, `packs`, `adapters`, `doctor`, `owasp-coverage`, and
-`supply-chain-audit`, `vector-audit`, and `misinformation-audit` are all **offline** — they construct no
+`supply-chain-audit`, `vector-audit`, `misinformation-audit`, and `consumption-audit` are all **offline** — they construct no
 transport and touch no network. `data-poisoning-audit` is active: it contacts only the exact
 operator-supplied `--target` URL through the hardened scope-safe transport.
 
@@ -228,7 +229,18 @@ observations are not independently verified: this is not general truth verificat
 Exit codes are 0 for matching claims, 3 for findings, and 2 for invalid input.
 Results contain only opaque identities, fixed rule codes, the manifest SHA-256,
 zero execution/request counts, and limitations. See [the LLM09 contract](docs/misinformation-audit.md).
-The active partial category count is 9/10, not full coverage or compliance.
+
+LLM10 has partial offline bounded-consumption coverage through
+`ai-scan consumption-audit --manifest FILE [--format json|text]`. Deterministic rules
+compare operator-supplied workload observations with supplied ceilings and declared
+fail-closed controls. No target execution, load generation, network, reference loading,
+LLM judge, model scoring, or billing/cost assessment occurs. Passing does not prove
+runtime enforcement. Exits: 0 passed, 3 findings, 2 invalid. JSON/text emit only fixed
+codes, opaque logical references, manifest SHA-256, zero execution/request counts,
+and limitations. See [the LLM10 contract](docs/consumption-audit.md).
+Exactly LLM01–LLM10 now have active partial coverage; none claims full coverage or
+compliance. Reliable/Kitchen Sink plans remain 20/40 cases.
+
 Prompt-only LLM06 tool-abuse packs do not count as LLM06 runtime coverage. Matrix identifiers
 for remediation/report/SARIF are reserved contract identifiers for future
 integration, not values emitted by the current report or SARIF renderers.

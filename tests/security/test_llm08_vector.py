@@ -300,7 +300,7 @@ def test_packaged_schema_fixtures_doctor_and_coverage_contract(capsys) -> None:
     from ai_scan.owasp_llm import coverage_summary, load_coverage_matrix
 
     matrix = load_coverage_matrix()
-    assert coverage_summary(matrix)["active_end_to_end_categories"] == 9
+    assert coverage_summary(matrix)["active_end_to_end_categories"] == 10
     llm08 = next(c for c in matrix.categories if c.id == "LLM08")
     assert llm08.current_active_cli_coverage is True
     assert "vector-audit" in llm08.active_coverage_source

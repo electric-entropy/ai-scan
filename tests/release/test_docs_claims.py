@@ -121,7 +121,8 @@ def test_owasp_docs_describe_current_mode_breadth_and_limits_truthfully() -> Non
     assert (
         "active llm01, llm02, partial offline-manifest llm03, partial active "
         "controlled-retrieval-protocol llm04, partial offline-declaration llm05, llm06, "
-        "and llm08, partial controlled-fixture llm07, and partial offline structured-claim llm09 "
+        "and llm08, partial controlled-fixture llm07, partial offline structured-claim llm09, "
+        "and partial offline bounded-consumption llm10 "
         "coverage only"
     ) in normalized
     assert "supply-chain-audit --manifest file" in normalized
@@ -130,7 +131,8 @@ def test_owasp_docs_describe_current_mode_breadth_and_limits_truthfully() -> Non
     assert "agency-audit --manifest file" in normalized
     assert "vector-audit --manifest file" in normalized
     assert "misinformation-audit --manifest file" in normalized
-    assert "9/10" in normalized
+    assert "consumption-audit --manifest file" in normalized
+    assert "10/10" in normalized
     assert "never imports, deserializes, loads, hashes, or executes model artifacts" in normalized
     assert "external service owns state and decides retrieval behavior" in normalized
     assert "model-weight poisoning" in normalized and "fine-tuning poisoning" in normalized
@@ -157,9 +159,10 @@ def test_owasp_docs_describe_current_mode_breadth_and_limits_truthfully() -> Non
     assert "budgets are identical" not in normalized
 
 
-def test_owasp_docs_current_summary_names_phase_2b8() -> None:
+def test_owasp_docs_current_summary_names_phase_2b10() -> None:
     text = _text(_OWASP_COVERAGE)
-    assert "Current honest summary after Phase 2B8:" in text
+    assert "Current honest summary after Phase 2B10:" in text
+    assert "Current honest summary after Phase 2B8:" not in text
     assert "Current honest summary after Phase 2B7:" not in text
 
 
