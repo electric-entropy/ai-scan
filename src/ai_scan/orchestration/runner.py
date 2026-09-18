@@ -114,6 +114,8 @@ class RunResult:
         run's aggregate (never flattened to ``not_observed``).
         """
         if not self.findings:
+            if self.coverage_gaps:
+                return InjectionStatus.INCONCLUSIVE
             return InjectionStatus.NOT_OBSERVED
         return max((f.status for f in self.findings), key=lambda s: _STATUS_SEVERITY[s])
 

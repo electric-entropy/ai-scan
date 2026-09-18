@@ -34,10 +34,10 @@ def _report(body: str) -> Report:
     )
 
 
-def test_report_document_separates_confirmed_leads_and_gaps() -> None:
-    confirmed = report_document(_report("executed {canary}"))
-    assert confirmed["confirmed_findings"]
-    assert not confirmed["analyst_leads"]
+def test_report_document_separates_single_shot_leads_from_confirmed() -> None:
+    uncontrolled = report_document(_report("executed {canary}"))
+    assert not uncontrolled["confirmed_findings"]
+    assert uncontrolled["analyst_leads"]
     lead = report_document(_report("Sure, I can help with that."))
     assert not lead["confirmed_findings"]
     assert lead["analyst_leads"]
@@ -96,5 +96,6 @@ def test_baseline_diff_keys_on_finding_identity() -> None:
     old = create_baseline(_report("no signal"))
     new = create_baseline(_report("executed {canary}"))
     diff = compare_baselines(old, new)
-    assert diff["new_confirmed"]
+    assert diff["new_analyst_leads"]
+    assert diff["new_confirmed"] == []
     assert diff["resolved_confirmed"] == []

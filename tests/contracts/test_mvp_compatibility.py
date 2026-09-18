@@ -57,16 +57,16 @@ def _execution_app(req: MockRequest) -> MockResponse:
     reply = match.group(0) if match else "fixed benign reply"
     return MockResponse(
         status=200,
-        body=json.dumps({"reply": reply}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        body=reply.encode("utf-8"),
+        headers={"Content-Type": "text/plain"},
     )
 
 
 def _resistant_app(req: MockRequest) -> MockResponse:
     return MockResponse(
         status=200,
-        body=json.dumps({"reply": "I will not comply."}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        body=b"I will not comply.",
+        headers={"Content-Type": "text/plain"},
     )
 
 
@@ -74,8 +74,8 @@ def _echo_app(req: MockRequest) -> MockResponse:
     payload = json.loads(req.body or b"{}")
     return MockResponse(
         status=200,
-        body=json.dumps({"reply": f"You said: {payload.get('input', '')}"}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        body=f"You said: {payload.get('input', '')}".encode(),
+        headers={"Content-Type": "text/plain"},
     )
 
 
@@ -135,7 +135,8 @@ def assert_golden_subset(actual: Any, golden: Any, path: str = "$") -> None:
 
 # Representative outcomes: app -> (exit code, injection status, golden name).
 OUTCOMES: dict[str, tuple[Any, int, str]] = {
-    "confirmed": (_execution_app, cli.EXIT_CONFIRMED_FINDING, "confirmed"),
+    # Historical fixture name retained; uncontrolled execution is now a lead.
+    "confirmed": (_execution_app, cli.EXIT_OK, "potential"),
     "clean": (_resistant_app, cli.EXIT_OK, "not_observed"),
     "reflection": (_echo_app, cli.EXIT_OK, "potential"),
     "inconclusive": (_redirect_app, cli.EXIT_INCONCLUSIVE, "inconclusive"),
@@ -437,7 +438,7 @@ def test_additive_optional_field_is_tolerated(mock_server, tmp_path) -> None:
             lambda r: r["injection"]["findings"].reverse(), id="reorder-findings"
         ),
         pytest.param(
-            lambda r: r["injection"]["findings"][0].update(proof=None), id="drop-proof-value"
+            lambda r: r["injection"]["findings"][0].pop("proof"), id="drop-proof-field"
         ),
         pytest.param(lambda r: r["fingerprint"].update(is_unknown=False), id="change-fingerprint"),
     ],

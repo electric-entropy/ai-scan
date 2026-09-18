@@ -7,17 +7,20 @@ import json
 from ai_scan.fingerprint import DEFAULT_PROBES, ProbeExchange
 from ai_scan.injection import (
     ExchangeOutcome,
+    InjectionResult,
     InjectionStatus,
     generate_canary,
     load_payloads,
 )
+from ai_scan.packs import load_builtin_pack
 from ai_scan.reporting import (
     Report,
     exit_code_for,
     write_report_atomic,
 )
+from ai_scan.reporting.json_report import report_document
 from ai_scan.targets import normalize_target
-from tests.trusted_engines import run_fingerprint, run_injection
+from tests.trusted_engines import run_fingerprint, run_injection, run_injection_pack
 
 
 def _confirmed_injection():
@@ -25,9 +28,11 @@ def _confirmed_injection():
 
     def respond(case) -> ExchangeOutcome:
         # Simulates instruction execution: emits only the canary.
-        return ExchangeOutcome(body=canary)
+        return ExchangeOutcome(body=canary if canary in case.rendered_prompt else "benign")
 
-    return run_injection(load_payloads("safe"), respond, canary=canary, goal="g")
+    return run_injection_pack(
+        load_builtin_pack("direct-injection-reliable"), respond, canary=canary, goal="g"
+    )
 
 
 def _clean_injection():
@@ -131,3 +136,27 @@ def test_console_summary_has_no_secrets() -> None:
     summary = report.console_summary()
     assert "Authorization" not in summary or "REDACTED" in summary
     assert "Bearer" not in summary
+
+
+def test_run_level_inconclusive_reason_is_a_coverage_gap() -> None:
+    injection = InjectionResult(
+        InjectionStatus.INCONCLUSIVE, [], 32, generate_canary()
+    )
+    report = Report.build(
+        target=normalize_target("https://api.example.com:8443/chat"),
+        fingerprint=None,
+        injection=injection,
+        request_budget={
+            "max_requests": 64,
+            "used": 32,
+            "runner_count": 32,
+            "invocation_used": 0,
+            "reason": "checkpoint run identity mismatch",
+        },
+        evidence=[],
+    )
+    assert report_document(report)["coverage_gaps"] == [{
+        "family": "run",
+        "status": "inconclusive",
+        "reason": "checkpoint run identity mismatch",
+    }]

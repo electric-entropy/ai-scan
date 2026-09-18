@@ -123,6 +123,22 @@ def _coverage_gaps(raw: dict[str, Any], findings: list[dict[str, Any]]) -> list[
                 "reason": "fingerprint transport/evidence unusable",
             }
         )
+    injection = raw.get("injection")
+    budget = raw.get("request_budget")
+    if (
+        isinstance(injection, dict)
+        and str(injection.get("status")) in _GAPS
+        and isinstance(budget, dict)
+        and isinstance(budget.get("reason"), str)
+        and budget["reason"]
+    ):
+        gaps.append(
+            {
+                "family": "run",
+                "status": str(injection["status"]),
+                "reason": budget["reason"],
+            }
+        )
     return gaps
 
 

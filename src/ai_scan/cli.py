@@ -82,7 +82,12 @@ from ai_scan.packs import (
     resolve_packs,
 )
 from ai_scan.reporting import Report, exit_code_for, write_report_atomic
-from ai_scan.reporting.diff import compare_baselines, create_baseline, render_baseline
+from ai_scan.reporting.diff import (
+    compare_baselines,
+    create_baseline,
+    load_baseline,
+    render_baseline,
+)
 from ai_scan.reporting.html import render_html
 from ai_scan.reporting.json_report import render_json
 from ai_scan.reporting.jsonl import render_jsonl
@@ -159,6 +164,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_inject = subparsers.add_parser(
         "inject",
         help="Run safe canary-based prompt-injection probes against a target.",
+        description="Single-shot probes yield analyst leads, never confirmed findings. "
+        "Potential leads exit 0; unusable evidence exits 4. "
+        "Use plan/run for controlled confirmation.",
     )
     _add_active_args(p_inject)
     p_inject.add_argument("--goal", required=True, help="Injection goal description.")
@@ -167,6 +175,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_assess = subparsers.add_parser(
         "assess",
         help="Run combined fingerprint + injection assessment and emit a report.",
+        description="Legacy single-shot assessment yields analyst leads, never confirmed findings. "
+        "Potential leads exit 0; unusable evidence exits 4. "
+        "Use plan/run for controlled confirmation.",
     )
     _add_active_args(p_assess)
     p_assess.add_argument("--profile", default="safe", help="Payload profile.")
@@ -720,8 +731,10 @@ def _cmd_baseline(args: argparse.Namespace) -> int:
             _write_or_print(render_baseline(create_baseline(report, mode=args.mode)), args.out)
             return EXIT_OK
         if args.baseline_command == "diff":
-            old = _load_json_file(args.old)
-            new = _load_json_file(args.new)
+            with open(args.old, encoding="utf-8") as handle:
+                old = load_baseline(handle.read())
+            with open(args.new, encoding="utf-8") as handle:
+                new = load_baseline(handle.read())
             _write_or_print(render_baseline(compare_baselines(old, new)), args.out)
             return EXIT_OK
     except (OSError, ValueError, TypeError, KeyError) as exc:
@@ -1364,10 +1377,14 @@ def _run_plan_active(
     )
     budget = {
         "max_requests": controller.max_requests,
-        "used": controller.count,
+        "used": result.request_count,
+        "invocation_used": controller.count,
         "runner_count": result.request_count,
         "plan_digest": plan.digest,
     }
+    if "checkpoint run identity mismatch" in result.coverage_gaps:
+        budget["reason"] = "checkpoint run identity mismatch"
+        print("inconclusive: checkpoint run identity mismatch")
     from ai_scan.transport.marker_redaction import sanitize_marker_structure
 
     safe_evidence = sanitize_marker_structure(evidence, run_secrets)
@@ -1475,7 +1492,8 @@ def _run_active(
                 )
             run_secrets.update(resp.known_secrets)
             evidence.append(resp.evidence())
-            extracted = fingerprint_adapter.extract(resp)
+            # Fingerprinting inspects envelope shape, not execution evidence.
+            extracted = resp.body
             if _deadline_passed(controller):
                 return ProbeExchange(probe.id, "", {}, status=0, transport_ok=False)
             return ProbeExchange(
@@ -1515,7 +1533,12 @@ def _run_active(
                 )
             run_secrets.update(resp.known_secrets)
             evidence.append(resp.evidence())
-            body = injection_adapter.extract(resp)
+            try:
+                body = injection_adapter.extract(resp)
+            except ExtractionError:
+                return ExchangeOutcome(
+                    body="", status=resp.status, transport_ok=False, attempts=resp.attempts
+                )
             if _deadline_passed(controller):
                 return ExchangeOutcome(
                     body="", status=resp.status, transport_ok=False, attempts=resp.attempts

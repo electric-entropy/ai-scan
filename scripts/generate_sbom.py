@@ -108,7 +108,7 @@ def build_sbom(*, root: Path | None = None) -> dict[str, object]:
             "name": _PROJECT,
             "version": version,
             "purl": app_ref,
-            "licenses": [{"license": {"id": _license_expression()}}],
+            "licenses": [{"license": {"name": "PolyForm Shield 1.0.0"}}],
         },
     }
     epoch = os.environ.get("SOURCE_DATE_EPOCH")
@@ -146,6 +146,12 @@ def validate_sbom(doc: object) -> None:
         raise SbomError("SBOM application component type must be 'application'")
     if not app.get("name") or not app.get("version"):
         raise SbomError("SBOM application component needs a name and version")
+    # CycloneDX 1.5 licenseChoice/license: `id` is an enumerated SPDX ID,
+    # while a custom license uses `name` (a string), never both. Enforce the
+    # exact generated custom-license subset offline rather than accepting an
+    # arbitrary SPDX expression as an ID. Python License-Expression is separate.
+    if app.get("licenses") != [{"license": {"name": "PolyForm Shield 1.0.0"}}]:
+        raise SbomError("SBOM project license must use the CycloneDX custom license name")
     components = doc.get("components")
     if not isinstance(components, list) or not components:
         raise SbomError("SBOM components must be a non-empty list")

@@ -78,7 +78,7 @@ def test_plan_and_run_execute_through_runner(mock_server, tmp_path) -> None:
         text = payload.get("input", "")
         # Emit canaries only for attack prompts; control prompts should stay benign.
         reply = next((part for part in text.split() if part.startswith("AISCAN-")), "benign")
-        return MockResponse(status=200, body=json.dumps({"reply": reply}).encode("utf-8"))
+        return MockResponse(status=200, body=reply.encode("utf-8"))
 
     server = mock_server(app)
     url = f"{server.base_url}/chat"

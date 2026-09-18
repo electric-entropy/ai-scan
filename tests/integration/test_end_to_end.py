@@ -118,7 +118,7 @@ def test_resistant_app_yields_no_confirmed_finding(mock_server) -> None:
     assert result.status.value in ("not_observed", "potential")
 
 
-def test_vulnerable_app_confirms_via_canary(mock_server) -> None:
+def test_uncontrolled_canary_is_an_analyst_lead(mock_server) -> None:
     server = mock_server(_vulnerable_app)
     target = normalize_target(f"{server.base_url}/chat")
     transport = Transport(TransportConfig())
@@ -126,8 +126,8 @@ def test_vulnerable_app_confirms_via_canary(mock_server) -> None:
     result = run_injection(
         load_payloads("safe"), _outcome_responder(transport, target), canary=canary, goal="g"
     )
-    assert result.status.value == "confirmed"
-    assert any(canary in (f.proof or "") for f in result.findings)
+    assert result.status.value == "potential"
+    assert all(f.proof is None for f in result.findings)
 
 
 def test_echo_app_is_not_confirmed_regression(mock_server) -> None:
@@ -203,12 +203,12 @@ def test_cli_assess_runs_headless_and_reports(mock_server, tmp_path) -> None:
 
     out = tmp_path / "report.json"
     rc = cli.main(["assess", "--target", target_url, "--out", str(out)])
-    # Vulnerable app reflects the canary → confirmed → exit 3.
-    assert rc == cli.EXIT_CONFIRMED_FINDING
+    # An untyped JSON envelope is not eligible final assistant output.
+    assert rc == cli.EXIT_INCONCLUSIVE
     report = json.loads(out.read_text(encoding="utf-8"))
     assert report["target_origin"] == target.origin
     assert "authorization" not in report
-    assert report["injection"]["status"] == "confirmed"
+    assert report["injection"]["status"] == "inconclusive"
     # Finding 7: budget is reported from the enforced physical counter.
     budget = report["request_budget"]
     assert budget["used"] >= 1

@@ -99,15 +99,14 @@ def test_profile_allowlist_accepts_known_profile() -> None:
 # --- Finding 5: execution vs. reflection -------------------------------------
 
 
-def test_execution_of_instruction_is_confirmed() -> None:
+def test_single_shot_execution_is_only_potential() -> None:
     canary = generate_canary()
     result = run_injection(
         load_payloads("safe"), _execute_responder(), canary=canary, goal="g"
     )
-    assert result.status == InjectionStatus.CONFIRMED
-    confirmed = [f for f in result.findings if f.status == InjectionStatus.CONFIRMED]
-    assert confirmed
-    assert all(canary in (f.proof or "") for f in confirmed)
+    assert result.status == InjectionStatus.POTENTIAL
+    assert all(f.status == InjectionStatus.POTENTIAL for f in result.findings)
+    assert all(f.proof is None for f in result.findings)
 
 
 def test_mere_reflection_is_not_confirmed() -> None:
@@ -228,4 +227,4 @@ def test_result_serializes() -> None:
     result = run_injection(load_payloads("safe"), _execute_responder(), canary=canary, goal="x")
     data = result.to_dict()
     json.dumps(data)
-    assert data["status"] == "confirmed"
+    assert data["status"] == "potential"

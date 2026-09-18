@@ -60,3 +60,23 @@ def test_main_writes_and_validates(tmp_path: Path) -> None:
 
 def test_sbom_is_deterministic() -> None:
     assert sb.build_sbom() == sb.build_sbom()
+
+
+def test_custom_license_uses_cyclonedx_name_not_spdx_id() -> None:
+    doc = sb.build_sbom()
+    assert doc["metadata"]["component"]["licenses"] == [
+        {"license": {"name": "PolyForm Shield 1.0.0"}}
+    ]
+
+
+@pytest.mark.parametrize("licenses", [
+    [{"license": {"id": "LicenseRef-PolyForm-Shield-1.0.0"}}],
+    [{"license": {"name": "PolyForm Shield 1.0.0", "id": "MIT"}}],
+    [{"license": {"name": None}}], [{"license": {"name": ""}}],
+    [{"license": {"name": 1}}], [], None,
+])
+def test_release_validator_rejects_invalid_project_license(licenses) -> None:
+    doc = sb.build_sbom()
+    doc["metadata"]["component"]["licenses"] = licenses
+    with pytest.raises(sb.SbomError):
+        sb.validate_sbom(doc)

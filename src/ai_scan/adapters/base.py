@@ -16,12 +16,14 @@ time, before any request exists, so a malformed adapter sends zero traffic.
 
 from __future__ import annotations
 
+import html
 import json
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, ClassVar, Protocol, runtime_checkable
+from urllib.parse import unquote
 
 from ai_scan.targets import Target
 from ai_scan.transport import HttpResponse, scrub_text
@@ -29,6 +31,17 @@ from ai_scan.transport import HttpResponse, scrub_text
 MARKER = "*"
 
 _VALID_EXTRACTION_MODES = frozenset({"text", "json_pointer", "header"})
+
+
+class _ExtractedText(str):
+    """String result carrying whether generic extraction may support confirmation."""
+
+    confirmation_eligible: bool
+
+    def __new__(cls, value: str, *, confirmation_eligible: bool) -> _ExtractedText:
+        obj = super().__new__(cls, value)
+        obj.confirmation_eligible = confirmation_eligible
+        return obj
 
 
 class AdapterError(Exception):
@@ -170,12 +183,46 @@ def extract_text(response: HttpResponse, spec: ExtractionSpec) -> str:
             (e.g. a JSON pointer into a non-JSON body or at a non-scalar node).
     """
     if spec.mode == "text":
+        # Raw structured envelopes are not assistant output. Only a semantic
+        # provider adapter can establish their role and terminal completion.
+        # Reject malformed prefixes too: parsing failure must not grant eligibility.
+        body = response.body
+        content_type = next(
+            (v.lower() for k, v in response.headers.items() if k.lower() == "content-type"),
+            "",
+        )
+        if _looks_structured_response(body) or any(
+            kind in content_type for kind in ("json", "xml", "event-stream")
+        ):
+            raise ExtractionError("structured response requires eligible provider extraction")
         value = response.body
+        eligible = True
     elif spec.mode == "header":
         value = _extract_header(response, spec.path)
+        eligible = False
     else:
         value = _extract_json_pointer(response.body, spec.path)
-    return value[: spec.max_chars]
+        eligible = False
+    return _ExtractedText(value[: spec.max_chars], confirmation_eligible=eligible)
+
+
+def _looks_structured_response(value: str) -> bool:
+    """Recognize bounded wrapper forms that are not raw assistant text."""
+    current = value
+    for _ in range(4):
+        probe = current.lstrip("\ufeff").lstrip()
+        lowered = probe.lower()
+        if lowered.startswith(("{", "[", '"', "<", "&lt;", "```", "~~~")):
+            return True
+        first_line = lowered.splitlines()[0] if lowered.splitlines() else lowered
+        if first_line.startswith((":", "data:", "event:", "id:", "retry:")):
+            return True
+        decoded = unquote(current)
+        unescaped = html.unescape(decoded)
+        if unescaped == current:
+            break
+        current = unescaped
+    return False
 
 
 def _extract_header(response: HttpResponse, name: str) -> str:

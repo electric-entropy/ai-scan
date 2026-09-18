@@ -124,6 +124,14 @@ class ExchangeOutcome:
     known_secrets: frozenset[str] = field(default_factory=frozenset)
     semantic: dict[str, Any] | None = None
 
+    def __post_init__(self) -> None:
+        eligibility = getattr(self.body, "confirmation_eligible", None)
+        if eligibility is False:
+            object.__setattr__(self, "body", str(self.body))
+            object.__setattr__(self, "transport_ok", False)
+        elif eligibility is True:
+            object.__setattr__(self, "body", str(self.body))
+
 
 @dataclass
 class InjectionFinding:
@@ -605,7 +613,7 @@ def _evaluate(
         ExactCanaryValidator().validate(evidence),
         ComplianceHeuristicValidator().validate(evidence),
     ]
-    result = classify(signals, GatingContext(), evaluable=evaluable)
+    result = classify(signals, GatingContext(matched_clean_control=False), evaluable=evaluable)
     # Legacy single-shot path stays on the 4-state report vocabulary.
     status = legacy_status(_FINDING_TO_INJECTION[result.status])
     proof = (

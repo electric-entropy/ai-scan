@@ -80,6 +80,21 @@ clean controls, non-reflected confirmation, evidence graph, replayable bundles) 
 the `plan` + `run` path. `run` verifies the exact target and plan integrity before
 any transport.
 
+Single-shot `inject`/`assess` results cannot be `confirmed`: deterministic
+execution without matched controls is a `potential` analyst lead (exit `0`),
+not a verified vulnerability. Reflection/refusal remain potential; clean output
+remains `not_observed`; unusable output is `inconclusive` (exit `4`). The v1
+report shape and exit-code vocabulary remain unchanged; exit `3` requires real
+controlled confirmation, available through `plan` + `run`.
+
+Default generic extraction supports plain text. Structured JSON, XML, SSE, or
+fenced bodies require explicit eligible extraction rather than treating an
+envelope as assistant output; use a provider adapter for final-assistant semantics.
+Checkpoint run-identity rejection exits `4` with a fixed safe reason and no
+new requests. In `run` budgets, `used` and `runner_count` are cumulative spent
+attempts; `invocation_used` counts only this invocation. Old evidence is never
+rebound to a newly generated canary.
+
 ### Exit codes
 
 | Code | Meaning                                   |
@@ -117,8 +132,9 @@ coverage, it never weakens safety.
 - **Kitchen Sink** — broader coverage that resolves the additional packs for
   separately labeled analyst leads.
 
-**Attack packs** (`ai-scan packs list`). Eight digest-verified builtin packs:
-`direct-injection`, `indirect-injection`, `rag-isolation`, and `tool-abuse`, each
+**Attack packs** (`ai-scan packs list`). Twelve digest-verified builtin packs:
+`direct-injection`, `indirect-injection`, `rag-isolation`, `tool-abuse`,
+`prompt-disclosure`, and `system-prompt-leakage`, each
 in a reliable and a kitchen-sink variant. Packs are declarative, validated, and
 content-digested; the plan records each pack's id/version/digest.
 
@@ -263,7 +279,7 @@ active-network semantics; egress stays disabled.
 ```bash
 # Point it at a target and it runs — no prompt, nothing to configure.
 ai-scan assess --target http://127.0.0.1:8080/chat --out report.json
-echo "exit code: $?"   # 0 clean / 3 confirmed / 4 inconclusive
+echo "exit code: $?"   # 0 completed (including analyst leads) / 4 inconclusive
 ```
 
 ## Request template format (Burp-style)
@@ -309,8 +325,9 @@ The JSON report (`--out`) is stable and machine-readable. Key sections:
 - `evidence` — redacted request/response records.
 - `findings` — confirmed/potential injection findings promoted to the top.
 
-`assess` exits `3` on any confirmed injection, `4` if the injection run was only
-inconclusive, otherwise `0`.
+Legacy single-shot `assess` cannot confirm: it exits `4` when evidence is
+inconclusive and otherwise `0`, including when it reports analyst leads. Use the
+controlled `plan` + `run` path for confirmation-based CI gates and exit `3`.
 
 ## Fingerprint confidence — limitations
 

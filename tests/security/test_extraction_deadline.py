@@ -2,7 +2,7 @@
 
 The absolute run deadline bounds transport I/O, but adapter *extraction* runs
 after the response returns. These tests drive the real CLI ``inject`` path: a
-confirming loopback target normally yields a confirmed finding, but when the
+canary-emitting loopback target normally yields an analyst lead, but when the
 deadline elapses during extraction the result must become inconclusive and must
 not confirm.
 """
@@ -76,13 +76,15 @@ def _inject(server: ThreadingHTTPServer, report: Path) -> int:
     )
 
 
-def test_inject_confirms_without_deadline_pressure(
+def test_inject_yields_lead_without_deadline_pressure(
     confirming_server: ThreadingHTTPServer, tmp_path: Path
 ) -> None:
-    # Baseline: the target genuinely confirms, so the regression below is
-    # meaningful (it is the deadline, not a weak target, that prevents confirm).
-    rc = _inject(confirming_server, tmp_path / "baseline.json")
-    assert rc == cli.EXIT_CONFIRMED_FINDING
+    # A usable uncontrolled response is a lead, not confirmed. Deadline expiry
+    # must still distinguish unusable evidence from that positive signal.
+    report = tmp_path / "baseline.json"
+    rc = _inject(confirming_server, report)
+    assert rc == cli.EXIT_OK
+    assert json.loads(report.read_text())["injection"]["status"] == "potential"
 
 
 def test_post_deadline_extraction_cannot_confirm(
@@ -109,7 +111,7 @@ def test_post_deadline_extraction_cannot_confirm(
     if report.exists():
         doc = json.loads(report.read_text(encoding="utf-8"))
         injection = doc.get("injection") or {}
-        assert injection.get("status") != "confirmed"
+        assert injection.get("status") == "inconclusive"
 
 
 def test_legacy_commands_configure_a_finite_duration() -> None:

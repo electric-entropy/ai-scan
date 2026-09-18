@@ -34,6 +34,26 @@ def test_operator_guide_bundle_commands_use_file_flag() -> None:
     assert "--out replay-report.json" not in text
 
 
+def test_readme_builtin_inventory_matches_registry() -> None:
+    from ai_scan.packs import available_packs
+
+    paragraph = _text(_README).split("**Attack packs**", 1)[1].split("**Adapters**", 1)[0]
+    assert "Twelve digest-verified builtin packs" in paragraph
+    assert len(available_packs()) == 12
+    for pack in available_packs():
+        family = pack.rsplit("-", 1)[0]
+        assert f"`{family}`" in paragraph
+
+
+def test_legacy_single_shot_documentation_has_no_confirmed_exit_claims() -> None:
+    readme = _text(_README)
+    migration = _text(_DOCS / "migration-v0.1-to-v0.2.md")
+    assert "0 clean / 3 confirmed / 4 inconclusive" not in readme
+    assert "`assess` exits `3` on any confirmed injection" not in readme
+    assert "Keep existing `assess` automation unchanged for CI gates" not in migration
+    assert "confirmation-based gates" in migration
+
+
 def test_operator_guide_documents_offline_replay_command() -> None:
     text = _text(_OPERATOR)
     assert "ai-scan replay --bundle" in text

@@ -10,7 +10,7 @@ The existing active commands remain available:
 - `ai-scan inject`
 - `ai-scan assess`
 
-Existing `assess --target ... --out report.json` automation continues to emit the legacy report v1 document and uses the same exit codes: `0`, `1`, `2`, `3`, and `4`. (As of 0.2.1 there is no pre-run gating step at all — active scans run unattended against `--target`, like nmap or sqlmap.)
+Existing `assess --target ... --out report.json` automation continues to emit the legacy report v1 document. The exit-code vocabulary remains `0`–`4`, but single-shot `inject`/`assess` can no longer emit `confirmed` or exit `3`: an uncontrolled deterministic execution signal is a `potential` analyst lead (exit `0`). Reflection/refusal remain potential, clean evidence remains `not_observed`, and unusable evidence exits `4`/`inconclusive`. Use `plan` + `run` for controlled, repeatable confirmation. Active scans run unattended against `--target`.
 
 ## New v0.2 commands
 
@@ -30,7 +30,7 @@ Existing `assess --target ... --out report.json` automation continues to emit th
 
 ## Recommended migration path
 
-1. Keep existing `assess` automation unchanged for CI gates.
+1. Keep `assess` for compatibility and analyst leads, but move confirmation-based gates to controlled `plan` + `run`; single-shot `assess` no longer exits `3`.
 2. Add `ai-scan plan` in review workflows to inspect exactly what will run.
 3. Move advanced workflows to `ai-scan run --plan ...` when you want resumable runner state and plan digests in reports.
 4. Use `ai-scan report` and `ai-scan baseline` for offline analyst outputs and CI baseline comparisons.
